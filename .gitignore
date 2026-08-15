@@ -3,6 +3,9 @@
 /dist/
 coverage.out
 
+# Locally installed dev tools (make tools)
+/hack/bin/
+
 # Editor / IDE
 .idea/
 .vscode/

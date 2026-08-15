@@ -24,7 +24,7 @@ func TestProbeEndpoints(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GET %s: %v", tc.path, err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if resp.StatusCode != tc.wantStatus {
 			t.Errorf("GET %s: got status %d, want %d", tc.path, resp.StatusCode, tc.wantStatus)
 		}

@@ -5,46 +5,57 @@
 # openspec/changes/add-mvp-core. Keys marked (v0.2.0) are later changes.
 
 image:
+  # -- Container image repository
   repository: ghcr.io/ratyx/remedik
-  tag: ""              # defaults to .Chart.AppVersion
+  # -- Image tag; defaults to the chart appVersion
+  tag: ""
+  # -- Image pull policy
   pullPolicy: IfNotPresent
 
-# Global execution posture. Install-time default is dry-run: remedik
-# matches, evaluates guards and records Simulated remediations — it acts
-# on nothing until you flip this.
+# -- Global execution posture. Install-time default is dry-run: remedik
+# matches, evaluates guards and records Simulated remediations — it acts on
+# nothing until you flip this.
 dryRun: true
 
-profile: standard      # minimal | standard | full
+# -- Install profile: minimal / standard / full
+profile: standard
 
 gateway:
-  # Alertmanager webhook receiver.
+  # -- Port the Alertmanager webhook receiver listens on
   port: 8090
   auth:
-    bearerTokenSecretRef: ""   # Secret containing the token Alertmanager sends
+    # -- Name of the Secret holding the bearer token Alertmanager must send
+    bearerTokenSecretRef: ""
 
 history:
-  keepPerStrategy: 200 # terminal Remediation records retained per strategy
+  # -- Terminal Remediation records retained per strategy
+  keepPerStrategy: 200
 
-slack:                 # (v0.2.0) Socket Mode bot — approval buttons, commands
+slack:
+  # -- Enable the Socket Mode Slack bot — planned for v0.2.0
   enabled: false
+  # -- Secret with the Slack app-level token — planned for v0.2.0
   appTokenSecretRef: ""
+  # -- Secret with the Slack bot token — planned for v0.2.0
   botTokenSecretRef: ""
 
-escalation:            # (v0.2.0)
+escalation:
   pagerduty:
+    # -- Enable PagerDuty escalation — planned for v0.2.0
     enabled: false
+    # -- Secret with the PagerDuty Events API routing key — planned for v0.2.0
     routingKeySecretRef: ""
 
-audit:                 # (v0.2.0) structured audit export
+audit:
+  # -- Structured audit export sinks (splunk-hec, loki, elasticsearch, s3, webhook) — planned for v0.2.0
   sinks: []
-  # - type: splunk-hec
-  #   url: https://splunk.example.com:8088
-  #   tokenSecretRef: splunk-hec-token
 
-ai:                    # (v0.2.0) read-only diagnosis — disabled by default
+ai:
+  # -- Read-only BYO-LLM diagnosis, disabled by default — planned for v0.2.0
   enabled: false
 
-packs: {}              # (v0.2.0) e.g. awsNodes: {enabled: true, auth: irsa}
+# -- Cloud packs, e.g. `awsNodes: {enabled: true, auth: irsa}` — planned for v0.2.0
+packs: {}
 
 resources:
   requests:

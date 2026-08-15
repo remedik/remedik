@@ -7,19 +7,38 @@
 ## 1. Developer quickstart (works today)
 
 Prerequisites: Go ≥ 1.24 (older Go ≥ 1.21 auto-downloads the right
-toolchain), GNU make, git.
+toolchain), GNU make, git, [helm](https://helm.sh/docs/intro/install/),
+`yamllint` (`sudo apt install yamllint`). Go-based lint tools install
+themselves, pinned, into `hack/bin/` on first use (`make tools`).
 
 ```bash
 git clone https://github.com/ratyx/remedik.git
 cd remedik
-make verify        # gofmt check, go vet, unit tests (race detector)
+make verify        # gofmt, go vet, golangci-lint, yamllint, helm lint, tests
 make build         # produces ./bin/remedik
 ./bin/remedik --version
 ./bin/remedik      # serves /healthz and /readyz on :8081
 ```
 
-Optional, used from v0.1.0 on: [kind](https://kind.sigs.k8s.io/) and
-[helm](https://helm.sh/) for the local cluster workflow.
+Other useful targets (`make help` lists everything): `make yaml-fix`
+(auto-format YAML), `make helm-docs` (regenerate the chart README from
+values annotations), `make lint`.
+
+### Local dev cluster (kind + Prometheus/Alertmanager/Grafana)
+
+Additionally requires: Docker (Docker Desktop with WSL integration, or
+docker-ce), [kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation),
+[kubectl](https://kubernetes.io/docs/tasks/tools/).
+
+```bash
+make dev-up        # kind cluster + kube-prometheus-stack (monitoring ns)
+make dev-info      # how to reach Grafana / Prometheus / Alertmanager UIs
+make dev-down      # tear it all down
+```
+
+Grafana: `http://localhost:3000` after the printed port-forward
+(admin / remedik-dev). remedik itself deploys into this cluster once
+`add-mvp-core` ships.
 
 ## 2. User quickstart (target UX — v0.1.0)
 

@@ -16,10 +16,19 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Verify (gofmt, vet, tests with race detector)
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.21.4
+      - name: Install yamllint
+        run: pip install yamllint==1.38.0
+      - name: Verify (gofmt, vet, golangci-lint, yamllint, helm lint, tests)
         run: make verify
       - name: Build
         run: make build
+      - name: Check helm-docs is up to date
+        run: |
+          make helm-docs
+          git diff --exit-code charts/
 
   vuln:
     runs-on: ubuntu-latest

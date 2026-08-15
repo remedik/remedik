@@ -15,3 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - OpenSpec change `add-mvp-core` specifying the MVP: alert gateway,
   `RemediationStrategy`/`Remediation` CRDs, deterministic execution engine
   with guards and dry-run, and the `deployment.restart` action.
+- Dev tooling (`add-dev-tooling`): golangci-lint, yamllint/yamlfmt and
+  helm-docs Make targets with pinned tool versions installed into
+  `hack/bin/`; `make dev-up`/`dev-down` for a local kind cluster with
+  kube-prometheus-stack; CI extended to run the full lint suite and check
+  generated chart docs.

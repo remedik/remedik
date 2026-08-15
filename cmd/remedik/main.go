@@ -34,10 +34,17 @@ func main() {
 	}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	logger.Info("starting remedik", "version", version.String(), "probe_addr", *probeAddr)
+	if err := run(logger, *probeAddr); err != nil {
+		logger.Error("remedik exited with error", "err", err)
+		os.Exit(1)
+	}
+}
+
+func run(logger *slog.Logger, probeAddr string) error {
+	logger.Info("starting remedik", "version", version.String(), "probe_addr", probeAddr)
 
 	srv := &http.Server{
-		Addr:              *probeAddr,
+		Addr:              probeAddr,
 		Handler:           probes.NewMux(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
@@ -54,13 +61,13 @@ func main() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
-			logger.Error("graceful shutdown failed", "err", err)
-			os.Exit(1)
+			return fmt.Errorf("graceful shutdown: %w", err)
 		}
+		return nil
 	case err := <-errCh:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("probe server failed", "err", err)
-			os.Exit(1)
+			return fmt.Errorf("probe server: %w", err)
 		}
+		return nil
 	}
 }

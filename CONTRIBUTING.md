@@ -20,7 +20,8 @@ this file is the short version of the workflow.
 2. **Review**: get the proposal approved before writing code.
 3. **Implement** in a branch; the PR template asks for the change reference.
 4. **Definition of done** — all of:
-   - `make verify` passes (gofmt, vet, unit tests with race detector)
+   - `make verify` passes (gofmt, vet, golangci-lint, yamllint, helm lint,
+     unit tests with race detector)
    - integration/e2e updated when the behavior is observable in a cluster
    - docs updated (README / QUICKSTART / docs/)
    - `CHANGELOG.md` updated under `[Unreleased]`
