@@ -1,7 +1,7 @@
 ## 1. API types & CRDs
 
 - [x] 1.1 Define `RemediationStrategy` and `Remediation` Go types (`api/v1alpha1`) with validation markers per spec
-- [ ] 1.2 Generate CRD manifests + deepcopy (`make generate manifests`, controller-gen v0.21.0 pinned); commit under `charts/remedik/crds/`. CI enforces freshness via `make verify-codegen`
+- [x] 1.2 Generate CRD manifests + deepcopy (`make generate manifests`, controller-gen v0.21.0 pinned); committed under `charts/remedik/crds/`. CI enforces freshness via `make verify-codegen`. Schema verified to reject the dangerous shapes: no matchers, no steps, unknown execution mode, retries above the cap
 
 ## 2. Alert gateway
 
