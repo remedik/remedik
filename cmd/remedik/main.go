@@ -1,8 +1,9 @@
 // Command remedik is the remedik operator entrypoint.
 //
-// The current binary is a pre-MVP skeleton: it serves health/readiness
-// probes and reports its version. The controller manager, alert gateway,
-// and remediation engine land with the `add-mvp-core` OpenSpec change.
+// The current binary is a pre-MVP build: it serves health probes and the
+// Alertmanager webhook gateway. Alerts are decoded, validated and logged;
+// the remediation engine that acts on them lands with the remaining tasks
+// of the `add-mvp-core` OpenSpec change.
 package main
 
 import (
@@ -14,16 +15,30 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/ratyx/remedik/internal/alert"
+	"github.com/ratyx/remedik/internal/gateway"
 	"github.com/ratyx/remedik/internal/probes"
 	"github.com/ratyx/remedik/internal/version"
 )
 
+// shutdownTimeout bounds how long in-flight requests may take to drain.
+const shutdownTimeout = 10 * time.Second
+
+// tokenEnvVar holds the gateway bearer token. It is read from the
+// environment rather than a flag so the value never appears in the process
+// table; the chart mounts it from a Secret.
+const tokenEnvVar = "REMEDIK_GATEWAY_TOKEN" //nolint:gosec // name of a variable, not a credential
+
 func main() {
 	var (
-		probeAddr   = flag.String("probe-bind-address", ":8081", "address the health/readiness probe endpoint binds to")
+		probeAddr   = flag.String("probe-bind-address", ":8081", "address the health/readiness probes bind to")
+		gatewayAddr = flag.String("gateway-bind-address", ":8090", "address the Alertmanager webhook gateway binds to")
+		gatewayPath = flag.String("gateway-path", gateway.DefaultPath, "path the Alertmanager webhook is served on")
+		logLevel    = flag.String("log-level", "info", "log level: debug, info, warn or error")
 		showVersion = flag.Bool("version", false, "print version and exit")
 	)
 	flag.Parse()
@@ -33,41 +48,117 @@ func main() {
 		return
 	}
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	if err := run(logger, *probeAddr); err != nil {
+	level, err := parseLogLevel(*logLevel)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
+
+	if err := run(logger, *probeAddr, *gatewayAddr, *gatewayPath); err != nil {
 		logger.Error("remedik exited with error", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(logger *slog.Logger, probeAddr string) error {
-	logger.Info("starting remedik", "version", version.String(), "probe_addr", probeAddr)
+func run(logger *slog.Logger, probeAddr, gatewayAddr, gatewayPath string) error {
+	logger.Info("starting remedik",
+		"version", version.String(),
+		"probe_addr", probeAddr,
+		"gateway_addr", gatewayAddr,
+		"gateway_path", gatewayPath)
 
-	srv := &http.Server{
-		Addr:              probeAddr,
-		Handler:           probes.NewMux(),
-		ReadHeaderTimeout: 5 * time.Second,
+	handler, err := gateway.New(gateway.Config{
+		Sink:   logSink(logger),
+		Path:   gatewayPath,
+		Token:  os.Getenv(tokenEnvVar),
+		Logger: logger.With("component", "gateway"),
+	})
+	if err != nil {
+		return fmt.Errorf("configure gateway: %w", err)
+	}
+
+	servers := []*http.Server{
+		newServer(probeAddr, probes.NewMux()),
+		newServer(gatewayAddr, handler.Mux()),
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	errCh := make(chan error, 1)
-	go func() { errCh <- srv.ListenAndServe() }()
+	// One buffered slot per server, so a failing listener never blocks.
+	errCh := make(chan error, len(servers))
+	for _, srv := range servers {
+		go func(s *http.Server) {
+			if serveErr := s.ListenAndServe(); serveErr != nil &&
+				!errors.Is(serveErr, http.ErrServerClosed) {
+				errCh <- fmt.Errorf("listen on %s: %w", s.Addr, serveErr)
+				return
+			}
+			errCh <- nil
+		}(srv)
+	}
 
 	select {
 	case <-ctx.Done():
 		logger.Info("shutting down")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := srv.Shutdown(shutdownCtx); err != nil {
-			return fmt.Errorf("graceful shutdown: %w", err)
-		}
-		return nil
+		return shutdown(servers)
 	case err := <-errCh:
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return fmt.Errorf("probe server: %w", err)
+		// Stop the remaining server before returning, so shutdown is
+		// clean whether we are failing or exiting normally.
+		if shutdownErr := shutdown(servers); shutdownErr != nil && err == nil {
+			return shutdownErr
 		}
-		return nil
+		return err
+	}
+}
+
+func newServer(addr string, h http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+}
+
+func shutdown(servers []*http.Server) error {
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+
+	var errs []error
+	for _, srv := range servers {
+		if err := srv.Shutdown(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("shutdown %s: %w", srv.Addr, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// logSink reports the alerts remedik received. It is the placeholder for
+// the remediation engine: until the engine exists, seeing exactly what was
+// parsed is the useful behavior.
+func logSink(logger *slog.Logger) gateway.Sink {
+	log := logger.With("component", "sink")
+	return gateway.SinkFunc(func(alerts []alert.Alert) {
+		for _, a := range alerts {
+			log.Info("alert received (no engine attached yet)",
+				"alert", a.String(),
+				"labels", a.Labels)
+		}
+	})
+}
+
+func parseLogLevel(s string) (slog.Level, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "debug":
+		return slog.LevelDebug, nil
+	case "info":
+		return slog.LevelInfo, nil
+	case "warn", "warning":
+		return slog.LevelWarn, nil
+	case "error":
+		return slog.LevelError, nil
+	default:
+		return 0, fmt.Errorf("invalid --log-level %q: want debug, info, warn or error", s)
 	}
 }

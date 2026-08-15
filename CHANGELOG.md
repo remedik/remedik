@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Alert gateway (`add-mvp-core` task 2): HTTP receiver for Alertmanager
+  webhooks with constant-time bearer authentication, body-size limits and
+  normalization of grouped deliveries into individual alert events. Served
+  by the binary on `:8090` (`--gateway-bind-address`, `--gateway-path`,
+  token from `REMEDIK_GATEWAY_TOKEN`); alerts are logged until the
+  remediation engine lands.
+
 - Project scaffolding: spec-driven process (OpenSpec), architecture decision
   records, security policy, contribution guide, CI pipeline, Helm chart
   skeleton, and a minimal binary serving health/readiness probes.

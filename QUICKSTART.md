@@ -20,8 +20,28 @@ cd remedik
 make verify        # gofmt, go vet, golangci-lint, yamllint, helm lint, tests
 make build         # produces ./bin/remedik
 ./bin/remedik --version
-./bin/remedik      # serves /healthz and /readyz on :8081
 ```
+
+Run it and send it an alert — the gateway is live, the engine is not yet, so
+alerts are decoded, validated and logged:
+
+```bash
+REMEDIK_GATEWAY_TOKEN=dev-token ./bin/remedik --log-level=debug &
+
+curl -sS -X POST http://localhost:8090/webhooks/alertmanager \
+  -H "Authorization: Bearer dev-token" -H "Content-Type: application/json" \
+  -d '{"version":"4","alerts":[
+        {"status":"firing",
+         "labels":{"alertname":"KubePodCrashLooping","namespace":"payments","pod":"api-0"},
+         "annotations":{"summary":"crash looping"},
+         "startsAt":"2026-08-15T09:00:00Z","fingerprint":"f00d1"}]}'
+# -> {"received":1}, and the alert appears in the operator log
+```
+
+Health probes live on `:8081` (`/healthz`, `/readyz`). Without a token the
+gateway answers 401; a malformed payload gets 400; anything understood gets
+200, even when nothing matches — Alertmanager retries non-2xx responses, so
+"nothing matched" must not look like a failure.
 
 Other useful targets (`make help` lists everything): `make yaml-fix`
 (auto-format YAML), `make helm-docs` (regenerate the chart README from

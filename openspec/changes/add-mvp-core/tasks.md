@@ -5,9 +5,10 @@
 
 ## 2. Alert gateway
 
-- [ ] 2.1 Webhook handler: bearer auth from Secret, payload validation, event normalization per spec
-- [ ] 2.2 Ingestion metrics (`remedik_alerts_received_total`, error and unmatched counters)
-- [ ] 2.3 Unit tests: grouped payload split, 401 / 400 / 200 paths
+- [x] 2.1 Webhook handler: bearer auth (constant-time, token from env/Secret), payload validation, event normalization per spec
+- [x] 2.2 Telemetry seam: `Recorder` interface (received / truncated / ingest errors / unauthorized) with a no-op default; the Prometheus adapter is wired with the operator (task 3), where the unmatched counter also lives
+- [x] 2.3 Unit tests: grouped payload split, 401 / 400 / 405 / 413 / 200 paths, auth variants, fingerprint derivation — 95%+ coverage on the gateway and alert packages
+- [x] 2.4 Wire the gateway into the binary behind flags, with a logging sink until the engine exists
 
 ## 3. Engine
 
