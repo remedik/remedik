@@ -12,7 +12,7 @@
 
 ## 3. Engine
 
-- [ ] 3.1 Matching (most-specific-wins, deterministic ties) + guard evaluation (cooldown, maxPerHour) with table-driven tests
+- [x] 3.1 Matching (most-specific-wins, deterministic ties) + guard evaluation (cooldown, maxPerHour) with table-driven tests — `internal/matching`, `internal/guards`, both 100% covered; includes `MemoryHistory` (the hot index the engine rebuilds from Remediation resources) with explicit, wall-clock-driven pruning
 - [ ] 3.2 Remediation lifecycle: create → sequential step loop → terminal state; attempts + exponential backoff recorded in status
 - [ ] 3.3 Global dry-run: Plan-only path producing `Simulated` records with the full would-have-run plan
 - [ ] 3.4 Startup `Interrupted` sweep + terminal-record pruning (keep-last-N per strategy)

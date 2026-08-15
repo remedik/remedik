@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Strategy selection and guards (`add-mvp-core` task 3.1): label-equality
+  matching with most-specific-wins and deterministic tie-breaking, plus
+  cooldown and maxPerHour guards that report which guard rejected an
+  execution and when to retry. Includes an in-memory execution history for
+  the engine to keep hot.
 - Alert gateway (`add-mvp-core` task 2): HTTP receiver for Alertmanager
   webhooks with constant-time bearer authentication, body-size limits and
   normalization of grouped deliveries into individual alert events. Served
