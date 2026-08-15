@@ -11,7 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - API types (`add-mvp-core` task 1.1): `RemediationStrategy` (cluster-scoped)
   and `Remediation` (namespaced audit record) in `remedik.dev/v1alpha1`,
-  with validation markers, print columns and status subresources.
+  with validation markers, print columns and status subresources. The
+  package depends on k8s.io/apimachinery alone — not controller-runtime —
+  so it stays cheap for clients and tools to import.
   `make generate` and `make manifests` produce DeepCopy code and CRDs with a
   pinned controller-gen; `make verify-codegen` fails on stale output.
 - First cookbook entry: `examples/strategies/pod-crashloop.yaml`.

@@ -195,7 +195,3 @@ type RemediationStrategyList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []RemediationStrategy `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&RemediationStrategy{}, &RemediationStrategyList{})
-}

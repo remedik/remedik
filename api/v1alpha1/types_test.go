@@ -1,6 +1,10 @@
 package v1alpha1
 
-import "testing"
+import (
+	"testing"
+
+	"k8s.io/apimachinery/pkg/runtime"
+)
 
 func TestRemediationState_IsTerminal(t *testing.T) {
 	tests := []struct {
@@ -69,5 +73,29 @@ func TestGroupVersion(t *testing.T) {
 	}
 	if GroupVersion.Version != "v1alpha1" {
 		t.Errorf("Version = %q, want v1alpha1", GroupVersion.Version)
+	}
+}
+
+func TestAddToScheme(t *testing.T) {
+	s := runtime.NewScheme()
+	if err := AddToScheme(s); err != nil {
+		t.Fatalf("AddToScheme() error = %v, want nil", err)
+	}
+
+	for _, kind := range []string{
+		"RemediationStrategy", "RemediationStrategyList",
+		"Remediation", "RemediationList",
+	} {
+		gvk := GroupVersion.WithKind(kind)
+		if !s.Recognizes(gvk) {
+			t.Errorf("scheme does not recognize %s", gvk)
+		}
+	}
+}
+
+func TestResource(t *testing.T) {
+	got := Resource("remediations")
+	if got.Group != "remedik.dev" || got.Resource != "remediations" {
+		t.Errorf("Resource() = %+v, want group remedik.dev / resource remediations", got)
 	}
 }

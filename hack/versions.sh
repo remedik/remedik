@@ -50,9 +50,17 @@ row "controller-gen" \
 	"$(grep -oE 'CONTROLLER_GEN_VERSION := \S+' Makefile | awk '{print $3}')" \
 	"$(latest_tag kubernetes-sigs/controller-tools 'v0[0-9.]+')"
 
-row "controller-runtime" \
-	"$(grep -oE 'sigs.k8s.io/controller-runtime \S+' go.mod | awk '{print $2}')" \
-	"$(latest_tag kubernetes-sigs/controller-runtime 'v0[0-9.]+')"
+# controller-runtime enters go.mod with the controller; until then the
+# API package depends on apimachinery alone.
+if grep -q 'sigs.k8s.io/controller-runtime' go.mod; then
+	row "controller-runtime" \
+		"$(grep -oE 'sigs.k8s.io/controller-runtime \S+' go.mod | awk '{print $2}')" \
+		"$(latest_tag kubernetes-sigs/controller-runtime 'v0[0-9.]+')"
+fi
+
+row "k8s.io/apimachinery" \
+	"$(grep -oE 'k8s.io/apimachinery \S+' go.mod | head -1 | awk '{print $2}')" \
+	"$(latest_tag kubernetes/apimachinery 'v0[0-9.]+')"
 
 row "golangci-lint" \
 	"$(grep -oE 'GOLANGCI_LINT_VERSION := \S+' Makefile | awk '{print $3}')" \
