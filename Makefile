@@ -49,6 +49,9 @@ tidy: ## go mod tidy
 ##@ Code generation
 
 generate: $(CONTROLLER_GEN) ## Regenerate DeepCopy methods for the API types
+	@# Remove stale output first: a malformed generated file would otherwise
+	@# break the package load that controller-gen itself needs.
+	rm -f api/*/zz_generated.deepcopy.go
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./api/..."
 
 manifests: $(CONTROLLER_GEN) ## Regenerate CRD manifests into the chart
