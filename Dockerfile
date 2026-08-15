@@ -1,12 +1,18 @@
 # syntax=docker/dockerfile:1
 
+# Base images are build arguments so a build can pin or substitute them
+# without editing this file:
+#   docker build --build-arg GO_IMAGE=golang:1.26.6-alpine .
+#
+# Both are declared here, before any FROM: an ARG used in a FROM
+# instruction must live in the global scope, because arguments declared
+# inside a stage are not visible to the next stage's FROM.
+ARG GO_IMAGE=golang:1.26-alpine
+ARG RUNTIME_IMAGE=gcr.io/distroless/static:nonroot
+
 # Build stage. Dependencies always come from the module proxy, never from a
 # local vendor directory (.dockerignore excludes it), so the image builds
 # identically on a laptop and in CI.
-# The Go version tracks go.mod. It is an argument so a build can pin or
-# substitute it without editing this file:
-#   docker build --build-arg GO_IMAGE=golang:1.26.6-alpine .
-ARG GO_IMAGE=golang:1.26-alpine
 FROM ${GO_IMAGE} AS build
 
 ARG VERSION=dev
@@ -28,7 +34,6 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # Runtime stage: distroless, non-root, no shell. There is nothing in this
 # image to exec into, which is the point — an operator with cluster write
 # access should present the smallest possible attack surface.
-ARG RUNTIME_IMAGE=gcr.io/distroless/static:nonroot
 FROM ${RUNTIME_IMAGE}
 
 WORKDIR /
