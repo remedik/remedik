@@ -1,0 +1,21 @@
+schema: spec-driven
+
+context: |
+  Project: remedik — a Kubernetes auto-remediation operator ("predictably boring").
+  It turns Alertmanager alerts into safe, audited remediations: strategies are CRDs,
+  every execution is a Remediation resource, destructive actions require human
+  approval (Slack), and AI/LLM features are read-only and optional by construction.
+
+  Tech: Go >= 1.24, module github.com/ratyx/remedik, controller-runtime for the
+  operator, Helm for install, API group remedik.dev (v1alpha1).
+
+  Conventions: English everywhere (code, comments, docs, commits). Conventional
+  Commits. gofmt + go vet clean; table-driven tests; race detector in CI.
+  ADRs in docs/adr/ record structural decisions; specs record behavior.
+  Definition of done: spec approved -> code -> tests -> docs -> CHANGELOG entry.
+
+rules:
+  proposal:
+    - Always include a "Non-goals" section
+  specs:
+    - Requirements use SHALL/MUST; any destructive behavior must specify its guard and its audit trail

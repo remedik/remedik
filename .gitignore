@@ -1,0 +1,16 @@
+# Build output
+/bin/
+/dist/
+coverage.out
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local scratch files
+*.local.*

@@ -1,0 +1,54 @@
+# remedik chart values — DESIGN CONTRACT
+#
+# NOTE: templates are not implemented yet. This file documents the intended
+# values schema for v0.1.0 and is kept in sync with the specs in
+# openspec/changes/add-mvp-core. Keys marked (v0.2.0) are later changes.
+
+image:
+  repository: ghcr.io/ratyx/remedik
+  tag: ""              # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+# Global execution posture. Install-time default is dry-run: remedik
+# matches, evaluates guards and records Simulated remediations — it acts
+# on nothing until you flip this.
+dryRun: true
+
+profile: standard      # minimal | standard | full
+
+gateway:
+  # Alertmanager webhook receiver.
+  port: 8090
+  auth:
+    bearerTokenSecretRef: ""   # Secret containing the token Alertmanager sends
+
+history:
+  keepPerStrategy: 200 # terminal Remediation records retained per strategy
+
+slack:                 # (v0.2.0) Socket Mode bot — approval buttons, commands
+  enabled: false
+  appTokenSecretRef: ""
+  botTokenSecretRef: ""
+
+escalation:            # (v0.2.0)
+  pagerduty:
+    enabled: false
+    routingKeySecretRef: ""
+
+audit:                 # (v0.2.0) structured audit export
+  sinks: []
+  # - type: splunk-hec
+  #   url: https://splunk.example.com:8088
+  #   tokenSecretRef: splunk-hec-token
+
+ai:                    # (v0.2.0) read-only diagnosis — disabled by default
+  enabled: false
+
+packs: {}              # (v0.2.0) e.g. awsNodes: {enabled: true, auth: irsa}
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 128Mi

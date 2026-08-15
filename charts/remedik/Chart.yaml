@@ -1,0 +1,11 @@
+apiVersion: v2
+name: remedik
+description: Predictably boring auto-remediation for Kubernetes alerts (pre-alpha skeleton).
+type: application
+version: 0.0.1-dev
+appVersion: "0.0.1-dev"
+home: https://github.com/ratyx/remedik
+sources:
+  - https://github.com/ratyx/remedik
+maintainers:
+  - name: raTyx
