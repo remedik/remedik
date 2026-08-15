@@ -43,9 +43,17 @@ gateway answers 401; a malformed payload gets 400; anything understood gets
 200, even when nothing matches — Alertmanager retries non-2xx responses, so
 "nothing matched" must not look like a failure.
 
-Other useful targets (`make help` lists everything): `make yaml-fix`
+Working on the API types additionally needs code generation:
+
+```bash
+go mod tidy              # resolve Kubernetes dependencies, write go.sum
+make generate manifests  # DeepCopy methods + CRD manifests (controller-gen)
+```
+
+Both are checked in CI (`make verify-codegen`), so commit whatever they
+change. Other useful targets (`make help` lists everything): `make yaml-fix`
 (auto-format YAML), `make helm-docs` (regenerate the chart README from
-values annotations), `make lint`.
+values annotations), `make lint`, `make versions`.
 
 ### Local dev cluster (kind + Prometheus/Alertmanager/Grafana)
 

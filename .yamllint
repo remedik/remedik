@@ -5,6 +5,7 @@ ignore: |
   bin/
   .claude/
   charts/*/templates/
+  charts/*/crds/
 
 rules:
   line-length: disable

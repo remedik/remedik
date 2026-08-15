@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- API types (`add-mvp-core` task 1.1): `RemediationStrategy` (cluster-scoped)
+  and `Remediation` (namespaced audit record) in `remedik.dev/v1alpha1`,
+  with validation markers, print columns and status subresources.
+  `make generate` and `make manifests` produce DeepCopy code and CRDs with a
+  pinned controller-gen; `make verify-codegen` fails on stale output.
+- First cookbook entry: `examples/strategies/pod-crashloop.yaml`.
 - Strategy selection and guards (`add-mvp-core` task 3.1): label-equality
   matching with most-specific-wins and deterministic tie-breaking, plus
   cooldown and maxPerHour guards that report which guard rejected an

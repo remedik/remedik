@@ -9,6 +9,7 @@ LDFLAGS := -s -w -X $(MODULE)/internal/version.version=$(VERSION)
 #   helm v3.21.4 · kind v0.32.0 · yamllint 1.38.0 · kubectl (stable)
 # Check for newer releases with: make versions
 # ---------------------------------------------------------------------------
+CONTROLLER_GEN_VERSION := v0.21.0
 GOLANGCI_LINT_VERSION := v2.12.2
 YAMLFMT_VERSION       := v0.21.0
 HELM_DOCS_VERSION     := v1.14.2
@@ -16,6 +17,7 @@ HELM_DOCS_VERSION     := v1.14.2
 KPS_CHART_VERSION ?= 88.3.0
 
 TOOLS_BIN := $(CURDIR)/hack/bin
+CONTROLLER_GEN := $(TOOLS_BIN)/controller-gen
 GOLANGCI  := $(TOOLS_BIN)/golangci-lint
 YAMLFMT   := $(TOOLS_BIN)/yamlfmt
 HELMDOCS  := $(TOOLS_BIN)/helm-docs
@@ -23,7 +25,7 @@ HELMDOCS  := $(TOOLS_BIN)/helm-docs
 KIND_CLUSTER := remedik-dev
 
 .PHONY: all build test vet fmt tidy lint yaml-lint yaml-fix helm-lint helm-docs \
-        verify tools dev-up dev-down dev-info versions clean help
+        generate manifests verify verify-codegen tools dev-up dev-down dev-info versions clean help
 
 all: verify build
 
@@ -43,6 +45,14 @@ fmt: ## Fail if any file is not gofmt'd
 
 tidy: ## go mod tidy
 	go mod tidy
+
+##@ Code generation
+
+generate: $(CONTROLLER_GEN) ## Regenerate DeepCopy methods for the API types
+	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./api/..."
+
+manifests: $(CONTROLLER_GEN) ## Regenerate CRD manifests into the chart
+	$(CONTROLLER_GEN) crd paths="./api/..." output:crd:artifacts:config=charts/remedik/crds
 
 ##@ Lint & docs
 
@@ -65,9 +75,17 @@ helm-docs: $(HELMDOCS) ## Regenerate chart README.md from values.yaml annotation
 
 verify: fmt vet lint yaml-lint helm-lint test ## Everything CI runs
 
+verify-codegen: generate manifests ## Fail if generated code or CRDs are stale
+	@git diff --exit-code api/ charts/remedik/crds/ \
+		|| { echo "generated files are stale — run 'make generate manifests' and commit"; exit 1; }
+
 ##@ Tools (installed pinned, into hack/bin)
 
-tools: $(GOLANGCI) $(YAMLFMT) $(HELMDOCS) ## Install all pinned dev tools
+tools: $(CONTROLLER_GEN) $(GOLANGCI) $(YAMLFMT) $(HELMDOCS) ## Install all pinned dev tools
+
+$(CONTROLLER_GEN):
+	@mkdir -p $(TOOLS_BIN)
+	GOBIN=$(TOOLS_BIN) go install sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_GEN_VERSION)
 
 $(GOLANGCI):
 	@mkdir -p $(TOOLS_BIN)

@@ -46,6 +46,14 @@ else
 fi
 row "go (min, go.mod)" "$go_pinned" "$go_want"
 
+row "controller-gen" \
+	"$(grep -oE 'CONTROLLER_GEN_VERSION := \S+' Makefile | awk '{print $3}')" \
+	"$(latest_tag kubernetes-sigs/controller-tools 'v0[0-9.]+')"
+
+row "controller-runtime" \
+	"$(grep -oE 'sigs.k8s.io/controller-runtime \S+' go.mod | awk '{print $2}')" \
+	"$(latest_tag kubernetes-sigs/controller-runtime 'v0[0-9.]+')"
+
 row "golangci-lint" \
 	"$(grep -oE 'GOLANGCI_LINT_VERSION := \S+' Makefile | awk '{print $3}')" \
 	"$(latest_tag golangci/golangci-lint 'v2[0-9.]+')"

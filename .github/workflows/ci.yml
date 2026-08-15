@@ -30,6 +30,8 @@ jobs:
         run: make verify
       - name: Build
         run: make build
+      - name: Check generated code and CRDs are up to date
+        run: make verify-codegen
       - name: Check helm-docs is up to date
         run: |
           make helm-docs

@@ -1,0 +1,28 @@
+# Restart a Deployment whose pods are crash looping.
+#
+# The safest strategy to start with: a rollout restart is reversible, scoped
+# to one workload, and is what an on-call engineer would do by hand anyway.
+#
+# Try it with the operator in dry-run (the install default): the Remediation
+# record appears as Simulated with the exact plan, and nothing is touched.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: pod-crashloop
+spec:
+  enabled: true
+  trigger:
+    match:
+      alertname: KubePodCrashLooping
+  execution:
+    mode: auto
+  guards:
+    # Do not restart the same workload again within 15 minutes: a crash loop
+    # that survives one restart needs a human, not a second restart.
+    cooldown: 15m
+    # Cap the blast radius of an alert storm.
+    maxPerHour: 4
+  steps:
+    - action: deployment.restart
+  onFailure:
+    retries: 1
