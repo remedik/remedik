@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+Everything below is implemented and verified: `make verify` for the unit
+suite, `make e2e` for the whole loop on a real cluster. Both OpenSpec
+changes are archived, so `openspec/specs/` is now the current contract
+rather than a proposal.
+
 ### Added
 
 - **The MVP loop works end to end.** An Alertmanager delivery reaches the
