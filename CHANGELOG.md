@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Action contract and registry (`add-mvp-core` task 4.1): every remediation
+  verb implements Resolve / Plan / Execute, so dry-run calls Plan only and
+  the mutating path is never reached. The registry rejects duplicate and
+  empty action names and reports unknown actions with the list of known
+  ones.
 - API types (`add-mvp-core` task 1.1): `RemediationStrategy` (cluster-scoped)
   and `Remediation` (namespaced audit record) in `remedik.dev/v1alpha1`,
   with validation markers, print columns and status subresources. The

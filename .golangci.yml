@@ -10,3 +10,6 @@ linters:
     generated: lax
     paths:
       - zz_generated.*\.go$
+      # hack/tools.go is a dependency manifest, not code: blank imports
+      # behind a build tag are the whole point of the file.
+      - hack/tools\.go$
