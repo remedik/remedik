@@ -95,6 +95,15 @@ spec:
                   DryRun records whether the operator was in dry-run mode. It is kept
                   on the record so a Simulated result is self-explanatory.
                 type: boolean
+              retries:
+                description: |-
+                  Retries is the retry budget copied from the strategy at creation
+                  time, for the same reason Steps is: an execution already under way
+                  must stay explainable, and must not change behaviour because someone
+                  edited or deleted the strategy while it was running.
+                format: int32
+                minimum: 0
+                type: integer
               steps:
                 description: |-
                   Steps is the plan: the steps resolved from the strategy at creation

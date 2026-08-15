@@ -80,6 +80,15 @@ type RemediationSpec struct {
 	// +optional
 	Steps []Step `json:"steps,omitempty"`
 
+	// Retries is the retry budget copied from the strategy at creation
+	// time, for the same reason Steps is: an execution already under way
+	// must stay explainable, and must not change behaviour because someone
+	// edited or deleted the strategy while it was running.
+	//
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	Retries int32 `json:"retries,omitempty"`
+
 	// DryRun records whether the operator was in dry-run mode. It is kept
 	// on the record so a Simulated result is self-explanatory.
 	//

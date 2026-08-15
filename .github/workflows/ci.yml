@@ -12,6 +12,7 @@ env:
   # Keep in sync with the pinned versions in the Makefile.
   HELM_VERSION: v3.21.4
   YAMLLINT_VERSION: 1.38.0
+  KIND_VERSION: v0.32.0
 
 jobs:
   verify:
@@ -36,6 +37,24 @@ jobs:
         run: |
           make helm-docs
           git diff --exit-code charts/
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: azure/setup-helm@v5
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: Install kind
+        run: |
+          curl -fsSLo /usr/local/bin/kind \
+            "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
+          chmod +x /usr/local/bin/kind
+      - name: End-to-end test on kind
+        run: make e2e
 
   vuln:
     runs-on: ubuntu-latest

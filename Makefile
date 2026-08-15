@@ -25,7 +25,8 @@ HELMDOCS  := $(TOOLS_BIN)/helm-docs
 KIND_CLUSTER := remedik-dev
 
 .PHONY: all build test vet fmt tidy lint yaml-lint yaml-fix helm-lint helm-docs \
-        generate manifests verify verify-codegen tools dev-up dev-down dev-info versions clean help
+        generate manifests verify verify-codegen tools docker-build e2e \
+        dev-up dev-down dev-info dev-deploy versions clean help
 
 all: verify build
 
@@ -72,7 +73,11 @@ yaml-fix: $(YAMLFMT) ## Auto-format YAML files in place
 
 helm-lint: ## Lint the Helm chart (requires helm)
 	@command -v helm >/dev/null || { echo "helm not found — install: https://helm.sh/docs/intro/install/"; exit 1; }
-	helm lint charts/remedik
+	@# A token is supplied because the chart refuses to render an
+	@# unauthenticated gateway unless that is asked for explicitly.
+	helm lint charts/remedik --set gateway.auth.token=lint
+	helm template remedik charts/remedik --set gateway.auth.token=lint >/dev/null
+	helm template remedik charts/remedik --set gateway.auth.disabled=true >/dev/null
 
 helm-docs: $(HELMDOCS) ## Regenerate chart README.md from values.yaml annotations
 	$(HELMDOCS) --chart-search-root charts
@@ -104,6 +109,19 @@ $(HELMDOCS):
 	@mkdir -p $(TOOLS_BIN)
 	GOBIN=$(TOOLS_BIN) go install github.com/norwoodj/helm-docs/cmd/helm-docs@$(HELM_DOCS_VERSION)
 
+##@ Container image
+
+IMAGE_REPO ?= ghcr.io/ratyx/remedik
+IMAGE_TAG  ?= $(VERSION)
+
+docker-build: ## Build the container image
+	docker build -t $(IMAGE_REPO):$(IMAGE_TAG) --build-arg VERSION=$(VERSION) .
+
+##@ Testing
+
+e2e: ## Run the end-to-end test on a throwaway kind cluster
+	./hack/e2e.sh
+
 ##@ Dev cluster (kind + Prometheus/Alertmanager/Grafana)
 
 dev-up: ## Create the kind dev cluster and install the monitoring stack
@@ -129,7 +147,20 @@ dev-info: ## Show how to reach the dev cluster UIs
 	@echo "  Alertmanager: kubectl port-forward -n monitoring svc/monitoring-kube-prometheus-alertmanager 9093:9093   -> http://localhost:9093"
 	@echo "  (service names may vary — check with: kubectl get svc -n monitoring)"
 	@echo ""
-	@echo "remedik itself deploys here once 'add-mvp-core' ships (make dev-deploy will appear then)."
+	@echo "Deploy remedik into this cluster with: make dev-deploy"
+
+dev-deploy: docker-build ## Build, load and install remedik into the dev cluster
+	kind load docker-image $(IMAGE_REPO):$(IMAGE_TAG) --name $(KIND_CLUSTER)
+	helm upgrade --install remedik charts/remedik \
+		--namespace remedik --create-namespace \
+		--set image.repository=$(IMAGE_REPO) --set image.tag=$(IMAGE_TAG) \
+		--set image.pullPolicy=IfNotPresent \
+		--set gateway.auth.token=dev-token \
+		--wait --timeout 3m
+	@echo ""
+	@echo "remedik is installed in dry-run mode. Watch it with:"
+	@echo "  kubectl -n remedik get remediations -w"
+	@echo "  kubectl -n remedik logs deploy/remedik -f"
 
 dev-down: ## Delete the kind dev cluster
 	kind delete cluster --name $(KIND_CLUSTER)
@@ -143,4 +174,4 @@ clean: ## Remove build output
 	rm -rf bin
 
 help: ## Show this help
-	@awk 'BEGIN {FS = ":.*##"} /^##@/ {printf "\n%s\n", substr($$0, 5)} /^[a-zA-Z_-]+:.*?##/ {printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*##"} /^##@/ {printf "\n%s\n", substr($$0, 5)} /^[a-zA-Z0-9_-]+:.*?##/ {printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)

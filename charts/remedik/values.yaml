@@ -1,8 +1,7 @@
-# remedik chart values — DESIGN CONTRACT
+# remedik chart values.
 #
-# NOTE: templates are not implemented yet. This file documents the intended
-# values schema for v0.1.0 and is kept in sync with the specs in
-# openspec/changes/add-mvp-core. Keys marked (v0.2.0) are later changes.
+# Keys marked "planned for v0.2.0" describe the agreed design of features
+# that are not implemented yet; they are inert in this release.
 
 image:
   # -- Container image repository
@@ -12,50 +11,60 @@ image:
   # -- Image pull policy
   pullPolicy: IfNotPresent
 
-# -- Global execution posture. Install-time default is dry-run: remedik
-# matches, evaluates guards and records Simulated remediations — it acts on
-# nothing until you flip this.
+# -- Global execution posture. The install default is dry-run: remedik
+# matches alerts, evaluates guards and records Simulated remediations,
+# changing nothing. Turn it off once the reports look right.
 dryRun: true
 
-# -- Install profile: minimal / standard / full
-profile: standard
+# -- Log level: debug, info, warn or error
+logLevel: info
 
 gateway:
   # -- Port the Alertmanager webhook receiver listens on
   port: 8090
+  # -- Path the Alertmanager webhook is served on
+  path: /webhooks/alertmanager
   auth:
-    # -- Name of the Secret holding the bearer token Alertmanager must send
-    bearerTokenSecretRef: ""
+    # -- Bearer token Alertmanager must present. The chart creates a Secret
+    # holding it. Prefer `existingSecret` in production so the value is not
+    # in your values file.
+    token: ""
+    # -- Name of a Secret you manage that holds the bearer token
+    existingSecret: ""
+    # -- Key inside the token Secret
+    secretKey: token
+    # -- Disable authentication entirely. Local development only: anything
+    # that can reach the service could then ask remedik to act.
+    disabled: false
+
+metrics:
+  # -- Port the Prometheus metrics endpoint listens on
+  port: 8080
+
+probes:
+  # -- Port the health and readiness probes listen on
+  port: 8081
 
 history:
   # -- Terminal Remediation records retained per strategy
   keepPerStrategy: 200
 
-slack:
-  # -- Enable the Socket Mode Slack bot — planned for v0.2.0
-  enabled: false
-  # -- Secret with the Slack app-level token — planned for v0.2.0
-  appTokenSecretRef: ""
-  # -- Secret with the Slack bot token — planned for v0.2.0
-  botTokenSecretRef: ""
+actions:
+  deploymentRestart:
+    # -- Enable the `deployment.restart` action. Disabling it also removes
+    # the RBAC rule that lets remedik patch Deployments.
+    enabled: true
 
-escalation:
-  pagerduty:
-    # -- Enable PagerDuty escalation — planned for v0.2.0
-    enabled: false
-    # -- Secret with the PagerDuty Events API routing key — planned for v0.2.0
-    routingKeySecretRef: ""
+serviceAccount:
+  # -- Create a ServiceAccount for the operator
+  create: true
+  # -- Name of the ServiceAccount; generated when empty
+  name: ""
+  # -- Annotations for the ServiceAccount (for example, cloud identity)
+  annotations: {}
 
-audit:
-  # -- Structured audit export sinks (splunk-hec, loki, elasticsearch, s3, webhook) — planned for v0.2.0
-  sinks: []
-
-ai:
-  # -- Read-only BYO-LLM diagnosis, disabled by default — planned for v0.2.0
-  enabled: false
-
-# -- Cloud packs, e.g. `awsNodes: {enabled: true, auth: irsa}` — planned for v0.2.0
-packs: {}
+# -- Extra annotations for the operator pod
+podAnnotations: {}
 
 resources:
   requests:
@@ -63,3 +72,35 @@ resources:
     memory: 64Mi
   limits:
     memory: 128Mi
+
+# -- Node selector for the operator pod
+nodeSelector: {}
+# -- Tolerations for the operator pod
+tolerations: []
+# -- Affinity for the operator pod
+affinity: {}
+
+# -- Override the chart name
+nameOverride: ""
+# -- Override the fully qualified release name
+fullnameOverride: ""
+
+slack:
+  # -- Socket Mode Slack bot with approval buttons — planned for v0.2.0
+  enabled: false
+
+escalation:
+  pagerduty:
+    # -- PagerDuty escalation — planned for v0.2.0
+    enabled: false
+
+audit:
+  # -- Structured audit export (Splunk HEC, Loki, Elasticsearch, S3) — planned for v0.2.0
+  sinks: []
+
+ai:
+  # -- Read-only bring-your-own-LLM diagnosis — planned for v0.2.0
+  enabled: false
+
+# -- Cloud packs such as `awsNodes` for node replacement — planned for v0.2.0
+packs: {}

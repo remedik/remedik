@@ -13,10 +13,11 @@
 ## 3. Engine
 
 - [x] 3.1 Matching (most-specific-wins, deterministic ties) + guard evaluation (cooldown, maxPerHour) with table-driven tests — `internal/matching`, `internal/guards`, both 100% covered; includes `MemoryHistory` (the hot index the engine rebuilds from Remediation resources) with explicit, wall-clock-driven pruning
-- [ ] 3.2 Remediation lifecycle: create → sequential step loop → terminal state; attempts + exponential backoff recorded in status
-- [ ] 3.3 Global dry-run: Plan-only path producing `Simulated` records with the full would-have-run plan
-- [ ] 3.4 Startup `Interrupted` sweep + terminal-record pruning (keep-last-N per strategy)
-- [ ] 3.5 envtest coverage for the controller state machine
+- [x] 3.2 Remediation lifecycle: create → sequential step loop → terminal state; attempts + exponential backoff recorded in status. Waiting for a retry is `Pending`, never `Running`, which is what keeps "Running means interrupted" true
+- [x] 3.3 Global dry-run: Plan-only path producing `Simulated` records with the full would-have-run plan. Dry-run also records cooldowns, so a report is never more optimistic than reality would have been
+- [x] 3.4 `Interrupted` recovery + terminal-record pruning (keep-last-N per strategy). No separate sweep is needed: an attempt runs to completion inside one reconcile, so a record found `Running` can only have been interrupted. The record that just finished is never a pruning candidate
+- [x] 3.5 Controller state machine covered by unit tests against an in-memory client (`internal/engine`, 93%): success, dry-run, interruption, retry-then-succeed, retries exhausted, unknown action, pruning, prune-failure isolation. envtest was **not** used: it needs downloaded control-plane binaries, and the behaviour it would add over these tests — real API validation and status subresource semantics — is what `make e2e` exercises against a real cluster. Revisit if the state machine outgrows the fake
+- [x] 3.6 Guard history rebuilt from existing `Remediation` resources at startup, so cooldowns and hourly counts survive a restart
 
 ## 4. Action: deployment.restart
 
@@ -25,10 +26,10 @@
 
 ## 5. Helm chart
 
-- [ ] 5.1 Templates: Deployment, ServiceAccount, Role/RoleBinding assembled from enabled actions, gateway Service; `dryRun` and gateway auth wired through values
-- [ ] 5.2 NOTES.txt with the Alertmanager receiver snippet; `helm lint` added to CI
+- [x] 5.1 Templates: Deployment, ServiceAccount, ClusterRole/Role assembled from enabled actions, gateway and metrics Services, token Secret; `dryRun` and gateway auth wired through values. The chart refuses to render an unauthenticated gateway unless that is asked for explicitly
+- [x] 5.2 NOTES.txt with the Alertmanager receiver snippet; `helm lint` plus a render of both auth modes runs in `make verify` and CI
 
 ## 6. E2E & docs
 
-- [ ] 6.1 kind e2e (`make e2e`): install chart → POST sample webhook → assert `Simulated` Remediation
-- [ ] 6.2 Docs: QUICKSTART section 2 → "current", `docs/architecture.md` status labels, CHANGELOG entry
+- [x] 6.1 kind e2e (`make e2e`): builds the image, installs the chart and asserts six behaviours end to end — authentication, dry-run leaving the workload untouched, a real restart, the cooldown refusing a repeat, an unmatched alert being ignored, and guards surviving an operator restart
+- [x] 6.2 Docs: README and QUICKSTART rewritten for a working product, `docs/architecture.md` status labels and state machine, chart README generated, CHANGELOG entry

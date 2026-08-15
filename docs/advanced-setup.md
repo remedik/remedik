@@ -1,18 +1,23 @@
 # Advanced setup
 
-> **Status: placeholder.** Each section below is a design commitment from
-> the architecture plan and becomes concrete, tested documentation when its
-> capability ships. Target values schemas are shown so early adopters can
-> see where remedik is going; they are kept in sync with the specs.
+> **Everything on this page is planned, not shipped.** Each section is a
+> design commitment; the values schemas show where remedik is going, and
+> become concrete, tested documentation when the capability lands. For what
+> works today see [QUICKSTART.md](../QUICKSTART.md) and the generated
+> [chart reference](../charts/remedik/README.md).
 
 ## Execution modes & notifications
 
-Per-strategy `execution.mode` (`auto` / `approval` / `manual`) and
-`notify.level` (`none` / `onCompletion` / `verbose`) — see
-[architecture](architecture.md#execution-modes-per-strategy). *(Ships with
-the Slack change.)*
+Only `execution.mode: auto` exists today. Per-strategy `approval` and
+`manual`, and `notify.level` (`none` / `onCompletion` / `verbose`), arrive
+with the Slack change — see
+[architecture](architecture.md#execution-modes-per-strategy).
 
 ## Install profiles
+
+Not implemented; the chart currently installs one shape, with individual
+features toggled by their own values (`actions.*`, `gateway.*`). Profiles
+would bundle those into three defaults:
 
 ```yaml
 profile: standard   # minimal | standard | full
@@ -21,8 +26,7 @@ profile: standard   # minimal | standard | full
 - `minimal` — gateway + engine + CRDs.
 - `standard` — + Slack bot, metrics, bundled Grafana dashboard.
 - `full` — + pipelines area (cloud packs + runbook runner) and GUI; for
-  greenfield clusters, optional kube-prometheus-stack subchart (disabled by
-  default).
+  greenfield clusters, an optional kube-prometheus-stack subchart.
 
 ## Hub/spoke (multi-cluster)
 

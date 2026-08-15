@@ -52,3 +52,14 @@ func addKnownTypes(s *runtime.Scheme) error {
 	metav1.AddToGroupVersion(s, GroupVersion)
 	return nil
 }
+
+// Labels applied by the engine to Remediation resources. They are part of
+// the API surface: users select on them, so they must stay stable.
+const (
+	// LabelStrategy carries the RemediationStrategy that produced the
+	// record, so `kubectl get rem -l remedik.dev/strategy=<name>` works and
+	// history lookups stay cheap.
+	LabelStrategy = "remedik.dev/strategy"
+	// LabelFingerprint carries the triggering alert's fingerprint.
+	LabelFingerprint = "remedik.dev/fingerprint"
+)

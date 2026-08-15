@@ -224,3 +224,6 @@ func TestStepRunner_EmptyPlan(t *testing.T) {
 		t.Errorf("recorded %d steps for an empty plan", len(got.Steps))
 	}
 }
+
+// errUnresolvable is shared by the sink tests.
+var errUnresolvable = errors.New("alert carries no deployment label")

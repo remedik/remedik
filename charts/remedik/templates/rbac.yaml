@@ -1,0 +1,80 @@
+{{/*
+Permissions are assembled from what is actually enabled. remedik never asks
+for cluster-admin: every rule below exists because a named feature needs
+it, and turning that feature off removes the rule.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "remedik.fullname" . }}
+  labels:
+    {{- include "remedik.labels" . | nindent 4 }}
+rules:
+  # Strategies are cluster-scoped and only ever read.
+  - apiGroups: ["remedik.dev"]
+    resources: ["remediationstrategies"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["remedik.dev"]
+    resources: ["remediationstrategies/status"]
+    verbs: ["get", "update", "patch"]
+{{- if .Values.actions.deploymentRestart.enabled }}
+  # action: deployment.restart — patches the pod template annotation, which
+  # is what `kubectl rollout restart` does. No delete permission: the
+  # action never removes pods.
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "patch"]
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "remedik.fullname" . }}
+  labels:
+    {{- include "remedik.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "remedik.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "remedik.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+---
+{{/*
+Remediation records live in the release namespace only, so their
+permissions are namespaced too.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "remedik.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "remedik.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["remedik.dev"]
+    resources: ["remediations"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["remedik.dev"]
+    resources: ["remediations/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "remedik.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "remedik.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "remedik.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "remedik.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}

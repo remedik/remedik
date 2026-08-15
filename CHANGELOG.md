@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **The MVP loop works end to end.** An Alertmanager delivery reaches the
+  gateway, a strategy matches it, guards decide, the engine executes and
+  records the outcome as a `Remediation` resource — installable with
+  `helm install`, verified by `make e2e` on a real kind cluster.
+- Remediation controller (`add-mvp-core` tasks 3.2–3.6): the execution state
+  machine, with retries and exponential backoff, `Interrupted` recovery
+  after a crash, and pruning of terminal records per strategy. Guard history
+  is rebuilt from existing resources at startup, so cooldowns and hourly
+  counts survive a restart.
+- Alert sink: matches alerts to strategies, evaluates guards and creates the
+  execution record. The plan and retry budget are copied onto the record, so
+  it still explains the run after the strategy is edited or deleted.
+- Prometheus metrics on the manager's endpoint: alerts received, truncated
+  and unmatched, ingest errors, guard rejections, remediations started and
+  finished by outcome, and execution duration.
+- Helm chart: Deployment, Services, ServiceAccount and RBAC assembled from
+  the actions actually enabled, a token Secret, and install notes carrying
+  the exact Alertmanager receiver snippet. Dry-run is the install default,
+  and the chart refuses to render an unauthenticated gateway unless asked.
+- Container image: distroless, non-root, read-only root filesystem.
+- `make e2e`: an end-to-end test on a throwaway kind cluster asserting
+  authentication, dry-run leaving the workload untouched, a real restart,
+  the cooldown refusing a repeat, an unmatched alert being ignored, and
+  guards surviving an operator restart. Plus `make docker-build` and
+  `make dev-deploy`.
+
 - `deployment.restart` action (`add-mvp-core` task 4.2): rolling restart via
   the same `kubectl.kubernetes.io/restartedAt` annotation `kubectl rollout
   restart` uses, so the Deployment controller honours maxUnavailable,

@@ -1,0 +1,7 @@
+# Dedicated cluster for the end-to-end test, kept separate from the
+# development cluster so a test run never disturbs `make dev-up`.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: remedik-e2e
+nodes:
+  - role: control-plane
