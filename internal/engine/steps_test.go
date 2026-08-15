@@ -92,9 +92,6 @@ func TestStepRunner_AllStepsSucceed(t *testing.T) {
 			t.Errorf("step %d index = %d", i, s.Index)
 		}
 	}
-	if got.Target.String() != "deployment/payments/api" {
-		t.Errorf("Target = %q, want the first step's target", got.Target)
-	}
 	if state := TerminalState(false, got.Err); state != v1alpha1.RemediationStateSucceeded {
 		t.Errorf("TerminalState = %q, want Succeeded", state)
 	}

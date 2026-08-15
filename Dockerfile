@@ -3,7 +3,11 @@
 # Build stage. Dependencies always come from the module proxy, never from a
 # local vendor directory (.dockerignore excludes it), so the image builds
 # identically on a laptop and in CI.
-FROM golang:1.26-alpine AS build
+# The Go version tracks go.mod. It is an argument so a build can pin or
+# substitute it without editing this file:
+#   docker build --build-arg GO_IMAGE=golang:1.26.6-alpine .
+ARG GO_IMAGE=golang:1.26-alpine
+FROM ${GO_IMAGE} AS build
 
 ARG VERSION=dev
 WORKDIR /src
@@ -24,7 +28,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # Runtime stage: distroless, non-root, no shell. There is nothing in this
 # image to exec into, which is the point — an operator with cluster write
 # access should present the smallest possible attack surface.
-FROM gcr.io/distroless/static:nonroot
+ARG RUNTIME_IMAGE=gcr.io/distroless/static:nonroot
+FROM ${RUNTIME_IMAGE}
 
 WORKDIR /
 COPY --from=build /out/remedik /remedik

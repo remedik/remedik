@@ -45,9 +45,6 @@ type RunResult struct {
 	// Reason is the machine-readable cause when Err is set:
 	// ReasonStepFailed or ReasonUnknownAction.
 	Reason string
-	// Target is the object the first step resolved to. It scopes the
-	// cooldown guard and is what kubectl shows.
-	Target action.Target
 }
 
 // Run executes the plan and returns the per-step outcome.
@@ -74,12 +71,9 @@ func (r *StepRunner) Run(ctx context.Context, labels map[string]string, plan []v
 			continue
 		}
 
-		status, target, err := r.runStep(ctx, i, labels, step, now)
+		status, err := r.runStep(ctx, i, labels, step, now)
 		result.Steps = append(result.Steps, status)
 
-		if i == 0 {
-			result.Target = target
-		}
 		if err != nil {
 			result.Err = err
 			result.Reason = v1alpha1.ReasonStepFailed
@@ -98,7 +92,7 @@ func (r *StepRunner) runStep(
 	labels map[string]string,
 	step v1alpha1.Step,
 	now func() time.Time,
-) (v1alpha1.StepStatus, action.Target, error) {
+) (v1alpha1.StepStatus, error) {
 	started := metav1.NewTime(now())
 	status := v1alpha1.StepStatus{
 		Index:     int32(index), //nolint:gosec // plan length is bounded by the CRD
@@ -118,7 +112,7 @@ func (r *StepRunner) runStep(
 
 	act, err := r.Registry.Get(step.Action)
 	if err != nil {
-		return finish(v1alpha1.StepPhaseFailed, "", err.Error()), action.Target{}, err
+		return finish(v1alpha1.StepPhaseFailed, "", err.Error()), err
 	}
 
 	params := action.Params(step.With)
@@ -126,24 +120,24 @@ func (r *StepRunner) runStep(
 	target, err := act.Resolve(labels, params)
 	if err != nil {
 		err = fmt.Errorf("resolve target for %s: %w", step.Action, err)
-		return finish(v1alpha1.StepPhaseFailed, "", err.Error()), action.Target{}, err
+		return finish(v1alpha1.StepPhaseFailed, "", err.Error()), err
 	}
 
 	if r.DryRun {
 		plan, planErr := act.Plan(ctx, target, params)
 		if planErr != nil {
 			planErr = fmt.Errorf("plan %s on %s: %w", step.Action, target, planErr)
-			return finish(v1alpha1.StepPhaseFailed, "", planErr.Error()), target, planErr
+			return finish(v1alpha1.StepPhaseFailed, "", planErr.Error()), planErr
 		}
-		return finish(v1alpha1.StepPhaseSimulated, plan, ""), target, nil
+		return finish(v1alpha1.StepPhaseSimulated, plan, ""), nil
 	}
 
 	done, execErr := act.Execute(ctx, target, params)
 	if execErr != nil {
 		execErr = fmt.Errorf("execute %s on %s: %w", step.Action, target, execErr)
-		return finish(v1alpha1.StepPhaseFailed, "", execErr.Error()), target, execErr
+		return finish(v1alpha1.StepPhaseFailed, "", execErr.Error()), execErr
 	}
-	return finish(v1alpha1.StepPhaseSucceeded, done, ""), target, nil
+	return finish(v1alpha1.StepPhaseSucceeded, done, ""), nil
 }
 
 func (r *StepRunner) now() time.Time { return time.Now() }
