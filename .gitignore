@@ -1,0 +1,23 @@
+# Build output
+/bin/
+/dist/
+coverage.out
+
+# Locally installed dev tools (make tools)
+/hack/bin/
+
+# Vendored dependencies are a local build aid for environments without
+# module-proxy access; they are never committed.
+/vendor/
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local scratch files
+*.local.*

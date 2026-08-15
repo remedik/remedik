@@ -1,0 +1,30 @@
+{{ template "chart.header" . }}
+
+{{ template "chart.versionBadge" . }}{{ template "chart.typeBadge" . }}{{ template "chart.appVersionBadge" . }}
+
+{{ template "chart.description" . }}
+
+> **Alpha.** The API group `remedik.dev/v1alpha1` may change between
+> releases. Every change is specified in `openspec/` before it lands.
+
+## Install
+
+The gateway needs a bearer token so only Alertmanager can submit alerts:
+
+```bash
+helm install remedik oci://ghcr.io/ratyx/charts/remedik \
+  --namespace remedik --create-namespace \
+  --set gateway.auth.token="$(openssl rand -hex 24)"
+```
+
+**Dry-run is the install default.** remedik matches alerts, evaluates guards
+and records what it would have done, changing nothing, until you set
+`dryRun=false`.
+
+Custom resource definitions are installed from the chart's `crds/`
+directory. Helm installs them on first install but never upgrades or
+deletes them: apply CRD changes yourself when upgrading across versions.
+
+{{ template "chart.valuesSection" . }}
+
+{{ template "chart.maintainersSection" . }}

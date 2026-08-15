@@ -1,0 +1,16 @@
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: e2e-crashloop
+spec:
+  trigger:
+    match:
+      alertname: E2ECrashLooping
+  guards:
+    # Long enough that the test can prove a second alert is refused.
+    cooldown: 30m
+    maxPerHour: 10
+  steps:
+    - action: deployment.restart
+  onFailure:
+    retries: 0

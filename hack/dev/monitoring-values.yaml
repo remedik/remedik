@@ -1,0 +1,11 @@
+# Dev-only values for kube-prometheus-stack (make dev-up).
+# Small footprint, fast feedback. NOT for production.
+grafana:
+  adminPassword: remedik-dev
+alertmanager:
+  enabled: true
+prometheus:
+  prometheusSpec:
+    scrapeInterval: 15s
+    evaluationInterval: 15s
+    retention: 24h

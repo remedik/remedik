@@ -1,0 +1,57 @@
+# Two healthy Deployments standing in for the workloads an alert complains
+# about. The test asserts on their pod-template restart annotation: absent
+# after a dry run, present after a real remediation.
+#
+# Two of them, because a dry run records a cooldown for the target it
+# simulated — faithfully, so that a dry-run report is not more optimistic
+# than reality. The real-remediation phase therefore needs its own target.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: e2e-payments
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: e2e-payments
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      containers:
+        - name: pause
+          image: registry.k8s.io/pause:3.10
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api2
+  namespace: e2e-payments
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api2
+  template:
+    metadata:
+      labels:
+        app: api2
+    spec:
+      containers:
+        - name: pause
+          image: registry.k8s.io/pause:3.10
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi

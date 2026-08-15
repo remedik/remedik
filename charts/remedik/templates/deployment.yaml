@@ -1,0 +1,101 @@
+{{- include "remedik.validateValues" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "remedik.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "remedik.labels" . | nindent 4 }}
+spec:
+  # One replica by design in this version: the state machine reads a
+  # Remediation found Running as interrupted, which is only sound while a
+  # single process reconciles it. Leader election arrives with
+  # multi-replica support.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "remedik.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "remedik.selectorLabels" . | nindent 8 }}
+      annotations:
+        # Roll the pod when the configuration changes, so a values change
+        # takes effect without a manual restart.
+        checksum/config: {{ printf "%v-%v-%v" .Values.dryRun .Values.gateway .Values.actions | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "remedik.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: remedik
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --dry-run={{ .Values.dryRun }}
+            - --gateway-bind-address=:{{ .Values.gateway.port }}
+            - --gateway-path={{ .Values.gateway.path }}
+            - --metrics-bind-address=:{{ .Values.metrics.port }}
+            - --probe-bind-address=:{{ .Values.probes.port }}
+            - --history-limit={{ .Values.history.keepPerStrategy }}
+            - --log-level={{ .Values.logLevel }}
+          env:
+            - name: REMEDIK_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            {{- if not .Values.gateway.auth.disabled }}
+            - name: REMEDIK_GATEWAY_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "remedik.gatewayTokenSecret" . }}
+                  key: {{ .Values.gateway.auth.secretKey }}
+            {{- end }}
+          ports:
+            - name: gateway
+              containerPort: {{ .Values.gateway.port }}
+              protocol: TCP
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+            - name: probes
+              containerPort: {{ .Values.probes.port }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: probes
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: probes
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

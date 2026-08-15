@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "remedik.fullname" . }}-gateway
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "remedik.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "remedik.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: gateway
+      port: {{ .Values.gateway.port }}
+      targetPort: gateway
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "remedik.fullname" . }}-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "remedik.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "remedik.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ .Values.metrics.port }}
+      targetPort: metrics
+      protocol: TCP

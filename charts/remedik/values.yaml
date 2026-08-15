@@ -1,0 +1,106 @@
+# remedik chart values.
+#
+# Keys marked "planned for v0.2.0" describe the agreed design of features
+# that are not implemented yet; they are inert in this release.
+
+image:
+  # -- Container image repository
+  repository: ghcr.io/ratyx/remedik
+  # -- Image tag; defaults to the chart appVersion
+  tag: ""
+  # -- Image pull policy
+  pullPolicy: IfNotPresent
+
+# -- Global execution posture. The install default is dry-run: remedik
+# matches alerts, evaluates guards and records Simulated remediations,
+# changing nothing. Turn it off once the reports look right.
+dryRun: true
+
+# -- Log level: debug, info, warn or error
+logLevel: info
+
+gateway:
+  # -- Port the Alertmanager webhook receiver listens on
+  port: 8090
+  # -- Path the Alertmanager webhook is served on
+  path: /webhooks/alertmanager
+  auth:
+    # -- Bearer token Alertmanager must present. The chart creates a Secret
+    # holding it. Prefer `existingSecret` in production so the value is not
+    # in your values file.
+    token: ""
+    # -- Name of a Secret you manage that holds the bearer token
+    existingSecret: ""
+    # -- Key inside the token Secret
+    secretKey: token
+    # -- Disable authentication entirely. Local development only: anything
+    # that can reach the service could then ask remedik to act.
+    disabled: false
+
+metrics:
+  # -- Port the Prometheus metrics endpoint listens on
+  port: 8080
+
+probes:
+  # -- Port the health and readiness probes listen on
+  port: 8081
+
+history:
+  # -- Terminal Remediation records retained per strategy
+  keepPerStrategy: 200
+
+actions:
+  deploymentRestart:
+    # -- Enable the `deployment.restart` action. Disabling it also removes
+    # the RBAC rule that lets remedik patch Deployments.
+    enabled: true
+
+serviceAccount:
+  # -- Create a ServiceAccount for the operator
+  create: true
+  # -- Name of the ServiceAccount; generated when empty
+  name: ""
+  # -- Annotations for the ServiceAccount (for example, cloud identity)
+  annotations: {}
+
+# -- Extra annotations for the operator pod
+podAnnotations: {}
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 128Mi
+
+# -- Node selector for the operator pod
+nodeSelector: {}
+# -- Tolerations for the operator pod
+tolerations: []
+# -- Affinity for the operator pod
+affinity: {}
+
+# -- Override the chart name
+nameOverride: ""
+# -- Override the fully qualified release name
+fullnameOverride: ""
+
+slack:
+  # -- Socket Mode Slack bot with approval buttons — planned for v0.2.0
+  enabled: false
+
+escalation:
+  pagerduty:
+    # -- PagerDuty escalation — planned for v0.2.0
+    enabled: false
+
+audit:
+  # -- Structured audit export (Splunk HEC, Loki, Elasticsearch, S3) — planned for v0.2.0
+  sinks: []
+
+ai:
+  # -- Read-only bring-your-own-LLM diagnosis — planned for v0.2.0
+  enabled: false
+
+# -- Cloud packs such as `awsNodes` for node replacement — planned for v0.2.0
+packs: {}

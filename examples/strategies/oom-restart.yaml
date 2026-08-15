@@ -1,0 +1,28 @@
+# Restart a Deployment whose container was OOMKilled.
+#
+# Restarting an OOMKilled workload buys time; it does not fix the memory
+# limit. The guards say so out loud: a long cooldown and a low hourly cap,
+# because if it keeps happening the answer is a limit change by a human, not
+# more restarts.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: oom-restart
+spec:
+  enabled: true
+  trigger:
+    match:
+      alertname: KubeContainerOOMKilled
+      severity: warning
+  execution:
+    mode: auto
+  guards:
+    # Deliberately long: a second restart within the hour would be treating
+    # a symptom that has already proven it needs attention.
+    cooldown: 1h
+    maxPerHour: 2
+  steps:
+    - action: deployment.restart
+  onFailure:
+    # No retry: an OOMKill is not a transient API failure.
+    retries: 0

@@ -1,0 +1,6 @@
+# kind cluster for local development: make dev-up / make dev-down
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: remedik-dev
+nodes:
+  - role: control-plane

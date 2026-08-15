@@ -1,0 +1,32 @@
+# A narrower rule for one namespace, overriding a broad default.
+#
+# When several strategies match an alert, the most specific one wins — the
+# one with the most matchers — and ties break by name, so the outcome never
+# depends on the order you applied them. This strategy has three matchers to
+# pod-crashloop's one, so it takes precedence in `payments` while the broad
+# rule keeps covering everything else.
+#
+# Use this shape when one team needs different guards from the cluster
+# default, rather than loosening the default for everyone.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: payments-crashloop
+spec:
+  enabled: true
+  trigger:
+    match:
+      alertname: KubePodCrashLooping
+      namespace: payments
+      severity: critical
+  execution:
+    mode: auto
+  guards:
+    # A payments outage is worth reacting to faster, and the team watches
+    # this namespace closely.
+    cooldown: 5m
+    maxPerHour: 6
+  steps:
+    - action: deployment.restart
+  onFailure:
+    retries: 1

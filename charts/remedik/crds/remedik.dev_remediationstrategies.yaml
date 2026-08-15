@@ -1,0 +1,251 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.21.0
+  name: remediationstrategies.remedik.dev
+spec:
+  group: remedik.dev
+  names:
+    kind: RemediationStrategy
+    listKind: RemediationStrategyList
+    plural: remediationstrategies
+    shortNames:
+    - rstrat
+    - rs
+    singular: remediationstrategy
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.enabled
+      name: Enabled
+      type: boolean
+    - jsonPath: .spec.execution.mode
+      name: Mode
+      type: string
+    - jsonPath: .status.executionCount
+      name: Runs
+      type: integer
+    - jsonPath: .status.lastExecutionTime
+      name: Last Run
+      type: date
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: RemediationStrategy maps alerts to remediation behavior.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: RemediationStrategySpec defines what a strategy matches and
+              what it does.
+            properties:
+              enabled:
+                default: true
+                description: |-
+                  Enabled is the per-strategy gate. A disabled strategy never matches
+                  an alert; it stays in the cluster so history and intent are kept.
+                type: boolean
+              execution:
+                description: Execution controls how the strategy runs.
+                properties:
+                  mode:
+                    default: auto
+                    description: |-
+                      Mode is how the strategy runs. Only "auto" is supported in
+                      v1alpha1.
+                    enum:
+                    - auto
+                    type: string
+                type: object
+              guards:
+                description: Guards bound how often the strategy may act.
+                properties:
+                  cooldown:
+                    description: |-
+                      Cooldown is the minimum time between one execution completing on a
+                      target and the next starting on that same target. It is what stops
+                      a flapping alert from restarting a deployment in a loop.
+                    type: string
+                  maxPerHour:
+                    description: |-
+                      MaxPerHour caps how many executions this strategy may start in the
+                      trailing hour, so an alert storm cannot amplify into a cluster-wide
+                      event.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                type: object
+              onFailure:
+                description: OnFailure decides what happens when a step fails.
+                properties:
+                  retries:
+                    default: 0
+                    description: |-
+                      Retries is how many additional attempts the whole strategy gets
+                      after a failure, with exponential backoff between them. Zero means
+                      one attempt and no retry.
+                    format: int32
+                    maximum: 10
+                    minimum: 0
+                    type: integer
+                type: object
+              steps:
+                description: |-
+                  Steps are the remediation actions, executed in order. Execution
+                  stops at the first failed step.
+                items:
+                  description: Step is one remediation action.
+                  properties:
+                    action:
+                      description: |-
+                        Action is the verb to run, in "noun.verb" form — for example
+                        "deployment.restart". Unknown actions fail validation at admission
+                        time when possible, and at execution time otherwise.
+                      minLength: 1
+                      type: string
+                    with:
+                      additionalProperties:
+                        type: string
+                      description: |-
+                        With holds the action's parameters. Values are strings so the schema
+                        stays stable across actions; each action documents and validates its
+                        own keys.
+                      type: object
+                  required:
+                  - action
+                  type: object
+                minItems: 1
+                type: array
+              trigger:
+                description: Trigger selects the alerts this strategy handles.
+                properties:
+                  match:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      Match is a set of label equality matchers. Every entry must equal
+                      the alert's corresponding label for the strategy to match.
+
+                      At least one matcher is required: a strategy that matched every
+                      alert would turn one mistake into cluster-wide remediation. Matching
+                      is exact — no regular expressions — so the outcome stays predictable
+                      at 3am. When several strategies match, the most specific one wins,
+                      with ties broken by name.
+                    minProperties: 1
+                    type: object
+                required:
+                - match
+                type: object
+            required:
+            - steps
+            - trigger
+            type: object
+          status:
+            description: RemediationStrategyStatus reports observed state.
+            properties:
+              conditions:
+                description: |-
+                  Conditions follow the standard Kubernetes convention. "Ready"
+                  reports whether the strategy is usable: a strategy referencing an
+                  unknown action is accepted by the schema but not Ready.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              executionCount:
+                description: |-
+                  ExecutionCount is how many executions this strategy has started
+                  since the resource was created. It is a coarse counter for humans;
+                  metrics remain the source for rates.
+                format: int64
+                type: integer
+              lastExecutionTime:
+                description: LastExecutionTime is when this strategy last started
+                  an execution.
+                format: date-time
+                type: string
+              observedGeneration:
+                description: ObservedGeneration is the .metadata.generation this status
+                  reflects.
+                format: int64
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -1,0 +1,18 @@
+apiVersion: v2
+name: remedik
+description: Predictably boring auto-remediation for Kubernetes alerts.
+type: application
+# Chart version and application version move together while the project is
+# pre-1.0; they are decoupled at the first stable release.
+version: 0.1.0-alpha.1
+appVersion: "0.1.0-alpha.1"
+home: https://github.com/ratyx/remedik
+sources:
+  - https://github.com/ratyx/remedik
+keywords:
+  - remediation
+  - alertmanager
+  - operator
+  - sre
+maintainers:
+  - name: raTyx

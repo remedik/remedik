@@ -1,0 +1,65 @@
+remedik {{ .Chart.AppVersion }} is installed in namespace {{ .Release.Namespace }}.
+
+{{ if .Values.dryRun -}}
+DRY-RUN IS ON. remedik will match alerts, evaluate guards and record what it
+would have done, without changing anything. That is the recommended way to
+start: run it for a week, read the reports, then turn it off.
+
+    kubectl get remediations -n {{ .Release.Namespace }}
+
+Every record will be in state Simulated, with the exact plan it would have run.
+{{- else -}}
+DRY-RUN IS OFF. remedik will act on matching alerts.
+
+    kubectl get remediations -n {{ .Release.Namespace }}
+{{- end }}
+
+1. Point Alertmanager at the gateway
+--------------------------------------------------------------------------
+Add this receiver to your Alertmanager configuration:
+
+    receivers:
+      - name: remedik
+        webhook_configs:
+          - url: http://{{ include "remedik.fullname" . }}-gateway.{{ .Release.Namespace }}.svc:{{ .Values.gateway.port }}{{ .Values.gateway.path }}
+{{- if not .Values.gateway.auth.disabled }}
+            http_config:
+              authorization:
+                type: Bearer
+                credentials: <the token in Secret {{ include "remedik.gatewayTokenSecret" . }}, key {{ .Values.gateway.auth.secretKey }}>
+{{- end }}
+
+Route the alerts you want remediated to that receiver.
+{{ if .Values.gateway.auth.disabled }}
+WARNING: gateway authentication is disabled. Anything that can reach the
+service can ask remedik to act. Use this for local development only.
+{{- end }}
+
+2. Add a strategy
+--------------------------------------------------------------------------
+Strategies decide what happens for which alert. A first one:
+
+    apiVersion: remedik.dev/v1alpha1
+    kind: RemediationStrategy
+    metadata:
+      name: pod-crashloop
+    spec:
+      trigger:
+        match:
+          alertname: KubePodCrashLooping
+      guards:
+        cooldown: 15m
+        maxPerHour: 4
+      steps:
+        - action: deployment.restart
+      onFailure:
+        retries: 1
+
+Enabled actions in this release: deployment.restart{{ if not .Values.actions.deploymentRestart.enabled }} (DISABLED){{ end }}
+
+3. Watch what it does
+--------------------------------------------------------------------------
+    kubectl get remediations -n {{ .Release.Namespace }} -w
+    kubectl logs -n {{ .Release.Namespace }} deploy/{{ include "remedik.fullname" . }} -f
+
+Metrics are on http://{{ include "remedik.fullname" . }}-metrics.{{ .Release.Namespace }}.svc:{{ .Values.metrics.port }}/metrics

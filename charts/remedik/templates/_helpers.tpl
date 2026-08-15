@@ -1,0 +1,67 @@
+{{/*
+Chart name, overridable.
+*/}}
+{{- define "remedik.name" -}}
+{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/*
+Fully qualified release name.
+*/}}
+{{- define "remedik.fullname" -}}
+{{- if .Values.fullnameOverride -}}
+{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" -}}
+{{- else if contains (include "remedik.name" .) .Release.Name -}}
+{{- .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- printf "%s-%s" .Release.Name (include "remedik.name" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "remedik.chart" -}}
+{{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "remedik.labels" -}}
+helm.sh/chart: {{ include "remedik.chart" . }}
+{{ include "remedik.selectorLabels" . }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end -}}
+
+{{- define "remedik.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "remedik.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end -}}
+
+{{- define "remedik.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create -}}
+{{- default (include "remedik.fullname" .) .Values.serviceAccount.name -}}
+{{- else -}}
+{{- default "default" .Values.serviceAccount.name -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Name of the Secret holding the gateway bearer token.
+
+Either the user points at their own Secret with gateway.auth.existingSecret,
+or the chart creates one from gateway.auth.token.
+*/}}
+{{- define "remedik.gatewayTokenSecret" -}}
+{{- if .Values.gateway.auth.existingSecret -}}
+{{- .Values.gateway.auth.existingSecret -}}
+{{- else -}}
+{{- printf "%s-gateway-token" (include "remedik.fullname" .) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Fail early on a configuration that cannot work, with a message that says
+what to do about it.
+*/}}
+{{- define "remedik.validateValues" -}}
+{{- if and (not .Values.gateway.auth.disabled) (not .Values.gateway.auth.token) (not .Values.gateway.auth.existingSecret) -}}
+{{- fail "\nremedik: the gateway needs a bearer token so only Alertmanager can submit alerts.\nSet one of:\n  gateway.auth.token=<value>            (the chart creates the Secret)\n  gateway.auth.existingSecret=<name>    (you manage the Secret; key: token)\nTo run without authentication — local development only — set gateway.auth.disabled=true.\n" -}}
+{{- end -}}
+{{- end -}}

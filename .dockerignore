@@ -1,0 +1,12 @@
+.git
+.github
+bin
+dist
+hack/bin
+docs
+examples
+openspec
+*.md
+Dockerfile
+.dockerignore
+vendor
