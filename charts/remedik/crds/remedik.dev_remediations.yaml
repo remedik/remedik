@@ -1,0 +1,286 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.21.0
+  name: remediations.remedik.dev
+spec:
+  group: remedik.dev
+  names:
+    kind: Remediation
+    listKind: RemediationList
+    plural: remediations
+    shortNames:
+    - rem
+    singular: remediation
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.strategyName
+      name: Strategy
+      type: string
+    - jsonPath: .spec.target
+      name: Target
+      type: string
+    - jsonPath: .status.state
+      name: State
+      type: string
+    - jsonPath: .status.attempt
+      name: Attempt
+      priority: 1
+      type: integer
+    - jsonPath: .spec.alert.name
+      name: Alert
+      priority: 1
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Remediation is the record of one remediation execution: what triggered
+          it, what ran, and how it ended. It is the audit trail — including for
+          dry-run, where the record exists and nothing was mutated.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              RemediationSpec is the immutable record of what triggered this execution
+              and what it intends to do. The engine writes it once, at creation.
+            properties:
+              alert:
+                description: Alert is the event that triggered this execution.
+                properties:
+                  fingerprint:
+                    description: Fingerprint identifies the alert series.
+                    type: string
+                  labels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      Labels are the alert's labels, kept verbatim so the record explains
+                      itself without the original alert.
+                    type: object
+                  name:
+                    description: Name is the "alertname" label.
+                    type: string
+                  startsAt:
+                    description: StartsAt is when the alert began firing.
+                    format: date-time
+                    type: string
+                required:
+                - fingerprint
+                type: object
+              dryRun:
+                description: |-
+                  DryRun records whether the operator was in dry-run mode. It is kept
+                  on the record so a Simulated result is self-explanatory.
+                type: boolean
+              steps:
+                description: |-
+                  Steps is the plan: the steps resolved from the strategy at creation
+                  time. Keeping a copy means the audit trail still explains the run
+                  after the strategy is edited or deleted.
+                items:
+                  description: Step is one remediation action.
+                  properties:
+                    action:
+                      description: |-
+                        Action is the verb to run, in "noun.verb" form — for example
+                        "deployment.restart". Unknown actions fail validation at admission
+                        time when possible, and at execution time otherwise.
+                      minLength: 1
+                      type: string
+                    with:
+                      additionalProperties:
+                        type: string
+                      description: |-
+                        With holds the action's parameters. Values are strings so the schema
+                        stays stable across actions; each action documents and validates its
+                        own keys.
+                      type: object
+                  required:
+                  - action
+                  type: object
+                type: array
+              strategyName:
+                description: StrategyName is the RemediationStrategy that matched.
+                type: string
+              target:
+                description: |-
+                  Target is the object being remediated, as "kind/namespace/name" —
+                  for example "deployment/payments/api". It is the key the cooldown
+                  guard is scoped by.
+                type: string
+            required:
+            - alert
+            - strategyName
+            type: object
+          status:
+            description: RemediationStatus is the execution's progress and outcome.
+            properties:
+              attempt:
+                description: Attempt is the 1-based attempt number currently running
+                  or last run.
+                format: int32
+                type: integer
+              completedAt:
+                description: CompletedAt is when the execution reached a terminal
+                  state.
+                format: date-time
+                type: string
+              conditions:
+                description: Conditions follow the standard Kubernetes convention.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              message:
+                description: Message is the human-readable detail behind Reason.
+                type: string
+              reason:
+                description: |-
+                  Reason is a short, machine-readable explanation of a terminal state,
+                  such as "Interrupted" or "StepFailed". Empty on success.
+                type: string
+              startedAt:
+                description: StartedAt is when the first step began.
+                format: date-time
+                type: string
+              state:
+                description: State is the current lifecycle state.
+                enum:
+                - Pending
+                - Running
+                - Succeeded
+                - Failed
+                - Simulated
+                type: string
+              steps:
+                description: |-
+                  Steps records the outcome of each step of the current attempt, in
+                  order.
+                items:
+                  description: StepStatus records what happened to one step.
+                  properties:
+                    action:
+                      description: Action is the verb that ran.
+                      type: string
+                    completedAt:
+                      description: CompletedAt is when the step finished.
+                      format: date-time
+                      type: string
+                    index:
+                      description: Index is the step's position in the plan, starting
+                        at 0.
+                      format: int32
+                      type: integer
+                    message:
+                      description: Message carries the error detail when Phase is
+                        Failed.
+                      type: string
+                    phase:
+                      description: Phase is the step's outcome.
+                      enum:
+                      - Pending
+                      - Running
+                      - Succeeded
+                      - Failed
+                      - Skipped
+                      - Simulated
+                      type: string
+                    plan:
+                      description: |-
+                        Plan is what the step did, or in dry-run would have done, in one
+                        human-readable line — for example "patch deployment payments/api
+                        restartedAt annotation".
+                      type: string
+                    startedAt:
+                      description: StartedAt is when the step began.
+                      format: date-time
+                      type: string
+                  required:
+                  - action
+                  - index
+                  - phase
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
