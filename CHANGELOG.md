@@ -20,3 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `hack/bin/`; `make dev-up`/`dev-down` for a local kind cluster with
   kube-prometheus-stack; CI extended to run the full lint suite and check
   generated chart docs.
+- `make versions`: reports every pinned version against the latest upstream
+  release, so drift is visible without hunting through files.
+
+### Changed
+
+- Minimum Go version is now 1.26 (matches the Kubernetes ecosystem, which
+  controller-runtime requires).
+- Pinned previously floating versions: kube-prometheus-stack 88.3.0, kind
+  v0.32.0 and helm v3.21.4 documented as prerequisites.
+- CI actions updated: `actions/checkout` v4 → v7, `actions/setup-go`
+  v5 → v7, `azure/setup-helm` v4 → v5.

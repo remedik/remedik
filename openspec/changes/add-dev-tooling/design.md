@@ -29,6 +29,16 @@ changes (`skip_specs: true`). Key decisions and their reasoning below.
 6. **helm-docs as the chart-docs source of truth** — `values.yaml` carries
    `# --` annotations; CI regenerates and fails on drift, so the chart
    README can never go stale.
+7. **Go 1.26 as the minimum** — the `go` directive is a *minimum*, so it
+   tracks the current major.minor series (`1.26.0`), not the latest patch
+   (1.26.6). This matches controller-runtime, which we adopt in
+   `add-mvp-core` and which already requires `go 1.26.0`; CI derives its
+   toolchain from `go.mod` (`go-version-file`), so there is one source of
+   truth.
+8. **`make versions`** — a read-only report comparing every pinned version
+   with the latest upstream tag. Preferred over automated bumping
+   (Dependabot/Renovate) at this stage: major bumps of Actions and Helm
+   charts need human judgement, and the report costs nothing to run.
 
 ## Risks / Trade-offs
 

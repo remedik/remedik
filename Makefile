@@ -4,13 +4,16 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X $(MODULE)/internal/version.version=$(VERSION)
 
 # ---------------------------------------------------------------------------
-# Pinned tool versions — keep in sync with .github/workflows/ci.yml
+# Pinned tool versions — keep in sync with .github/workflows/ci.yml.
+# External prerequisites (install yourself; see QUICKSTART.md):
+#   helm v3.21.4 · kind v0.32.0 · yamllint 1.38.0 · kubectl (stable)
+# Check for newer releases with: make versions
 # ---------------------------------------------------------------------------
 GOLANGCI_LINT_VERSION := v2.12.2
 YAMLFMT_VERSION       := v0.21.0
 HELM_DOCS_VERSION     := v1.14.2
-# kube-prometheus-stack chart version for the dev cluster; empty = latest.
-KPS_CHART_VERSION ?=
+# kube-prometheus-stack chart version used by the dev cluster.
+KPS_CHART_VERSION ?= 88.3.0
 
 TOOLS_BIN := $(CURDIR)/hack/bin
 GOLANGCI  := $(TOOLS_BIN)/golangci-lint
@@ -20,7 +23,7 @@ HELMDOCS  := $(TOOLS_BIN)/helm-docs
 KIND_CLUSTER := remedik-dev
 
 .PHONY: all build test vet fmt tidy lint yaml-lint yaml-fix helm-lint helm-docs \
-        verify tools dev-up dev-down dev-info clean help
+        verify tools dev-up dev-down dev-info versions clean help
 
 all: verify build
 
@@ -92,7 +95,7 @@ dev-up: ## Create the kind dev cluster and install the monitoring stack
 	helm repo update prometheus-community >/dev/null
 	helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
 		--namespace monitoring --create-namespace \
-		$(if $(KPS_CHART_VERSION),--version $(KPS_CHART_VERSION),) \
+		--version $(KPS_CHART_VERSION) \
 		-f hack/dev/monitoring-values.yaml --wait --timeout 10m
 	@$(MAKE) --no-print-directory dev-info
 
@@ -110,6 +113,9 @@ dev-down: ## Delete the kind dev cluster
 	kind delete cluster --name $(KIND_CLUSTER)
 
 ##@ Misc
+
+versions: ## Show pinned vs. latest upstream versions of every tool
+	@hack/versions.sh
 
 clean: ## Remove build output
 	rm -rf bin

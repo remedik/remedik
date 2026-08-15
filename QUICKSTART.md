@@ -6,10 +6,13 @@
 
 ## 1. Developer quickstart (works today)
 
-Prerequisites: Go ≥ 1.24 (older Go ≥ 1.21 auto-downloads the right
-toolchain), GNU make, git, [helm](https://helm.sh/docs/intro/install/),
-`yamllint` (`sudo apt install yamllint`). Go-based lint tools install
-themselves, pinned, into `hack/bin/` on first use (`make tools`).
+Prerequisites: **Go ≥ 1.26** (older toolchains auto-download it), GNU make,
+git, **helm v3.21.4** ([install](https://helm.sh/docs/intro/install/)),
+**yamllint 1.38.0** (`sudo apt install yamllint`). Go-based lint tools
+install themselves, pinned, into `hack/bin/` on first use (`make tools`).
+
+Run `make versions` at any time to see every pinned version next to the
+latest upstream release.
 
 ```bash
 git clone https://github.com/ratyx/remedik.git
@@ -27,8 +30,10 @@ values annotations), `make lint`.
 ### Local dev cluster (kind + Prometheus/Alertmanager/Grafana)
 
 Additionally requires: Docker (Docker Desktop with WSL integration, or
-docker-ce), [kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation),
-[kubectl](https://kubernetes.io/docs/tasks/tools/).
+docker-ce), **kind v0.32.0**
+([install](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)),
+[kubectl](https://kubernetes.io/docs/tasks/tools/) (stable). The monitoring
+stack is pinned to kube-prometheus-stack 88.3.0.
 
 ```bash
 make dev-up        # kind cluster + kube-prometheus-stack (monitoring ns)
