@@ -1,10 +1,14 @@
 package engine
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/ratyx/remedik/api/v1alpha1"
@@ -283,4 +287,73 @@ func TestSink_ContinuesAfterAFailedCreate(t *testing.T) {
 	if got := f.history.StartsSince("restart-api", testClock.Add(-time.Hour)); got != 0 {
 		t.Errorf("history recorded %d starts despite failed creates", got)
 	}
+}
+
+// recordingEvents captures published Kubernetes events.
+type recordingEvents struct {
+	record.EventRecorder
+	events []string
+}
+
+func (r *recordingEvents) Eventf(
+	object runtime.Object, eventtype, reason, messageFmt string, args ...any,
+) {
+	name := "<unknown>"
+	if obj, ok := object.(*v1alpha1.RemediationStrategy); ok {
+		name = obj.Name
+	}
+	r.events = append(r.events,
+		fmt.Sprintf("%s/%s/%s: %s", name, eventtype, reason, fmt.Sprintf(messageFmt, args...)))
+}
+
+// A guard rejection has to be visible where an operator will look for it:
+// on the strategy, not only in the operator's logs.
+func TestSink_GuardRejectionIsPublishedAsAnEvent(t *testing.T) {
+	f := newSink(t, false, strategy("restart-api", map[string]string{"alertname": "KubePodCrashLooping"},
+		func(s *v1alpha1.RemediationStrategy) {
+			s.Spec.Guards.Cooldown = &metav1.Duration{Duration: 15 * time.Minute}
+		}))
+	events := &recordingEvents{}
+	f.sink.Events = events
+	f.history.RecordCompletion("restart-api", "deployment/payments/api", testClock.Add(-5*time.Minute))
+
+	f.sink.Consume([]alert.Alert{firingAlert()})
+
+	if len(events.events) != 1 {
+		t.Fatalf("published %d events, want 1: %v", len(events.events), events.events)
+	}
+	got := events.events[0]
+	for _, want := range []string{
+		"restart-api/Normal/" + EventReasonGuardRejected,
+		"KubePodCrashLooping",
+		`guard "cooldown"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("event = %q, want it to contain %q", got, want)
+		}
+	}
+}
+
+func TestSink_NoEventsWhenNothingIsRejected(t *testing.T) {
+	f := newSink(t, false, strategy("restart-api", map[string]string{"alertname": "KubePodCrashLooping"}))
+	events := &recordingEvents{}
+	f.sink.Events = events
+
+	f.sink.Consume([]alert.Alert{firingAlert()})
+
+	if len(events.events) != 0 {
+		t.Errorf("published %v, want no events for an accepted alert", events.events)
+	}
+}
+
+// The recorder is optional; a nil one must not panic.
+func TestSink_EventRecorderIsOptional(t *testing.T) {
+	f := newSink(t, false, strategy("restart-api", map[string]string{"alertname": "KubePodCrashLooping"},
+		func(s *v1alpha1.RemediationStrategy) {
+			s.Spec.Guards.Cooldown = &metav1.Duration{Duration: 15 * time.Minute}
+		}))
+	f.sink.Events = nil
+	f.history.RecordCompletion("restart-api", "deployment/payments/api", testClock.Add(-time.Minute))
+
+	f.sink.Consume([]alert.Alert{firingAlert()})
 }

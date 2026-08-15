@@ -21,6 +21,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
@@ -136,10 +138,24 @@ func run(logger *slog.Logger, opts options) error {
 
 	metrics.MustRegister()
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	restConfig := ctrl.GetConfigOrDie()
+
+	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsserver.Options{BindAddress: opts.metricsAddr},
 		HealthProbeBindAddress: opts.probeAddr,
+		Cache: cache.Options{
+			ByObject: map[client.Object]cache.ByObject{
+				// Remediation records only ever live in the operator's own
+				// namespace. Watching them cluster-wide — the default —
+				// would demand cluster-wide permission on them for no
+				// benefit, so the cache is scoped to match the RBAC the
+				// chart grants.
+				&v1alpha1.Remediation{}: {
+					Namespaces: map[string]cache.Config{opts.namespace: {}},
+				},
+			},
+		},
 		// Single replica by design in this version: the state machine
 		// treats a Remediation found Running as interrupted, which is only
 		// sound while one process reconciles it. Leader election arrives
@@ -150,8 +166,18 @@ func run(logger *slog.Logger, opts options) error {
 		return fmt.Errorf("create manager: %w", err)
 	}
 
+	// Actions read and write arbitrary workloads across the cluster. They
+	// use a direct client rather than the manager's cached one: caching
+	// every Deployment in the cluster to touch a handful would cost memory
+	// for nothing, and it would force the chart to grant list and watch on
+	// Deployments where get and patch are enough.
+	directClient, err := client.New(restConfig, client.Options{Scheme: scheme})
+	if err != nil {
+		return fmt.Errorf("create direct client: %w", err)
+	}
+
 	registry, err := action.NewRegistry(
-		workload.NewDeploymentRestart(mgr.GetClient(), time.Now),
+		workload.NewDeploymentRestart(directClient, time.Now),
 	)
 	if err != nil {
 		return fmt.Errorf("build action registry: %w", err)
@@ -198,6 +224,7 @@ func run(logger *slog.Logger, opts options) error {
 		Namespace: opts.namespace,
 		DryRun:    opts.dryRun,
 		Metrics:   metrics.Engine{},
+		Events:    mgr.GetEventRecorderFor("remedik"),
 		Logger:    logger.With("component", "sink"),
 	}
 

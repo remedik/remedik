@@ -17,13 +17,23 @@ rules:
   - apiGroups: ["remedik.dev"]
     resources: ["remediationstrategies/status"]
     verbs: ["get", "update", "patch"]
+  # Guard rejections are published as events on the strategy. Strategies are
+  # cluster-scoped, and Kubernetes files events for a cluster-scoped object
+  # in the default namespace, so this permission cannot be narrowed to the
+  # release namespace.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
 {{- if .Values.actions.deploymentRestart.enabled }}
   # action: deployment.restart — patches the pod template annotation, which
-  # is what `kubectl rollout restart` does. No delete permission: the
-  # action never removes pods.
+  # is what `kubectl rollout restart` does.
+  #
+  # Two verbs, deliberately: the action reads one Deployment by name and
+  # patches it. It needs no list or watch because it uses a direct client
+  # rather than a cache, and no delete because it never removes pods.
   - apiGroups: ["apps"]
     resources: ["deployments"]
-    verbs: ["get", "list", "watch", "patch"]
+    verbs: ["get", "patch"]
 {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -59,9 +69,6 @@ rules:
   - apiGroups: ["remedik.dev"]
     resources: ["remediations/status"]
     verbs: ["get", "update", "patch"]
-  - apiGroups: [""]
-    resources: ["events"]
-    verbs: ["create", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

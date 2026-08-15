@@ -296,6 +296,14 @@ else
 	fail "the cooldown did not stop a repeat: $count_before -> $count_after"
 fi
 
+# The refusal has to be visible where an operator looks first.
+if kubectl get events --all-namespaces --field-selector reason=GuardRejected \
+	-o jsonpath='{range .items[*]}{.message}{"\n"}{end}' 2>/dev/null | grep -q 'guard "cooldown"'; then
+	pass "the refusal is published as an event on the strategy"
+else
+	fail "no GuardRejected event was published"
+fi
+
 # --------------------------------------------------------------------------
 # Test 5 — an alert nothing matches
 # --------------------------------------------------------------------------

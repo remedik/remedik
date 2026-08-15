@@ -6,7 +6,9 @@ import (
 	"log/slog"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/ratyx/remedik/api/v1alpha1"
@@ -38,6 +40,11 @@ type Sink struct {
 	DryRun bool
 	// Metrics receives telemetry; defaults to NopRecorder.
 	Metrics Recorder
+	// Events publishes Kubernetes events on the strategy, so that
+	// `kubectl describe remediationstrategy` answers "why did nothing
+	// happen?" without anyone having to find the operator's logs.
+	// Optional: nil disables event publishing.
+	Events record.EventRecorder
 	// Logger is required.
 	Logger *slog.Logger
 	// Now supplies timestamps; tests inject a fixed clock.
@@ -102,6 +109,7 @@ func (s *Sink) consumeOne(ctx context.Context, a alert.Alert) error {
 		log.Info("guard rejected the execution",
 			"guard", decision.Guard, "reason", decision.Reason,
 			"retry_after", decision.RetryAfter)
+		s.recordRejection(strategy, a, decision)
 		return nil
 	}
 
@@ -201,6 +209,26 @@ func (s *Sink) create(
 		return fmt.Errorf("create remediation: %w", err)
 	}
 	return nil
+}
+
+// EventReasonGuardRejected is the reason on the event published when a
+// guard refuses an execution. It is a single stable value rather than one
+// per guard, which is what makes `--field-selector reason=GuardRejected`
+// useful; the guard itself is named in the message, and metrics carry it
+// as a label for counting.
+const EventReasonGuardRejected = "GuardRejected"
+
+// recordRejection publishes the guard decision on the strategy, so that
+// `kubectl describe remediationstrategy` answers "why did nothing happen?"
+// without anyone having to find the operator's logs.
+func (s *Sink) recordRejection(
+	strategy *v1alpha1.RemediationStrategy, a alert.Alert, decision guards.Decision,
+) {
+	if s.Events == nil {
+		return
+	}
+	s.Events.Eventf(strategy, corev1.EventTypeNormal, EventReasonGuardRejected,
+		"refused %s: guard %q: %s", a.String(), decision.Guard, decision.Reason)
 }
 
 func (s *Sink) metrics() Recorder {

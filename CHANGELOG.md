@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Alert sink: matches alerts to strategies, evaluates guards and creates the
   execution record. The plan and retry budget are copied onto the record, so
   it still explains the run after the strategy is edited or deleted.
+- Guard rejections are published as Kubernetes events on the strategy, so
+  `kubectl describe remediationstrategy` answers "why did nothing happen?"
+  without anyone having to find the operator's logs.
 - Prometheus metrics on the manager's endpoint: alerts received, truncated
   and unmatched, ingest errors, guard rejections, remediations started and
   finished by outcome, and execution duration.
