@@ -21,7 +21,7 @@
 ## 4. Action: deployment.restart
 
 - [x] 4.1 Action interface (`Resolve` / `Plan` / `Execute`) + registry — `internal/action`, 100% covered, standard library only. Dry-run calls Plan and never Execute, so a Simulated remediation cannot mutate the cluster even if an action is buggy
-- [ ] 4.2 `deployment.restart` implementation (restart-annotation patch) + unit tests incl. not-found and RBAC-denied paths
+- [x] 4.2 `deployment.restart` implementation (restart-annotation patch) + unit tests incl. not-found and RBAC-denied paths — `internal/action/workload`, 94% covered. Refuses to guess a Deployment from a pod name: the alert must carry a `deployment` label or the step must name one
 
 ## 5. Helm chart
 

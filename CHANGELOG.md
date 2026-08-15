@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `deployment.restart` action (`add-mvp-core` task 4.2): rolling restart via
+  the same `kubectl.kubernetes.io/restartedAt` annotation `kubectl rollout
+  restart` uses, so the Deployment controller honours maxUnavailable,
+  readiness and PodDisruptionBudgets. Never deletes pods.
+- Step execution and retry timing (`add-mvp-core` task 3.2, partial):
+  `StepRunner` sequences a strategy's steps, stops at the first failure and
+  records the rest as Skipped; `Backoff` gives deterministic exponential
+  retry delays capped at ten minutes.
 - Action contract and registry (`add-mvp-core` task 4.1): every remediation
   verb implements Resolve / Plan / Execute, so dry-run calls Plan only and
   the mutating path is never reached. The registry rejects duplicate and

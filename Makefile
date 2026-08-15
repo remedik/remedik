@@ -40,8 +40,9 @@ test: ## Run unit tests with the race detector
 vet: ## Run go vet
 	go vet ./...
 
-fmt: ## Fail if any file is not gofmt'd
-	@out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "not gofmt'd:"; echo "$$out"; exit 1; fi
+fmt: ## Fail if any file is not gofmt'd (vendored code is not ours to format)
+	@out=$$(gofmt -l $$(git ls-files '*.go')); \
+		if [ -n "$$out" ]; then echo "not gofmt'd:"; echo "$$out"; exit 1; fi
 
 tidy: ## go mod tidy
 	go mod tidy

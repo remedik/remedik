@@ -6,6 +6,7 @@ ignore: |
   .claude/
   charts/*/templates/
   charts/*/crds/
+  vendor/
 
 rules:
   line-length: disable
