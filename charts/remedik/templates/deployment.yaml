@@ -24,7 +24,7 @@ spec:
       annotations:
         # Roll the pod when the configuration changes, so a values change
         # takes effect without a manual restart.
-        checksum/config: {{ printf "%v-%v-%v" .Values.dryRun .Values.gateway .Values.actions | sha256sum }}
+        checksum/config: {{ printf "%v-%v-%v-%v" .Values.dryRun .Values.gateway .Values.actions .Values.dashboard | sha256sum }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -46,6 +46,11 @@ spec:
             - --probe-bind-address=:{{ .Values.probes.port }}
             - --history-limit={{ .Values.history.keepPerStrategy }}
             - --log-level={{ .Values.logLevel }}
+            {{- if .Values.dashboard.enabled }}
+            {{- /* No flag at all when the dashboard is off: nothing listens,
+                   and no handler exists to be reached. */}}
+            - --dashboard-bind-address=:{{ .Values.dashboard.port }}
+            {{- end }}
           env:
             - name: REMEDIK_NAMESPACE
               valueFrom:
@@ -58,6 +63,13 @@ spec:
                   name: {{ include "remedik.gatewayTokenSecret" . }}
                   key: {{ .Values.gateway.auth.secretKey }}
             {{- end }}
+            {{- if and .Values.dashboard.enabled (not .Values.dashboard.auth.disabled) }}
+            - name: REMEDIK_DASHBOARD_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "remedik.dashboardTokenSecret" . }}
+                  key: {{ .Values.dashboard.auth.secretKey }}
+            {{- end }}
           ports:
             - name: gateway
               containerPort: {{ .Values.gateway.port }}
@@ -68,6 +80,11 @@ spec:
             - name: probes
               containerPort: {{ .Values.probes.port }}
               protocol: TCP
+            {{- if .Values.dashboard.enabled }}
+            - name: dashboard
+              containerPort: {{ .Values.dashboard.port }}
+              protocol: TCP
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz

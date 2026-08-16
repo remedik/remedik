@@ -31,3 +31,32 @@ spec:
       port: {{ .Values.metrics.port }}
       targetPort: metrics
       protocol: TCP
+{{- if .Values.dashboard.enabled }}
+---
+{{/*
+ClusterIP, and no Ingress anywhere in this chart.
+
+The dashboard shows alert labels, namespaces and workload names. Publishing
+that is a decision for whoever owns the cluster; a chart that quietly
+created an Ingress would be making it on their behalf. The documented way
+in is a port-forward:
+
+    kubectl -n <namespace> port-forward svc/<release>-dashboard 8082:8082
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "remedik.fullname" . }}-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "remedik.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "remedik.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: dashboard
+      port: {{ .Values.dashboard.port }}
+      targetPort: dashboard
+      protocol: TCP
+{{- end }}

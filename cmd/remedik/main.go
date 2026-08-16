@@ -29,6 +29,7 @@ import (
 	"github.com/ratyx/remedik/api/v1alpha1"
 	"github.com/ratyx/remedik/internal/action"
 	"github.com/ratyx/remedik/internal/action/workload"
+	"github.com/ratyx/remedik/internal/dashboard"
 	"github.com/ratyx/remedik/internal/engine"
 	"github.com/ratyx/remedik/internal/gateway"
 	"github.com/ratyx/remedik/internal/guards"
@@ -42,6 +43,9 @@ const (
 	// process table; the chart mounts it from a Secret.
 	tokenEnvVar = "REMEDIK_GATEWAY_TOKEN" //nolint:gosec // the name of a variable, not a credential
 
+	// dashboardTokenEnvVar holds the dashboard token, for the same reason.
+	dashboardTokenEnvVar = "REMEDIK_DASHBOARD_TOKEN" //nolint:gosec // the name of a variable, not a credential
+
 	// namespaceEnvVar is the namespace Remediation resources are created
 	// in. The chart sets it from the pod's own namespace.
 	namespaceEnvVar = "REMEDIK_NAMESPACE"
@@ -52,15 +56,16 @@ const (
 )
 
 type options struct {
-	metricsAddr  string
-	probeAddr    string
-	gatewayAddr  string
-	gatewayPath  string
-	namespace    string
-	dryRun       bool
-	historyLimit int
-	logLevel     string
-	showVersion  bool
+	metricsAddr   string
+	probeAddr     string
+	gatewayAddr   string
+	gatewayPath   string
+	dashboardAddr string
+	namespace     string
+	dryRun        bool
+	historyLimit  int
+	logLevel      string
+	showVersion   bool
 }
 
 func main() {
@@ -100,6 +105,13 @@ func parseFlags() options {
 		"address the Alertmanager webhook gateway binds to")
 	flag.StringVar(&opts.gatewayPath, "gateway-path", gateway.DefaultPath,
 		"path the Alertmanager webhook is served on")
+	// The dashboard is off unless an address is given. One flag rather than
+	// an enable flag and an address: "not listening anywhere" is the
+	// clearest possible spelling of "not enabled", and it cannot be set to
+	// a contradictory pair.
+	flag.StringVar(&opts.dashboardAddr, "dashboard-bind-address", "",
+		"address the read-only web dashboard binds to; empty disables it (for example "+
+			dashboard.DefaultBindAddress+")")
 	flag.StringVar(&opts.namespace, "namespace", os.Getenv(namespaceEnvVar),
 		"namespace Remediation resources are created in")
 	flag.BoolVar(&opts.dryRun, "dry-run", true,
@@ -124,7 +136,8 @@ func run(logger *slog.Logger, opts options) error {
 		"namespace", opts.namespace,
 		"dry_run", opts.dryRun,
 		"gateway_addr", opts.gatewayAddr,
-		"gateway_path", opts.gatewayPath)
+		"gateway_path", opts.gatewayPath,
+		"dashboard_addr", dashboardStatus(opts.dashboardAddr))
 
 	if opts.dryRun {
 		logger.Warn("dry-run is on: remediations are recorded as Simulated and nothing is changed. " +
@@ -239,15 +252,32 @@ func run(logger *slog.Logger, opts options) error {
 		return fmt.Errorf("configure gateway: %w", err)
 	}
 
-	if err := mgr.Add(&gatewayServer{
-		server: &http.Server{
-			Addr:              opts.gatewayAddr,
-			Handler:           handler.Mux(),
-			ReadHeaderTimeout: 5 * time.Second,
-		},
-		logger: logger.With("component", "gateway"),
-	}); err != nil {
+	if err := mgr.Add(newHTTPServer("gateway", opts.gatewayAddr, handler.Mux(), logger)); err != nil {
 		return fmt.Errorf("register the gateway server: %w", err)
+	}
+
+	// The dashboard reads through the manager's cache, so it lists exactly
+	// what the reconciler already watches: serving a page costs no API call
+	// and needs no permission the operator does not already hold.
+	//
+	// mgr.GetClient() is passed as a dashboard.Reader, an interface with no
+	// write method on it. The handler cannot mutate anything because there
+	// is nothing on its client to call.
+	if opts.dashboardAddr != "" {
+		ui, err := dashboard.New(dashboard.Config{
+			Reader:    mgr.GetClient(),
+			Namespace: opts.namespace,
+			Token:     os.Getenv(dashboardTokenEnvVar),
+			DryRun:    opts.dryRun,
+			Version:   version.String(),
+			Logger:    logger.With("component", "dashboard"),
+		})
+		if err != nil {
+			return fmt.Errorf("configure dashboard: %w", err)
+		}
+		if err := mgr.Add(newHTTPServer("dashboard", opts.dashboardAddr, ui.Mux(), logger)); err != nil {
+			return fmt.Errorf("register the dashboard server: %w", err)
+		}
 	}
 
 	if err := mgr.Add(&historyPruner{history: history, every: historyPruneInterval}); err != nil {
@@ -279,20 +309,38 @@ func buildScheme() (*runtime.Scheme, error) {
 	return scheme, nil
 }
 
-// gatewayServer runs the webhook listener under the manager, so it shares
-// the manager's lifecycle and shuts down with everything else.
-type gatewayServer struct {
+// httpServer runs one listener under the manager, so it shares the
+// manager's lifecycle and shuts down with everything else. The gateway and
+// the dashboard each get one; they listen on separate ports so a cluster's
+// owner can apply different network policy to each.
+//
+// The manager starts runnables after its caches have synced, which is what
+// makes it safe for these handlers to read through the cached client.
+type httpServer struct {
+	name   string
 	server *http.Server
 	logger *slog.Logger
 }
 
+func newHTTPServer(name, addr string, handler http.Handler, logger *slog.Logger) *httpServer {
+	return &httpServer{
+		name: name,
+		server: &http.Server{
+			Addr:              addr,
+			Handler:           handler,
+			ReadHeaderTimeout: 5 * time.Second,
+		},
+		logger: logger.With("component", name),
+	}
+}
+
 // Start implements manager.Runnable.
-func (g *gatewayServer) Start(ctx context.Context) error {
+func (s *httpServer) Start(ctx context.Context) error {
 	errCh := make(chan error, 1)
 	go func() {
-		g.logger.Info("gateway listening", "addr", g.server.Addr)
-		if err := g.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errCh <- fmt.Errorf("listen on %s: %w", g.server.Addr, err)
+		s.logger.Info(s.name+" listening", "addr", s.server.Addr)
+		if err := s.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- fmt.Errorf("listen on %s: %w", s.server.Addr, err)
 			return
 		}
 		errCh <- nil
@@ -304,7 +352,7 @@ func (g *gatewayServer) Start(ctx context.Context) error {
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		return g.server.Shutdown(shutdownCtx)
+		return s.server.Shutdown(shutdownCtx)
 	}
 }
 
@@ -329,6 +377,16 @@ func (p *historyPruner) Start(ctx context.Context) error {
 			p.history.Prune(now)
 		}
 	}
+}
+
+// dashboardStatus describes the dashboard for the startup log line, where
+// an empty address would read as a configuration the operator forgot rather
+// than the default it is.
+func dashboardStatus(addr string) string {
+	if addr == "" {
+		return "disabled"
+	}
+	return addr
 }
 
 func parseLogLevel(s string) (slog.Level, error) {

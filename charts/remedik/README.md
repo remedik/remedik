@@ -25,6 +25,24 @@ Custom resource definitions are installed from the chart's `crds/`
 directory. Helm installs them on first install but never upgrades or
 deletes them: apply CRD changes yourself when upgrading across versions.
 
+## The dashboard
+
+Off by default. Its pages show alert labels, namespaces and workload names,
+so who may see them is your decision — which is also why the chart creates a
+ClusterIP Service and never an Ingress.
+
+```bash
+helm upgrade remedik ... \
+  --set dashboard.enabled=true \
+  --set dashboard.auth.token="$(openssl rand -hex 24)"
+
+kubectl -n remedik port-forward svc/remedik-dashboard 8082:8082
+```
+
+Open <http://127.0.0.1:8082/>, leave the username empty and paste the token
+as the password. Enabling the dashboard adds no RBAC rule: it reads exactly
+what the operator already reads.
+
 ## Values
 
 | Key | Type | Default | Description |
@@ -33,6 +51,12 @@ deletes them: apply CRD changes yourself when upgrading across versions.
 | affinity | object | `{}` | Affinity for the operator pod |
 | ai.enabled | bool | `false` | Read-only bring-your-own-LLM diagnosis — planned for v0.2.0 |
 | audit.sinks | list | `[]` | Structured audit export (Splunk HEC, Loki, Elasticsearch, S3) — planned for v0.2.0 |
+| dashboard.auth.disabled | bool | `false` | Serve the dashboard without authentication. Anything that can reach the port could then read every alert label, namespace and workload name remedik has recorded. |
+| dashboard.auth.existingSecret | string | `""` | Name of a Secret you manage that holds the dashboard token |
+| dashboard.auth.secretKey | string | `"token"` | Key inside the token Secret |
+| dashboard.auth.token | string | `""` | Token required to read the dashboard. The chart creates a Secret holding it. Present it as a bearer token, or as the password in the browser's own prompt (the username is ignored). Prefer `existingSecret` in production so the value is not in your values file. |
+| dashboard.enabled | bool | `false` | Serve the read-only web dashboard. Off by default: its pages disclose alert labels, namespaces and workload names, and deciding who may see those is the cluster owner's call, not the chart's. Enabling it grants remedik no additional permission — the dashboard reads what the operator already reads. |
+| dashboard.port | int | `8082` | Port the dashboard listens on |
 | dryRun | bool | `true` | Global execution posture. The install default is dry-run: remedik matches alerts, evaluates guards and records Simulated remediations, changing nothing. Turn it off once the reports look right. |
 | escalation.pagerduty.enabled | bool | `false` | PagerDuty escalation — planned for v0.2.0 |
 | fullnameOverride | string | `""` | Override the fully qualified release name |

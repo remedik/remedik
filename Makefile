@@ -78,6 +78,17 @@ helm-lint: ## Lint the Helm chart (requires helm)
 	helm lint charts/remedik --set gateway.auth.token=lint
 	helm template remedik charts/remedik --set gateway.auth.token=lint >/dev/null
 	helm template remedik charts/remedik --set gateway.auth.disabled=true >/dev/null
+	@# The dashboard is off by default and opt-in either way it is authenticated.
+	helm template remedik charts/remedik --set gateway.auth.token=lint \
+		--set dashboard.enabled=true --set dashboard.auth.token=lint >/dev/null
+	helm template remedik charts/remedik --set gateway.auth.token=lint \
+		--set dashboard.enabled=true --set dashboard.auth.disabled=true >/dev/null
+	@# Enabling it without a way to authenticate must fail, not render.
+	@helm template remedik charts/remedik --set gateway.auth.token=lint \
+		--set dashboard.enabled=true >/dev/null 2>&1 \
+		&& { echo "the chart rendered an unauthenticated dashboard without being asked"; exit 1; } \
+		|| echo "chart refuses an unauthenticated dashboard, as intended"
+	./hack/rbac-unchanged.sh
 
 helm-docs: $(HELMDOCS) ## Regenerate chart README.md from values.yaml annotations
 	$(HELMDOCS) --chart-search-root charts
@@ -156,11 +167,15 @@ dev-deploy: docker-build ## Build, load and install remedik into the dev cluster
 		--set image.repository=$(IMAGE_REPO) --set image.tag=$(IMAGE_TAG) \
 		--set image.pullPolicy=IfNotPresent \
 		--set gateway.auth.token=dev-token \
+		--set dashboard.enabled=true --set dashboard.auth.token=dev-token \
 		--wait --timeout 3m
 	@echo ""
 	@echo "remedik is installed in dry-run mode. Watch it with:"
 	@echo "  kubectl -n remedik get remediations -w"
 	@echo "  kubectl -n remedik logs deploy/remedik -f"
+	@echo ""
+	@echo "Dashboard (read-only): kubectl -n remedik port-forward svc/remedik-dashboard 8082:8082"
+	@echo "  -> http://127.0.0.1:8082/  (username blank, password: dev-token)"
 
 dev-down: ## Delete the kind dev cluster
 	kind delete cluster --name $(KIND_CLUSTER)

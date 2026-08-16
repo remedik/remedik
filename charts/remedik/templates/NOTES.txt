@@ -63,3 +63,30 @@ Enabled actions in this release: deployment.restart{{ if not .Values.actions.dep
     kubectl logs -n {{ .Release.Namespace }} deploy/{{ include "remedik.fullname" . }} -f
 
 Metrics are on http://{{ include "remedik.fullname" . }}-metrics.{{ .Release.Namespace }}.svc:{{ .Values.metrics.port }}/metrics
+{{ if .Values.dashboard.enabled }}
+4. Read the dashboard
+--------------------------------------------------------------------------
+The dashboard is served on a ClusterIP Service; this chart creates no
+Ingress, because who may see your alert labels and workload names is your
+decision, not the chart's. Reach it with a port-forward:
+
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "remedik.fullname" . }}-dashboard {{ .Values.dashboard.port }}:{{ .Values.dashboard.port }}
+
+Then open http://127.0.0.1:{{ .Values.dashboard.port }}/
+{{- if not .Values.dashboard.auth.disabled }}
+
+Your browser will ask for credentials. Leave the username empty and paste
+the token as the password — it is in Secret {{ include "remedik.dashboardTokenSecret" . }}, key {{ .Values.dashboard.auth.secretKey }}:
+
+    kubectl -n {{ .Release.Namespace }} get secret {{ include "remedik.dashboardTokenSecret" . }} -o jsonpath='{.data.{{ .Values.dashboard.auth.secretKey }}}' | base64 -d
+{{- else }}
+
+WARNING: the dashboard is served without authentication. Anything that can
+reach the port can read every alert label, namespace and workload name
+remedik has recorded. Use this for local development only.
+{{- end }}
+{{- else }}
+
+The read-only dashboard is not installed. Enable it with
+--set dashboard.enabled=true --set dashboard.auth.token=<value>
+{{- end }}
