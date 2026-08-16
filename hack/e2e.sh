@@ -190,7 +190,7 @@ wait_for_state() {
 		local states
 		states=$(kubectl -n "$NAMESPACE" get remediations \
 			-o jsonpath='{range .items[*]}{.status.state}{"\n"}{end}' 2>/dev/null || true)
-		echo "$states" | grep -qx "$want" && return 0
+		grep -qx "$want" <<<"$states" && return 0
 		sleep 2
 		elapsed=$((elapsed + 2))
 	done
@@ -204,7 +204,7 @@ wait_for_strategy_state() {
 		local states
 		states=$(kubectl -n "$NAMESPACE" get remediations -l "remedik.dev/strategy=${strategy}" \
 			-o jsonpath='{range .items[*]}{.status.state}{"\n"}{end}' 2>/dev/null || true)
-		echo "$states" | grep -qx "$want" && return 0
+		grep -qx "$want" <<<"$states" && return 0
 		sleep 2
 		elapsed=$((elapsed + 2))
 	done
@@ -277,7 +277,7 @@ dashboard_status() {
 wait_for_dashboard_body() {
 	local path="$1" want="$2" timeout="${3:-45}" elapsed=0
 	while [ "$elapsed" -lt "$timeout" ]; do
-		if dashboard_body "$path" | grep -q "$want"; then
+		if grep -q "$want" <<<"$(dashboard_body "$path")"; then
 			return 0
 		fi
 		sleep 2
@@ -426,7 +426,7 @@ fi
 if wait_for_strategy_state e2e-node-drain Simulated 60; then
 	drain_plan=$(kubectl -n "$NAMESPACE" get remediations -l remedik.dev/strategy=e2e-node-drain \
 		-o jsonpath='{.items[0].status.steps[0].plan}' 2>/dev/null || true)
-	if echo "$drain_plan" | grep -q "Eviction API"; then
+	if grep -q "Eviction API" <<<"$drain_plan"; then
 		pass "the drain plan says it would evict: ${drain_plan}"
 	else
 		fail "the drain plan does not describe an eviction (${drain_plan})"
@@ -434,14 +434,14 @@ if wait_for_strategy_state e2e-node-drain Simulated 60; then
 
 	drain_pods=$(kubectl -n "$NAMESPACE" get remediations -l remedik.dev/strategy=e2e-node-drain \
 		-o jsonpath='{.items[0].status.steps[0].outputs.pods}' 2>/dev/null || true)
-	if echo "$drain_pods" | grep -q "e2e-payments/"; then
+	if grep -q "e2e-payments/" <<<"$drain_pods"; then
 		pass "the plan names the pods that would move"
 	else
 		fail "the plan names no pods (${drain_pods})"
 	fi
 
 	# DaemonSet pods are skipped, which is what makes a drain terminate.
-	if echo "$drain_plan" | grep -q "DaemonSet"; then
+	if grep -q "DaemonSet" <<<"$drain_plan"; then
 		pass "the plan says DaemonSet pods are skipped"
 	else
 		fail "the plan does not mention skipping DaemonSet pods"
@@ -518,7 +518,7 @@ fi
 verified=$(kubectl -n "$NAMESPACE" get remediations \
 	-o jsonpath='{range .items[?(@.status.state=="Succeeded")]}{.status.steps[0].verified}{"\n"}{end}' \
 	2>/dev/null | head -1)
-if echo "$verified" | grep -q 'ready'; then
+if grep -q 'ready' <<<"$verified"; then
 	pass "the record confirms the rollout completed: ${verified}"
 else
 	fail "the record does not confirm the rollout; verification did not run"
@@ -527,7 +527,7 @@ fi
 kubectl_line=$(kubectl -n "$NAMESPACE" get remediations \
 	-o jsonpath='{range .items[?(@.status.state=="Succeeded")]}{.status.steps[0].kubectl}{"\n"}{end}' \
 	2>/dev/null | head -1)
-if echo "$kubectl_line" | grep -q 'kubectl rollout restart'; then
+if grep -q 'kubectl rollout restart' <<<"$kubectl_line"; then
 	pass "the record carries the equivalent command: ${kubectl_line}"
 else
 	fail "the record carries no kubectl equivalent"
@@ -682,7 +682,7 @@ fi
 # on whatever the first request happened to catch.
 wait_for_dashboard_body / "e2e-crashloop" 45 || true
 overview=$(dashboard_body /)
-if echo "$overview" | grep -q "e2e-crashloop"; then
+if grep -q "e2e-crashloop" <<<"$overview"; then
 	pass "the overview lists the executions of the e2e strategy"
 else
 	fail "the overview does not mention the e2e strategy"
@@ -691,12 +691,12 @@ fi
 # Test 2 recorded a Simulated remediation. Whatever the operator's posture is
 # now, that trial has to be reportable — it is the report an operator shows
 # their team before turning dry-run off.
-if echo "$overview" | grep -q "What remedik would have done"; then
+if grep -q "What remedik would have done" <<<"$overview"; then
 	pass "the dry-run report is on the overview"
 else
 	fail "no dry-run report, although a simulated remediation exists"
 fi
-if echo "$overview" | grep -q "restartedAt"; then
+if grep -q "restartedAt" <<<"$overview"; then
 	pass "the report says what would have been done"
 else
 	fail "the report does not show the plan of the simulated remediation"
@@ -707,7 +707,7 @@ simulated=$(kubectl -n "$NAMESPACE" get remediations \
 	2>/dev/null | head -1)
 if [ -n "$simulated" ]; then
 	detail=$(dashboard_body "/remediations/${simulated}")
-	if echo "$detail" | grep -q "nothing in the cluster was changed"; then
+	if grep -q "nothing in the cluster was changed" <<<"$detail"; then
 		pass "the detail page of ${simulated} explains the simulation"
 	else
 		fail "the detail page of ${simulated} does not explain the simulation"
@@ -718,17 +718,18 @@ fi
 
 wait_for_dashboard_body /strategies "E2ECrashLooping" 45 || true
 strategies=$(dashboard_body /strategies)
-if echo "$strategies" | grep -q "E2ECrashLooping" && echo "$strategies" | grep -q "30m"; then
+grep -q "E2ECrashLooping" <<<"$strategies"; matcher=$?
+grep -q "30m" <<<"$strategies"; guard=$?
+if [ "$matcher" -eq 0 ] && [ "$guard" -eq 0 ]; then
 	pass "the strategies page shows the matcher and the cooldown guard"
 else
-	# An assertion that does not show what it saw costs a round trip every
-	# time it fails, and this one failed only on a runner.
+	# Each status separately: the previous version reported "one of these two
+	# is missing" and then printed evidence that both were present, which
+	# said the fault was in the assertion without saying where.
 	fail "the strategies page is missing the matcher or the guard"
-	info "bytes=$(printf '%s' "$strategies" | wc -c)"
-	info "has E2ECrashLooping: $(echo "$strategies" | grep -c 'E2ECrashLooping')"
-	info "has 30m: $(echo "$strategies" | grep -c '30m')"
-	info "strategy names on the page: $(echo "$strategies" | grep -oE 'e2e-[a-z-]+' | sort -u | tr '\n' ' ')"
-	info "cooldowns on the page: $(echo "$strategies" | grep -oE '<code>[0-9]+[hms]</code>' | sort -u | tr '\n' ' ')"
+	info "matcher grep exit=${matcher}, guard grep exit=${guard}, bytes=$(printf '%s' "$strategies" | wc -c)"
+	info "strategy names on the page: $(grep -oE 'e2e-[a-z-]+' <<<"$strategies" | sort -u | tr '\n' ' ')"
+	info "cooldowns on the page: $(grep -oE '<code>[0-9]+[hms]</code>' <<<"$strategies" | sort -u | tr '\n' ' ')"
 fi
 
 status=$(dashboard_status /remediations/does-not-exist)
@@ -740,7 +741,7 @@ fi
 
 # The cluster's name, which is what tells three port-forwarded dashboards
 # apart. It is in the tab title so it survives being one of twenty tabs.
-if echo "$overview" | grep -q '<title>e2e-cluster'; then
+if grep -q '<title>e2e-cluster' <<<"$overview"; then
 	pass "the cluster name leads the browser title"
 else
 	fail "the cluster name is not in the title"
@@ -750,13 +751,13 @@ fi
 # It answers "is anything wrong right now?"; the list answers "what happened
 # to payments last Tuesday?". Merging them is what this replaced.
 for panel in posture-heading attention-heading activity-heading where-heading; do
-	if echo "$overview" | grep -q "$panel"; then
+	if grep -q "$panel" <<<"$overview"; then
 		pass "the overview has its ${panel%-heading} panel"
 	else
 		fail "the overview is missing the ${panel%-heading} panel"
 	fi
 done
-if echo "$overview" | grep -q 'href="/remediations"'; then
+if grep -q 'href="/remediations"' <<<"$overview"; then
 	pass "and it sends the reader to the list"
 else
 	fail "the overview does not link to the list"
@@ -773,8 +774,8 @@ list=$(dashboard_body /remediations)
 # cluster with a hundred and fifty namespaces needs instead of a wall of
 # links — and it is the structural form of the bug that made the filter
 # appear broken twice.
-live_line=$(echo "$list" | grep -n 'id="live"' | head -1 | cut -d: -f1)
-controls_line=$(echo "$list" | grep -n 'class="filters"' | head -1 | cut -d: -f1)
+live_line=$(grep -n 'id="live"' <<<"$list" | head -1 | cut -d: -f1)
+controls_line=$(grep -n 'class="filters"' <<<"$list" | head -1 | cut -d: -f1)
 if [ -n "$live_line" ] && [ -n "$controls_line" ] && [ "$controls_line" -lt "$live_line" ]; then
 	pass "the filter controls sit outside the region the refresh replaces"
 else
@@ -783,24 +784,24 @@ fi
 
 # Everything so far targets one namespace, so the namespace row is correctly
 # absent: a dimension with one value is not a choice. The state row is not.
-if echo "$list" | grep -q 'href="/remediations?state='; then
+if grep -q 'href="/remediations?state=' <<<"$list"; then
 	pass "the list offers filter links for a dimension with more than one value"
 else
 	fail "the list offers no state filter link"
 fi
-if echo "$list" | grep -q 'id="filter-namespace"'; then
+if grep -q 'id="filter-namespace"' <<<"$list"; then
 	fail "the list offers a namespace filter although every record is in one namespace"
 else
 	pass "and omits the namespace row, which would offer a choice of one"
 fi
 
 filtered=$(dashboard_body "/remediations?namespace=e2e-payments")
-if echo "$filtered" | grep -q 'e2e-payments'; then
+if grep -q 'e2e-payments' <<<"$filtered"; then
 	pass "a namespace filter renders that namespace's records"
 else
 	fail "the namespace filter hid everything in its own namespace"
 fi
-if echo "$filtered" | grep -q 'hidden'; then
+if grep -q 'hidden' <<<"$filtered"; then
 	pass "and the page says how much it is hiding"
 else
 	fail "a filtered page does not say what it is hiding"
@@ -808,19 +809,19 @@ fi
 
 # The shell reloads itself when the operator changes, which is the defect
 # that made two correct filter fixes invisible in an already-open tab.
-if echo "$overview" | grep -q '<meta name="remedik-asset"'; then
+if grep -q '<meta name="remedik-asset"' <<<"$overview"; then
 	pass "the page carries its build fingerprint, so a stale tab can notice"
 else
 	fail "the page has no asset fingerprint for the refresh to compare"
 fi
 
 empty=$(dashboard_body "/remediations?namespace=no-such-namespace")
-if echo "$empty" | grep -q "Nothing matches this filter"; then
+if grep -q "Nothing matches this filter" <<<"$empty"; then
 	pass "a filter that matches nothing says so, rather than looking like an empty cluster"
 else
 	fail "an empty filter result did not explain itself"
 fi
-if echo "$empty" | grep -q "No strategies, so nothing can run"; then
+if grep -q "No strategies, so nothing can run" <<<"$empty"; then
 	fail "an empty filter result claimed the cluster has no strategies"
 else
 	pass "and it does not claim the cluster is unconfigured"
@@ -914,7 +915,7 @@ fi
 
 sts_verified=$(kubectl -n "$NAMESPACE" get remediations -l remedik.dev/strategy=e2e-statefulset \
 	-o jsonpath='{.items[0].status.steps[0].verified}' 2>/dev/null || true)
-if echo "$sts_verified" | grep -q 'ready'; then
+if grep -q 'ready' <<<"$sts_verified"; then
 	pass "the StatefulSet rollout was confirmed: ${sts_verified}"
 else
 	fail "the StatefulSet rollout was not confirmed (verified=${sts_verified})"
@@ -935,7 +936,7 @@ for _ in $(seq 1 30); do
 	sleep 2
 done
 
-if echo "$orphan_msg" | grep -q 'no controller owner'; then
+if grep -q 'no controller owner' <<<"$orphan_msg"; then
 	pass "a pod nothing owns was refused, not deleted"
 else
 	fail "the bare pod was not refused (message: ${orphan_msg})"
@@ -1062,7 +1063,7 @@ if wait_for_strategy_state e2e-node-cordon Succeeded 90; then
 	fi
 	cordon_verified=$(kubectl -n "$NAMESPACE" get remediations -l remedik.dev/strategy=e2e-node-cordon \
 		-o jsonpath='{.items[0].status.steps[0].verified}' 2>/dev/null || true)
-	if echo "$cordon_verified" | grep -q 'unschedulable'; then
+	if grep -q 'unschedulable' <<<"$cordon_verified"; then
 		pass "the record confirms it: ${cordon_verified}"
 	else
 		fail "the record does not confirm the cordon (${cordon_verified})"
@@ -1224,7 +1225,7 @@ status=$(send_labeled_alert E2EVolumeFilling pvc-1 \
 	'"namespace":"e2e-payments","persistentvolumeclaim":"ledger-data"')
 if wait_for_strategy_state e2e-pvc-expand Failed 120; then
 	message=$(strategy_field e2e-pvc-expand '.status.message')
-	if echo "$message" | grep -q 'allowVolumeExpansion'; then
+	if grep -q 'allowVolumeExpansion' <<<"$message"; then
 		pass "the expansion was refused, naming the StorageClass"
 	else
 		fail "the refusal does not explain itself: ${message}"
@@ -1451,12 +1452,12 @@ kill "$METRICS_FORWARD_PID" 2>/dev/null || true
 wait "$METRICS_FORWARD_PID" 2>/dev/null || true
 METRICS_FORWARD_PID=""
 
-if echo "$metrics_body" | grep -q 'remedik_namespace_posture{namespace="e2e-payments",posture="live"} 1'; then
+if grep -q 'remedik_namespace_posture{namespace="e2e-payments",posture="live"} 1' <<<"$metrics_body"; then
 	pass "the override is a metric, so the posture is queryable"
 else
 	fail "remedik_namespace_posture does not report the override"
 fi
-if echo "$metrics_body" | grep -q '^remedik_dry_run 1'; then
+if grep -q '^remedik_dry_run 1' <<<"$metrics_body"; then
 	pass "and remedik_dry_run still reports the default, which is 1"
 else
 	fail "remedik_dry_run does not report the default"
