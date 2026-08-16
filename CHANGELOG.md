@@ -8,11 +8,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 Everything below is implemented and verified: `make verify` for the unit
-suite, `make e2e` for the whole loop on a real cluster. Both OpenSpec
-changes are archived, so `openspec/specs/` is now the current contract
-rather than a proposal.
+suite, `make e2e` for the whole loop on a real cluster. Every OpenSpec
+change is archived, so `openspec/specs/` is the current contract rather than
+a proposal.
 
 ### Added
+
+- **Escalation when a remediation fails** (`add-failure-escalation`). The
+  loop this project exists to serve had no end: a remediation that failed
+  was recorded as `Failed` and nothing else happened, and nobody goes
+  looking at 3am for a remediation they did not know was attempted.
+
+  `onFailure.steps` is a second plan, run once the retries are spent, so
+  "escalate" means whatever the cluster already uses — a `webhook.call` to
+  PagerDuty, a `job.run` that hands the incident to a pipeline. It is
+  deliberately not a notification subsystem: escalating is an action like
+  any other, so it is gated by the same RBAC, audited in the same record,
+  and there is nothing to configure separately.
+
+  Four properties, each chosen against an obvious alternative:
+
+  - **It cannot change the outcome.** A remediation that escalated is still
+    a remediation that did not work, and a record turning green because
+    somebody was paged would be the most misleading thing here.
+  - **It runs once the retries are spent, not per attempt.** Paging on the
+    first failure of three pages for something about to fix itself, and a
+    page that is usually unnecessary is a page people learn to ignore.
+  - **It runs during a dry run** — the only thing in remedik that does. A
+    trial is exactly when an operator wants to see the escalation path work;
+    the steps are told `remedik_dry_run="true"`, so nobody is paged for an
+    incident that did not happen.
+  - **It is not retried.** Looping on a failed page during an incident helps
+    nobody. `status.escalation` records that it failed, and
+    `remedik_escalations_total{outcome="Failed"}` is its own alertable
+    signal: a remediation failed and nobody was told.
+
+  The steps receive the alert's labels plus `remedik_remediation`,
+  `remedik_strategy`, `remedik_target`, `remedik_reason`, `remedik_message`,
+  `remedik_attempts` and `remedik_dry_run`, so a webhook body explains the
+  incident with no templating. remedik's keys overwrite any alert label of
+  the same name — an escalation that can be lied to by whoever writes the
+  alerting rules is worse than no escalation.
+
+  The dashboard shows it as its own section, and says so explicitly when a
+  remediation failed with no escalation declared: "it failed and no alert
+  went anywhere" is a fact worth stating rather than leaving to be inferred
+  from an absence.
+
+- **`make e2e` now covers thirteen of the fourteen actions**, up from six.
+  A rollback needs real revision history, a scale needs a real HPA to
+  refuse, an expansion needs a real StorageClass, and a webhook needs
+  something at the other end — none of which a unit test can supply. The
+  endpoint is remedik's own gateway, so the whole outbound path (POST,
+  bearer credential from a Secret, 2xx, and the 401 that fails a step
+  honestly) is proven without the test needing anything outside the cluster.
+  Eighty assertions, up from fifty-seven.
+
+  The fourteenth is `pvc.expand` succeeding: kind's `standard` StorageClass
+  does not allow expansion, so the e2e proves the refusal instead — which is
+  the behaviour worth guaranteeing, since the API server would otherwise
+  accept the patch and change nothing. `CONTRIBUTING.md` now states what
+  kind cannot host and why, rather than leaving it as a gap.
 
 - **Node actions and volume expansion** (`add-node-actions`), landing last
   on purpose — after the contract could verify its own work and after a
@@ -336,6 +392,33 @@ rather than a proposal.
   generated chart docs.
 - `make versions`: reports every pinned version against the latest upstream
   release, so drift is visible without hunting through files.
+
+### Fixed
+
+- **An action with no target no longer reports "on /".** `webhook.call`,
+  `job.run` and `script.run` act outside the cluster and resolve to nothing,
+  and every message about them carried a bare slash that read like a bug in
+  remedik rather than a report of the one in the endpoint. A zero target now
+  renders as nothing, which is already the record's convention for it.
+
+- **The README said thirteen actions.** There are fourteen.
+
+- **`make dev-deploy` left the old binary running.** The image tag comes
+  from `git describe`, so an uncommitted change rebuilds the same tag with
+  different contents and `helm upgrade` sees no diff to roll out. It now
+  restarts the deployment, because a dev loop that silently deploys nothing
+  costs more than the twenty seconds the restart takes.
+
+- **`make dev-deploy` left the old CRDs in place.** Helm installs `crds/`
+  once and never upgrades them, so every field added to `api/` was rejected
+  with `unknown field` until somebody applied them by hand. The dev target
+  now applies them server-side, and `charts/remedik/README.md` gives
+  operators the three commands to do the same across a version upgrade —
+  it previously said only that they had to.
+
+- **The escalation's message no longer appears twice** on a remediation's
+  page, once for the escalation and once for the single step that already
+  said it.
 
 ### Changed
 

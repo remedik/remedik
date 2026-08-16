@@ -104,13 +104,20 @@ most are the ones that must be easiest to test. Keep them that way.
 
 ## Open work
 
-Nothing is open. Ten changes were implemented and archived on 2026-08-16 —
-the read-only dashboard, the action contract's second version, the workload
-actions, the observability bundle, launch readiness, the escape hatches, the
-`blastRadius` guard, scaling and rollback, and the node actions.
+Nothing is open. Eleven changes were implemented and archived on 2026-08-16
+— the read-only dashboard, the action contract's second version, the
+workload actions, the observability bundle, launch readiness, the escape
+hatches, the `blastRadius` guard, scaling and rollback, the node actions,
+and failure escalation.
 
 Fourteen actions across four groups, three guards, sixteen capabilities in
 `openspec/specs/`.
+
+The loop closes with `onFailure.steps`: a remediation that fails for good
+runs a second plan, which is how somebody gets told. It never changes the
+outcome, it is never retried, and it is the one thing that runs for real
+during a dry run — read the reasoning in `docs/architecture.md` before
+changing any of those three.
 
 ### Before this can go online
 

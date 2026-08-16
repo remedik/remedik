@@ -34,6 +34,12 @@ spec:
     - action: deployment.restart
   onFailure:
     retries: 1
+    steps:                        # and if that still does not work, page somebody
+      - action: webhook.call
+        with:
+          url: https://events.pagerduty.com/v2/enqueue
+          secretRef: pagerduty-routing-key
+          secretKey: key
 ```
 
 ```console
@@ -43,7 +49,7 @@ pod-crashloop-x7k2q   pod-crashloop   deployment/payments/api   Succeeded   2m
 pod-crashloop-b91mm   pod-crashloop   deployment/checkout/web   Simulated   1h
 ```
 
-**Thirteen actions ship today**, each a separate permission the chart grants
+**Fourteen actions ship today**, each a separate permission the chart grants
 only when you enable it, and only `deployment.restart` on by default:
 
 | | Action | What it does |
@@ -71,9 +77,24 @@ forbids expansion accepts the patch and does nothing, so remedik checks
 first. And a remediation Job runs as a ServiceAccount you name, never
 remedik's own, which is refused.
 
+**When remediation does not work, somebody gets told.** `onFailure.steps` is
+a second plan that runs once the retries are spent, so the loop closes:
+
+```
+alert --> remedik --> remediate --> it worked, done
+                              \--> it did not --> page whoever is on call
+```
+
+Escalating is not a notification setting — it is made of the same actions,
+under the same RBAC, in the same audit trail. It never turns a failure into
+a success, it is never retried during an incident, and it runs during a dry
+run too — the one exception in remedik, so a trial proves the path before
+anybody needs it. `remedik_escalations_total{outcome="Failed"}` is its own
+alertable signal: a remediation failed and nobody was told.
+
 There is also a read-only dashboard, off by default, that answers the same
-questions in a browser — how much a dry-run trial would have done, and why
-nothing happened during an incident.
+questions in a browser — how much a dry-run trial would have done, why
+nothing happened during an incident, and whether a failure reached a person.
 
 ## Try it in five minutes
 
