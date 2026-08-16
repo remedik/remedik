@@ -80,6 +80,17 @@ func newReconciler(t *testing.T, dryRun bool, actions []action.Action, objs ...c
 	if err != nil {
 		t.Fatalf("NewRegistry() error = %v", err)
 	}
+	// The posture now lives on the record, resolved once by the sink, so a
+	// dry-run fixture marks the records rather than the reconciler. That is
+	// the behaviour under test: the reconciler obeys what was recorded.
+	if dryRun {
+		for _, obj := range objs {
+			if rem, ok := obj.(*v1alpha1.Remediation); ok {
+				rem.Spec.DryRun = true
+			}
+		}
+	}
+
 	c := newFakeClient(objs...)
 	metrics := newCountingRecorder()
 	history := guards.NewMemoryHistory(0)
@@ -92,7 +103,6 @@ func newReconciler(t *testing.T, dryRun bool, actions []action.Action, objs ...c
 			Client:   c,
 			Registry: registry,
 			History:  history,
-			DryRun:   dryRun,
 			Metrics:  metrics,
 			Logger:   quietLogger(),
 			Now:      func() time.Time { return testClock },

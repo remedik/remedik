@@ -9,14 +9,17 @@ import (
 	"github.com/ratyx/remedik/api/v1alpha1"
 )
 
-// Posture is what the cluster looks like right now.
+// Snapshot is what the cluster looks like right now.
 //
 // It is declared here rather than taken from internal/metrics because the
 // dependency runs the other way throughout this project: the engine says
 // what it can report, and the metrics package adapts. Its fields match
 // metrics.Snapshot exactly, so the adaptation is a conversion rather than a
 // copy loop.
-type Posture struct {
+//
+// It is not called Posture: posture is what remedik is allowed to do, and
+// this is a count of what exists.
+type Snapshot struct {
 	// StrategiesEnabled and StrategiesDisabled count RemediationStrategy
 	// resources. Zero enabled is the difference between "nothing has
 	// happened" and "nothing can happen".
@@ -43,19 +46,19 @@ type Snapshotter struct {
 	Namespace string
 }
 
-// Snapshot reads the current posture.
-func (s *Snapshotter) Snapshot(ctx context.Context) (Posture, error) {
+// Snapshot reads the current counts.
+func (s *Snapshotter) Snapshot(ctx context.Context) (Snapshot, error) {
 	var strategies v1alpha1.RemediationStrategyList
 	if err := s.Reader.List(ctx, &strategies); err != nil {
-		return Posture{}, fmt.Errorf("list strategies: %w", err)
+		return Snapshot{}, fmt.Errorf("list strategies: %w", err)
 	}
 
 	var remediations v1alpha1.RemediationList
 	if err := s.Reader.List(ctx, &remediations, client.InNamespace(s.Namespace)); err != nil {
-		return Posture{}, fmt.Errorf("list remediations: %w", err)
+		return Snapshot{}, fmt.Errorf("list remediations: %w", err)
 	}
 
-	snapshot := Posture{RecordsByState: make(map[string]int, 5)}
+	snapshot := Snapshot{RecordsByState: make(map[string]int, 5)}
 
 	for i := range strategies.Items {
 		if strategies.Items[i].IsEnabled() {

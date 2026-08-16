@@ -34,6 +34,10 @@ spec:
       name: Alert
       priority: 1
       type: string
+    - jsonPath: .spec.dryRun
+      name: Dry-run
+      priority: 1
+      type: boolean
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -92,8 +96,18 @@ spec:
                 type: object
               dryRun:
                 description: |-
-                  DryRun records whether the operator was in dry-run mode. It is kept
-                  on the record so a Simulated result is self-explanatory.
+                  DryRun records the posture this execution ran under, resolved from
+                  the target's namespace when the record was created.
+
+                  It is serialized even when false, deliberately: `omitempty` is
+                  dropped, so a live record states its posture instead of leaving it to
+                  be inferred from an absent field — on exactly the record whose job is
+                  to explain itself.
+
+                  It stays +optional in the schema, which is a separate thing. Making
+                  it required would reject every record written by an earlier version
+                  on its next status update, which is an upgrade breaking on a field
+                  added for clarity.
                 type: boolean
               escalationSteps:
                 description: "EscalationSteps is the plan to run once this remediation

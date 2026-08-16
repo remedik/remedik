@@ -55,7 +55,7 @@ func (r *RemediationReconciler) escalate(
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), EscalationTimeout)
 	defer cancel()
 
-	dryRun := rem.Spec.DryRun || r.DryRun
+	dryRun := rem.Spec.DryRun
 	log = log.With("escalation_steps", len(rem.Spec.EscalationSteps))
 	log.Info("remediation failed for good; escalating")
 

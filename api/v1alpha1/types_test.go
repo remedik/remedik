@@ -1,6 +1,8 @@
 package v1alpha1
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -97,5 +99,18 @@ func TestResource(t *testing.T) {
 	got := Resource("remediations")
 	if got.Group != "remedik.dev" || got.Resource != "remediations" {
 		t.Errorf("Resource() = %+v, want group remedik.dev / resource remediations", got)
+	}
+}
+
+// A live record must state its posture rather than leaving it to be inferred
+// from an absent field: with per-namespace posture, "was this one simulated?"
+// is a real question, asked of a record that exists to explain itself.
+func TestRemediationSpec_PostureIsAlwaysSerialized(t *testing.T) {
+	encoded, err := json.Marshal(RemediationSpec{StrategyName: "restart-api", DryRun: false})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if !strings.Contains(string(encoded), `"dryRun":false`) {
+		t.Errorf("a live record serialized as %s, want an explicit \"dryRun\":false", encoded)
 	}
 }

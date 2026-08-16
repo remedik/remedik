@@ -41,8 +41,13 @@ type Sink struct {
 	Workloads guards.WorkloadReader
 	// Namespace is where Remediation resources are created.
 	Namespace string
-	// DryRun is recorded on each resource so the outcome explains itself.
-	DryRun bool
+	// Posture decides whether a remediation acts or only reports, from the
+	// namespace it targets. It is resolved here, once, and recorded on the
+	// resource — for the same reason the steps and the retry budget are: an
+	// execution keeps the behaviour it started with, and the record explains
+	// itself without the reader having to know what the chart said at the
+	// time.
+	Posture Posture
 	// Metrics receives telemetry; defaults to NopRecorder.
 	Metrics Recorder
 	// Events publishes Kubernetes events on the strategy, so that
@@ -213,7 +218,7 @@ func (s *Sink) create(
 			Steps:           strategy.Spec.Steps,
 			Retries:         strategy.Spec.OnFailure.Retries,
 			EscalationSteps: strategy.Spec.OnFailure.Steps,
-			DryRun:          s.DryRun,
+			DryRun:          s.Posture.DryRunFor(target.Namespace),
 		},
 	}
 

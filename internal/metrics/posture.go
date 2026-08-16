@@ -52,9 +52,19 @@ var (
 	dryRunGauge = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace,
 		Name:      "dry_run",
-		Help: "1 when the operator is in dry-run and changes nothing, 0 when it acts. " +
-			"A flat remediation rate means something different in each case.",
+		Help: "1 when the operator's DEFAULT posture is dry-run, 0 when it acts. " +
+			"A flat remediation rate means something different in each case. " +
+			"Read it with remedik_namespace_posture: namespaces listed there " +
+			"override this, so this gauge alone does not describe the cluster.",
 	})
+
+	namespacePostureGauge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Name:      "namespace_posture",
+		Help: "Always 1, one series per namespace whose posture differs from the " +
+			"default. posture=\"live\" means remedik acts there; posture=\"dryRun\" " +
+			"means it only reports. No series means the default describes everything.",
+	}, []string{"namespace", "posture"})
 
 	strategiesDesc = prometheus.NewDesc(
 		namespace+"_strategies",
@@ -73,8 +83,14 @@ var (
 type PostureConfig struct {
 	// Version is the running build.
 	Version string
-	// DryRun is the operator's posture.
+	// DryRun is the operator's default posture.
 	DryRun bool
+	// NamespacePosture maps a namespace to "live" or "dryRun" for each one
+	// that differs from the default. Reporting these is the whole point:
+	// somebody reading dryRun=1 and concluding the cluster is safe is the
+	// failure mode this feature introduces, and a metric they can query is
+	// the cheapest way to keep that from being invisible.
+	NamespacePosture map[string]string
 	// Snapshot reads the live counts. Optional: without it, the two gauges
 	// that need cluster state are simply not reported.
 	Snapshot SnapshotFunc
@@ -86,13 +102,17 @@ type PostureConfig struct {
 // registry. It panics on duplicate registration, which can only happen if it
 // is called twice — a programming error, not a runtime condition.
 func MustRegisterPosture(cfg PostureConfig) {
-	ctrlmetrics.Registry.MustRegister(buildInfo, dryRunGauge)
+	ctrlmetrics.Registry.MustRegister(buildInfo, dryRunGauge, namespacePostureGauge)
 
 	buildInfo.WithLabelValues(cfg.Version).Set(1)
 	if cfg.DryRun {
 		dryRunGauge.Set(1)
 	} else {
 		dryRunGauge.Set(0)
+	}
+
+	for ns, posture := range cfg.NamespacePosture {
+		namespacePostureGauge.WithLabelValues(ns, posture).Set(1)
 	}
 
 	if cfg.Snapshot != nil {

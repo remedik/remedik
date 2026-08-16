@@ -70,7 +70,7 @@ func newSink(t *testing.T, dryRun bool, objs ...client.Object) *sinkFixture {
 			Registry:  registry,
 			History:   history,
 			Namespace: testNamespace,
-			DryRun:    dryRun,
+			Posture:   NewPosture(dryRun, nil),
 			Metrics:   metrics,
 			Logger:    quietLogger(),
 			Now:       func() time.Time { return testClock },
@@ -354,4 +354,77 @@ func TestSink_EventRecorderIsOptional(t *testing.T) {
 	f.history.RecordCompletion("restart-api", "deployment/payments/api", testClock.Add(-time.Minute))
 
 	f.sink.Consume([]alert.Alert{firingAlert()})
+}
+
+// newPostureSink is newSink with an explicit posture rather than a bare
+// dry-run flag.
+func newPostureSink(t *testing.T, posture Posture, objs ...client.Object) *sinkFixture {
+	t.Helper()
+	f := newSink(t, true, objs...)
+	f.sink.Posture = posture
+	return f
+}
+
+// The reason per-namespace posture exists: live where remediation has been
+// earned, reporting everywhere else, in one install.
+func TestSink_ResolvesThePostureFromTheTargetsNamespace(t *testing.T) {
+	tests := []struct {
+		name       string
+		posture    Posture
+		namespace  string
+		wantDryRun bool
+	}{
+		{
+			name:       "the default applies where nothing overrides it",
+			posture:    NewPosture(true, nil),
+			namespace:  "payments",
+			wantDryRun: true,
+		},
+		{
+			name:       "a live namespace acts although the default simulates",
+			posture:    NewPosture(true, map[string]Mode{"payments": ModeLive}),
+			namespace:  "payments",
+			wantDryRun: false,
+		},
+		{
+			name:       "and its neighbour still simulates",
+			posture:    NewPosture(true, map[string]Mode{"staging": ModeLive}),
+			namespace:  "payments",
+			wantDryRun: true,
+		},
+		{
+			name:       "a held-back namespace reports although the default acts",
+			posture:    NewPosture(false, map[string]Mode{"payments": ModeDryRun}),
+			namespace:  "payments",
+			wantDryRun: true,
+		},
+		{
+			// remedik's own namespace must not decide this. The posture is
+			// about the workload being remediated.
+			name:       "remedik's own namespace is not the one consulted",
+			posture:    NewPosture(true, map[string]Mode{testNamespace: ModeLive}),
+			namespace:  "payments",
+			wantDryRun: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newPostureSink(t, tt.posture,
+				strategy("restart-api", map[string]string{"alertname": "KubePodCrashLooping"}))
+
+			a := firingAlert()
+			a.Labels["namespace"] = tt.namespace
+			f.sink.Consume([]alert.Alert{a})
+
+			created := f.client.remediations()
+			if len(created) != 1 {
+				t.Fatalf("created %d remediations, want 1", len(created))
+			}
+			if got := created[0].Spec.DryRun; got != tt.wantDryRun {
+				t.Errorf("Spec.DryRun = %v, want %v (target namespace %q, posture %s)",
+					got, tt.wantDryRun, tt.namespace, tt.posture)
+			}
+		})
+	}
 }

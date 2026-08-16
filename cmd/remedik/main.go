@@ -53,6 +53,9 @@ const (
 	// in. The chart sets it from the pod's own namespace.
 	namespaceEnvVar = "REMEDIK_NAMESPACE"
 
+	// clusterEnvVar names the cluster, for the dashboard's header.
+	clusterEnvVar = "REMEDIK_CLUSTER"
+
 	// serviceAccountEnvVar is remedik's own ServiceAccount, which a
 	// remediation Job is refused if it asks to run as. The chart sets it
 	// from the pod's own spec.
@@ -72,7 +75,9 @@ type options struct {
 	actions        []string
 	serviceAccount string
 	namespace      string
+	cluster        string
 	dryRun         bool
+	posture        []string
 	historyLimit   int
 	logLevel       string
 	showVersion    bool
@@ -132,8 +137,19 @@ func parseFlags() options {
 	flag.StringVar(&opts.serviceAccount, "service-account", os.Getenv(serviceAccountEnvVar),
 		"remedik's own ServiceAccount. Remediation Jobs are refused if they ask to run as it, "+
 			"so that a strategy author cannot inherit the operator's permissions by writing one word")
+	flag.StringVar(&opts.cluster, "cluster-name", os.Getenv(clusterEnvVar),
+		"a name for the cluster this operator watches, shown in the dashboard. "+
+			"Purely a label: remedik sees one cluster because it runs in one")
 	flag.BoolVar(&opts.dryRun, "dry-run", true,
-		"evaluate and record what would happen without changing anything")
+		"the default posture: evaluate and record what would happen without changing anything")
+	flag.Func("namespace-posture",
+		"override the default posture for one namespace, as \"namespace=live\" or "+
+			"\"namespace=dryRun\". Repeatable. This is how a cluster runs live where "+
+			"remediation has been earned and reporting-only everywhere else",
+		func(value string) error {
+			opts.posture = append(opts.posture, value)
+			return nil
+		})
 	flag.IntVar(&opts.historyLimit, "history-limit", engine.DefaultHistoryLimit,
 		"terminal Remediation resources kept per strategy")
 	flag.StringVar(&opts.logLevel, "log-level", "info",
@@ -150,17 +166,33 @@ func run(logger *slog.Logger, opts options) error {
 		return fmt.Errorf("no namespace: set --namespace or %s", namespaceEnvVar)
 	}
 
+	overrides, err := engine.ParsePosture(opts.posture)
+	if err != nil {
+		return fmt.Errorf("--namespace-posture: %w", err)
+	}
+	posture := engine.NewPosture(opts.dryRun, overrides)
+
 	logger.Info("starting remedik",
 		"version", version.String(),
 		"namespace", opts.namespace,
-		"dry_run", opts.dryRun,
+		"posture", posture.String(),
 		"gateway_addr", opts.gatewayAddr,
 		"gateway_path", opts.gatewayPath,
 		"dashboard_addr", dashboardStatus(opts.dashboardAddr))
 
-	if opts.dryRun {
+	switch {
+	case posture.Mixed():
+		// The warning that matters most here is the one nobody would think
+		// to ask for: an operator reading "dryRun: true" in the values file
+		// and believing nothing acts.
+		logger.Warn("the posture is mixed, so the default does not describe the whole cluster",
+			"acts_in", posture.Namespaces(engine.ModeLive),
+			"reports_only_in", posture.Namespaces(engine.ModeDryRun),
+			"default", string(posture.Default))
+	case opts.dryRun:
 		logger.Warn("dry-run is on: remediations are recorded as Simulated and nothing is changed. " +
-			"Set dryRun=false in the chart values once the reports look right.")
+			"Set dryRun=false in the chart values, or make one namespace live with " +
+			"namespacePosture, once the reports look right.")
 	}
 
 	scheme, err := buildScheme()
@@ -231,8 +263,9 @@ func run(logger *slog.Logger, opts options) error {
 	// costs no API call. They are registered here, after the manager exists,
 	// because that is where the cache is.
 	metrics.MustRegisterPosture(metrics.PostureConfig{
-		Version: version.String(),
-		DryRun:  opts.dryRun,
+		Version:          version.String(),
+		DryRun:           opts.dryRun,
+		NamespacePosture: postureLabels(posture),
 		Snapshot: postureFrom(&engine.Snapshotter{
 			Reader:    mgr.GetCache(),
 			Namespace: opts.namespace,
@@ -246,7 +279,6 @@ func run(logger *slog.Logger, opts options) error {
 		Client:       mgr.GetClient(),
 		Registry:     registry,
 		History:      history,
-		DryRun:       opts.dryRun,
 		HistoryLimit: opts.historyLimit,
 		Metrics:      metrics.Engine{},
 		Events:       mgr.GetEventRecorder("remedik"),
@@ -281,7 +313,7 @@ func run(logger *slog.Logger, opts options) error {
 		History:   history,
 		Workloads: &engine.WorkloadHealth{Reader: directClient},
 		Namespace: opts.namespace,
-		DryRun:    opts.dryRun,
+		Posture:   posture,
 		Metrics:   metrics.Engine{},
 		Events:    mgr.GetEventRecorder("remedik"),
 		Logger:    logger.With("component", "sink"),
@@ -314,7 +346,8 @@ func run(logger *slog.Logger, opts options) error {
 			Reader:    mgr.GetClient(),
 			Namespace: opts.namespace,
 			Token:     os.Getenv(dashboardTokenEnvVar),
-			DryRun:    opts.dryRun,
+			Posture:   dashboardPosture(posture),
+			Cluster:   opts.cluster,
 			Version:   version.String(),
 			Logger:    logger.With("component", "dashboard"),
 		})
@@ -351,8 +384,31 @@ func run(logger *slog.Logger, opts options) error {
 // package owns how it is published, and neither has to import the other.
 func postureFrom(s *engine.Snapshotter) metrics.SnapshotFunc {
 	return func(ctx context.Context) (metrics.Snapshot, error) {
-		posture, err := s.Snapshot(ctx)
-		return metrics.Snapshot(posture), err
+		snapshot, err := s.Snapshot(ctx)
+		return metrics.Snapshot(snapshot), err
+	}
+}
+
+// postureLabels flattens the overrides for the namespace_posture metric.
+func postureLabels(p engine.Posture) map[string]string {
+	if len(p.Overrides) == 0 {
+		return nil
+	}
+	labels := make(map[string]string, len(p.Overrides))
+	for namespace, mode := range p.Overrides {
+		labels[namespace] = string(mode)
+	}
+	return labels
+}
+
+// dashboardPosture converts the engine's posture into the shape the pages
+// render, the same way postureFrom converts a snapshot for the metrics: the
+// engine says what is true, and the adapters translate.
+func dashboardPosture(p engine.Posture) dashboard.Posture {
+	return dashboard.Posture{
+		DryRun:     p.Default != engine.ModeLive,
+		Live:       p.Namespaces(engine.ModeLive),
+		DryRunOnly: p.Namespaces(engine.ModeDryRun),
 	}
 }
 

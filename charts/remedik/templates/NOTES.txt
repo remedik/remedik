@@ -1,17 +1,30 @@
 remedik {{ .Chart.AppVersion }} is installed in namespace {{ .Release.Namespace }}.
 
 {{ if .Values.dryRun -}}
-DRY-RUN IS ON. remedik will match alerts, evaluate guards and record what it
-would have done, without changing anything. That is the recommended way to
-start: run it for a week, read the reports, then turn it off.
+DRY-RUN IS ON BY DEFAULT. remedik will match alerts, evaluate guards and
+record what it would have done, without changing anything. That is the
+recommended way to start: run it for a week, read the reports, then turn it
+off — or make one namespace live and leave the rest reporting.
 
     kubectl get remediations -n {{ .Release.Namespace }}
 
 Every record will be in state Simulated, with the exact plan it would have run.
 {{- else -}}
-DRY-RUN IS OFF. remedik will act on matching alerts.
+DRY-RUN IS OFF BY DEFAULT. remedik will act on matching alerts.
 
     kubectl get remediations -n {{ .Release.Namespace }}
+{{- end }}
+{{- if .Values.namespacePosture }}
+
+  ...EXCEPT IN THESE NAMESPACES, which you overrode:
+{{ range $namespace, $posture := .Values.namespacePosture }}
+    {{ printf "%-24s %s" $namespace $posture }}
+{{- end }}
+
+  "live" means remedik changes those namespaces whatever the default says.
+  Every Remediation records the posture it ran under, and the dashboard's
+  badge reads "Mixed" so nobody concludes from the default alone that
+  nothing is happening.
 {{- end }}
 
 1. Point Alertmanager at the gateway

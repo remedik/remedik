@@ -112,11 +112,21 @@ type RemediationSpec struct {
 	// +optional
 	EscalationSteps []Step `json:"escalationSteps,omitempty"`
 
-	// DryRun records whether the operator was in dry-run mode. It is kept
-	// on the record so a Simulated result is self-explanatory.
+	// DryRun records the posture this execution ran under, resolved from
+	// the target's namespace when the record was created.
+	//
+	// It is serialized even when false, deliberately: `omitempty` is
+	// dropped, so a live record states its posture instead of leaving it to
+	// be inferred from an absent field — on exactly the record whose job is
+	// to explain itself.
+	//
+	// It stays +optional in the schema, which is a separate thing. Making
+	// it required would reject every record written by an earlier version
+	// on its next status update, which is an upgrade breaking on a field
+	// added for clarity.
 	//
 	// +optional
-	DryRun bool `json:"dryRun,omitempty"`
+	DryRun bool `json:"dryRun"`
 }
 
 // AlertRef identifies the alert that triggered a remediation.
@@ -321,6 +331,7 @@ func (r *Remediation) IsTerminal() bool { return r.Status.State.IsTerminal() }
 // +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
 // +kubebuilder:printcolumn:name="Attempt",type=integer,JSONPath=`.status.attempt`,priority=1
 // +kubebuilder:printcolumn:name="Alert",type=string,JSONPath=`.spec.alert.name`,priority=1
+// +kubebuilder:printcolumn:name="Dry-run",type=boolean,JSONPath=`.spec.dryRun`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Remediation is the record of one remediation execution: what triggered
