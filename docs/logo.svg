@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="128" height="128" role="img" aria-label="remedik">
-  <title>remedik</title>
-  <!-- A shield with a pulse through it: guarded remediation, in one mark. -->
-  <g fill="none" stroke="#4f46e5" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round">
-    <path d="M12 2.6 4.2 6v6.1c0 4.6 3.2 8.4 7.8 9.3 4.6-.9 7.8-4.7 7.8-9.3V6Z"/>
-    <path d="M8.4 12.2h2.1l1.1-2.4 1.4 4.4 1.1-2h1.5"/>
-  </g>
-</svg>

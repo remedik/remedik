@@ -7,7 +7,7 @@ type: application
 version: 0.1.0-alpha.1
 appVersion: "0.1.0-alpha.1"
 home: https://github.com/remedik/remedik
-icon: https://raw.githubusercontent.com/remedik/remedik/main/docs/logo.svg
+icon: https://raw.githubusercontent.com/remedik/remedik/main/docs/brand/remedik-mark.png
 sources:
   - https://github.com/remedik/remedik
 keywords:

@@ -19,7 +19,7 @@ func TestStaticAssetsAreServedFromTheBinary(t *testing.T) {
 	}{
 		{path: "/static/app.css", contentType: "text/css; charset=utf-8"},
 		{path: "/static/app.js", contentType: "text/javascript; charset=utf-8"},
-		{path: "/static/favicon.svg", contentType: "image/svg+xml"},
+		{path: "/static/favicon.png", contentType: "image/png"},
 	}
 
 	for _, tc := range tests {

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/brand/remedik-banner.png" alt="remedik — Kubernetes auto-remediation operator" width="640">
+</p>
+
 # remedik
 
 > Predictably boring auto-remediation for Kubernetes alerts.
