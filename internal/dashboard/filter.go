@@ -123,7 +123,7 @@ type FilterOption struct {
 	Count int
 }
 
-// FilterGroup is one dimension of the filter, rendered as a row of links.
+// FilterGroup is one dimension of the filter and the control that offers it.
 type FilterGroup struct {
 	// Label names the dimension.
 	Label string
@@ -133,8 +133,34 @@ type FilterGroup struct {
 	AllURL string
 	// AllSelected reports whether nothing is chosen here.
 	AllSelected bool
-	// Options are the values present in the records.
+	// Options are every value present in the records.
 	Options []FilterOption
+	// AsSelect reports that there are too many values to draw as links, so
+	// the dimension renders as a select with keyboard type-ahead instead.
+	AsSelect bool
+	// QuickPicks are the busiest few, kept as one-click pills beside the
+	// select, plus whatever is in force so it can always be undone.
+	QuickPicks []FilterOption
+	// Keep is the rest of the filter, which the select's form must send back
+	// as hidden fields — otherwise choosing a namespace would silently clear
+	// the state somebody had already chosen.
+	Keep Filter
+}
+
+// KeptParams are the other clauses, as the hidden fields a select's form
+// needs to preserve them.
+func (g FilterGroup) KeptParams() []Label {
+	var kept []Label
+	for _, pair := range []Label{
+		{Key: paramNamespace, Value: g.Keep.Namespace},
+		{Key: paramStrategy, Value: g.Keep.Strategy},
+		{Key: paramState, Value: g.Keep.State},
+	} {
+		if pair.Key != g.Param && pair.Value != "" {
+			kept = append(kept, pair)
+		}
+	}
+	return kept
 }
 
 // FilterOptions are the choices the controls offer.
@@ -186,92 +212,150 @@ func sortedKeys(set map[string]bool) []string {
 	return out
 }
 
-// Groups turns the available values into rows of links, one row per
-// dimension, with the counts each choice would yield.
+// pillLimit is where a dimension stops being a row of links and becomes a
+// select.
+//
+// Pills are the best control for a handful — one click, everything visible,
+// no menu to open — and the worst for a hundred and fifty, which is a wall
+// nobody scans. A select is not a lesser option above that: browsers give it
+// keyboard type-ahead, which is exactly the "find my namespace among 150"
+// interaction, for no JavaScript.
+const pillLimit = 8
+
+// quickPickLimit is how many of the busiest values stay as pills beside a
+// select, so the common cases are still one click.
+const quickPickLimit = 4
+
+// Groups turns the available values into controls, with the count each
+// choice would yield.
 //
 // The counts ignore the row's own clause, so the namespace row always shows
 // every namespace's total under the *other* filters — which is what makes it
 // usable for switching rather than only for narrowing.
 func (o FilterOptions) Groups(active Filter, remediations []v1alpha1.Remediation) []FilterGroup {
-	groups := []FilterGroup{
+	specs := []struct {
+		label  string
+		param  string
+		values []string
+		chosen string
+		rest   Filter
+		set    func(*Filter, string)
+		key    func(*v1alpha1.Remediation) string
+	}{
 		{
-			Label: "Namespace", Param: paramNamespace,
-			AllURL: Filter{Strategy: active.Strategy, State: active.State}.Path(),
-			Options: buildOptions(o.Namespaces, active.Namespace, remediations,
-				func(f *Filter, v string) { f.Namespace = v },
-				Filter{Strategy: active.Strategy, State: active.State}),
+			label: "Namespace", param: paramNamespace, values: o.Namespaces, chosen: active.Namespace,
+			rest: Filter{Strategy: active.Strategy, State: active.State},
+			set:  func(f *Filter, v string) { f.Namespace = v },
+			key:  func(r *v1alpha1.Remediation) string { return TargetNamespace(r.Spec.Target) },
 		},
 		{
-			Label: "Strategy", Param: paramStrategy,
-			AllURL: Filter{Namespace: active.Namespace, State: active.State}.Path(),
-			Options: buildOptions(o.Strategies, active.Strategy, remediations,
-				func(f *Filter, v string) { f.Strategy = v },
-				Filter{Namespace: active.Namespace, State: active.State}),
+			label: "Strategy", param: paramStrategy, values: o.Strategies, chosen: active.Strategy,
+			rest: Filter{Namespace: active.Namespace, State: active.State},
+			set:  func(f *Filter, v string) { f.Strategy = v },
+			key:  func(r *v1alpha1.Remediation) string { return r.Spec.StrategyName },
 		},
 		{
-			Label: "State", Param: paramState,
-			AllURL: Filter{Namespace: active.Namespace, Strategy: active.Strategy}.Path(),
-			Options: buildOptions(o.States, active.State, remediations,
-				func(f *Filter, v string) { f.State = v },
-				Filter{Namespace: active.Namespace, Strategy: active.Strategy}),
+			label: "State", param: paramState, values: o.States, chosen: active.State,
+			rest: Filter{Namespace: active.Namespace, Strategy: active.Strategy},
+			set:  func(f *Filter, v string) { f.State = v },
+			key:  func(r *v1alpha1.Remediation) string { return displayState(r.Status.State) },
 		},
 	}
 
-	kept := groups[:0]
-	for _, group := range groups {
+	groups := make([]FilterGroup, 0, len(specs))
+	for _, spec := range specs {
 		// One value is not a choice, and a row offering it is furniture.
-		if len(group.Options) > 1 {
-			group.AllSelected = !anySelected(group.Options)
-			kept = append(kept, group)
+		if len(spec.values) < 2 {
+			continue
 		}
+
+		counts := countByValue(remediations, spec.rest, spec.key)
+		options := make([]FilterOption, 0, len(spec.values))
+		for _, value := range spec.values {
+			// Clicking the value already in force removes it, so the same
+			// control both narrows and widens and nothing is a dead end.
+			target := spec.rest
+			if value != spec.chosen {
+				spec.set(&target, value)
+			}
+			options = append(options, FilterOption{
+				Value:    value,
+				URL:      target.Path(),
+				Selected: value == spec.chosen,
+				Count:    counts[value],
+			})
+		}
+
+		group := FilterGroup{
+			Label:       spec.label,
+			Param:       spec.param,
+			AllURL:      spec.rest.Path(),
+			AllSelected: spec.chosen == "",
+			Options:     options,
+			// The form posts the other clauses back as hidden fields, so
+			// choosing a namespace does not silently clear the state filter.
+			Keep: spec.rest,
+		}
+		if len(options) > pillLimit {
+			group.AsSelect = true
+			group.QuickPicks = busiest(options, quickPickLimit, spec.chosen)
+		}
+		groups = append(groups, group)
 	}
-	return kept
+	return groups
 }
 
-func buildOptions(
-	values []string,
-	current string,
+// countByValue tallies every value of one dimension in a single pass.
+//
+// The obvious version asked "how many match this?" once per option, and each
+// answer scanned every record: 195 options over 10,000 records is 1.95
+// million comparisons to draw one page. It read as correct and benchmarked
+// at 50ms. This is the same arithmetic without the product.
+func countByValue(
 	remediations []v1alpha1.Remediation,
-	set func(*Filter, string),
 	rest Filter,
-) []FilterOption {
-	options := make([]FilterOption, 0, len(values))
-	for _, value := range values {
-		// Clicking the value already in force removes it, so the same link
-		// both narrows and widens and nothing is a dead end.
-		target := rest
-		if value != current {
-			set(&target, value)
-		}
-
-		counted := rest
-		set(&counted, value)
-
-		options = append(options, FilterOption{
-			Value:    value,
-			URL:      target.Path(),
-			Selected: value == current,
-			Count:    countMatching(remediations, counted),
-		})
-	}
-	return options
-}
-
-func countMatching(remediations []v1alpha1.Remediation, filter Filter) int {
-	n := 0
+	key func(*v1alpha1.Remediation) string,
+) map[string]int {
+	counts := make(map[string]int)
 	for i := range remediations {
-		if filter.Matches(&remediations[i]) {
-			n++
+		rem := &remediations[i]
+		// Against the other clauses only: this dimension is the one being
+		// chosen, so its own clause must not narrow its own counts.
+		if !rest.Matches(rem) {
+			continue
+		}
+		if value := key(rem); value != "" {
+			counts[value]++
 		}
 	}
-	return n
+	return counts
 }
 
-func anySelected(options []FilterOption) bool {
-	for _, option := range options {
-		if option.Selected {
-			return true
+// busiest picks the values worth keeping as one-click pills beside a select:
+// the largest few, plus whatever is currently in force so the reader can
+// always see and undo it.
+func busiest(options []FilterOption, limit int, chosen string) []FilterOption {
+	ranked := make([]FilterOption, len(options))
+	copy(ranked, options)
+	sort.SliceStable(ranked, func(i, j int) bool { return ranked[i].Count > ranked[j].Count })
+
+	picks := make([]FilterOption, 0, limit+1)
+	seen := map[string]bool{}
+	for _, option := range ranked {
+		if len(picks) == limit {
+			break
+		}
+		picks = append(picks, option)
+		seen[option.Value] = true
+	}
+
+	if chosen != "" && !seen[chosen] {
+		for _, option := range options {
+			if option.Value == chosen {
+				picks = append(picks, option)
+				break
+			}
 		}
 	}
-	return false
+	return picks
 }

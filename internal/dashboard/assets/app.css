@@ -1729,6 +1729,88 @@ a.stat:hover {
   opacity: 0.7;
 }
 
+/* Above a handful of values a dimension becomes a select. The browser's own
+   keyboard type-ahead is the search, which is why this is not a compromise
+   at a hundred and fifty namespaces. */
+.filter-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.filter-select select {
+  appearance: none;
+  font: inherit;
+  font-size: 0.78rem;
+  max-width: 16rem;
+  padding: 3px 26px 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background-color: var(--surface);
+  color: var(--text);
+  /* An inline chevron, so no request leaves the page. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 6.5 8 10.5 12 6.5' fill='none' stroke='%23667085' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  background-size: 13px;
+}
+
+.filter-select select:hover {
+  border-color: var(--accent);
+}
+
+.filter-select button {
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 620;
+  padding: 3px 12px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: var(--accent);
+  color: var(--accent-text);
+  cursor: pointer;
+}
+
+.filter-select button:hover {
+  filter: brightness(1.08);
+}
+
+/* --------------------------------------------------------------------------
+   Paging
+   -------------------------------------------------------------------------- */
+
+.paging {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.paging-where {
+  color: var(--text-3);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.paging-links {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.paging-page {
+  color: var(--text-3);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.pill-link.is-off {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .filter-summary {
   margin: 2px 0 0;
   color: var(--text-3);

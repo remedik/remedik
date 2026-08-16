@@ -215,12 +215,12 @@ func TestBuildRemediations_CountsFollowTheFilter(t *testing.T) {
 	remediations[1].Spec.Target = "deployment/payments/api"
 	remediations[2].Spec.Target = "deployment/checkout/web"
 
-	all := buildRemediations(remediations, Filter{}, testNow())
+	all := buildRemediations(remediations, Filter{}, 1, testNow())
 	if all.Total != 3 || all.Filtered() {
 		t.Fatalf("unfiltered: Total = %d, Filtered = %v", all.Total, all.Filtered())
 	}
 
-	only := buildRemediations(remediations, Filter{Namespace: "checkout"}, testNow())
+	only := buildRemediations(remediations, Filter{Namespace: "checkout"}, 1, testNow())
 
 	if only.Total != 1 {
 		t.Errorf("Total = %d, want 1", only.Total)
@@ -259,7 +259,7 @@ func TestFilterGroups_LinksBothNarrowAndWiden(t *testing.T) {
 	remediations[0].Spec.Target = "deployment/payments/api"
 	remediations[1].Spec.Target = "deployment/checkout/web"
 
-	view := buildRemediations(remediations, Filter{Namespace: "payments"}, testNow())
+	view := buildRemediations(remediations, Filter{Namespace: "payments"}, 1, testNow())
 	group := groupNamed(t, view.Groups, "Namespace")
 
 	if group.AllURL != "/remediations" {
@@ -299,7 +299,7 @@ func TestFilterGroups_OmitADimensionWithNothingToChoose(t *testing.T) {
 		succeededRemediation("ok-1", 30),
 		succeededRemediation("ok-2", 10),
 	}
-	view := buildRemediations(remediations, Filter{}, testNow())
+	view := buildRemediations(remediations, Filter{}, 1, testNow())
 
 	for _, group := range view.Groups {
 		if len(group.Options) < 2 {

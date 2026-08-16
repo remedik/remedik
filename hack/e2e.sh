@@ -737,10 +737,18 @@ fi
 # and the submission, and that state was destroyed by the ten-second refresh
 # — twice, in two different ways. A link has nothing to lose.
 list=$(dashboard_body /remediations)
-if echo "$list" | grep -q '<form' || echo "$list" | grep -q '<select'; then
-	fail "the list page has a form; filtering must be navigation, with no state to lose"
+
+# The controls must sit outside the region the ten-second refresh replaces.
+# That is what makes it safe to offer a select at all, which is what a
+# cluster with a hundred and fifty namespaces needs instead of a wall of
+# links — and it is the structural form of the bug that made the filter
+# appear broken twice.
+live_line=$(echo "$list" | grep -n 'id="live"' | head -1 | cut -d: -f1)
+controls_line=$(echo "$list" | grep -n 'class="filters"' | head -1 | cut -d: -f1)
+if [ -n "$live_line" ] && [ -n "$controls_line" ] && [ "$controls_line" -lt "$live_line" ]; then
+	pass "the filter controls sit outside the region the refresh replaces"
 else
-	pass "filtering uses links, so a refresh has nothing to destroy"
+	fail "the controls are inside the live region (controls=${controls_line}, live=${live_line})"
 fi
 
 # Everything so far targets one namespace, so the namespace row is correctly

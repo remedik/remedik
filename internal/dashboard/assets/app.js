@@ -24,6 +24,9 @@
   var assetMeta = document.querySelector('meta[name="remedik-asset"]');
   var asset = assetMeta ? assetMeta.content : "";
 
+  // LIVE_ID is the region a page may mark as the only part worth replacing.
+  var LIVE_ID = "live";
+
   var toggle = document.getElementById("refresh-toggle");
   var content = document.getElementById("content");
   var updated = document.getElementById("updated");
@@ -101,15 +104,16 @@
           return;
         }
 
-        var next = doc.getElementById("content");
+        // A page may mark a narrower live region. The list does, because its
+        // filter controls hold what the reader typed or chose, and replacing
+        // them every ten seconds is what made the filter appear broken twice
+        // before. Pages with no live region swap their whole content.
+        var target = document.getElementById(LIVE_ID) || content;
+        var next = doc.getElementById(target.id);
         if (!next) {
           return;
         }
-
-        // Only #content is swapped, and the filter controls are outside it
-        // on purpose — see layout.html — so a half-made selection cannot be
-        // destroyed by a refresh.
-        content.innerHTML = next.innerHTML;
+        target.innerHTML = next.innerHTML;
 
         var stamp = doc.getElementById("updated");
         if (updated && stamp) {

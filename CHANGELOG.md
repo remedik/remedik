@@ -14,6 +14,35 @@ a proposal.
 
 ### Added
 
+- **The dashboard holds up at any cluster size** (`scale-the-dashboard`).
+  Measured on 150 namespaces, 40 strategies and 10,000 records — a mid-sized
+  platform team, not an outlier — it rendered **190 filter links** and took
+  **49.7 ms** to build one list page.
+
+  The 49.7 ms was shape, not slowness: every filter option counted itself
+  with its own pass over every record, so the cost was options × records and
+  grew as a product. At 500 namespaces it would have been seconds, per page
+  load, on the operator that is also running remediation. Counting each
+  dimension in one pass gives identical numbers in **1.2 ms**. The slow
+  version read as obviously correct; the benchmark is what made it obviously
+  wrong, and it is now checked in so the claim stays a measurement.
+
+  The controls now follow the cardinality. A handful of values stays links —
+  one click, no menu. Above a threshold the dimension becomes a select
+  carrying every value with its count, beside links for the busiest few:
+  browsers give a select keyboard type-ahead, which is exactly the "find my
+  namespace among 150" interaction, for no JavaScript. Its form sends the
+  other clauses back as hidden fields, so choosing a namespace does not
+  clear a state somebody already chose.
+
+  The list pages rather than truncating, and paging composes with the
+  filters. A page beyond the end is clamped, because history is pruned and a
+  bookmarked page 40 may have become nothing.
+
+  Offering a select was only safe once the refresh stopped replacing the
+  controls: the list marks its rows and counts as the live region and keeps
+  its controls outside it.
+
 - **The dashboard is four pages, and the front one is a dashboard**
   (`rework-dashboard-pages`). The overview carried the stats, the dry-run
   report, the filters and a fifty-row table; it read as a list with
@@ -515,6 +544,15 @@ a proposal.
   button to reach before a timer fires, and no JavaScript on the path at
   all. Clicking the value in force removes it, so the same control narrows
   and widens, and each carries the count its choice would yield.
+
+- **The list panicked on a filter that matched nothing**, returning an empty
+  reply rather than a page. The display's "0 of 0" made the row loop start at
+  index -1. Caught by `make e2e`, which is the only test here that fetches
+  the page the way a browser does.
+
+  A panic in a view builder now renders a 500 page saying what happened and
+  that nothing in the cluster changed, instead of a closed connection — this
+  is the page somebody opens when something is already wrong.
 
 - **`/remediations` answered 307.** Only the trailing-slash form was
   registered, so the mux redirected every link on every page.

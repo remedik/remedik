@@ -409,6 +409,43 @@ not: numbers that disagreed with the rows beneath them would be worse than
 no filter, and a control whose options shrink as you use it is one you can
 get stuck in.
 
+**The control follows the cardinality.** Links are the best control for a
+handful and the worst for a hundred and fifty, which is a wall nobody scans.
+Above a threshold the dimension becomes a `<select>` carrying every value
+and its count, beside links for the busiest few. A select is not a
+compromise there: browsers give it keyboard type-ahead, which is exactly the
+"find my namespace among 150" interaction, for no JavaScript. Its form sends
+the other clauses back as hidden fields, so choosing a namespace does not
+silently clear the state somebody already chose.
+
+**The list pages**, because "200 shown, 9,800 not drawn" is a truncation with
+an apology rather than a list of what happened. Pages are links, so they
+compose with the filters and can be sent to somebody. A page beyond the end
+is clamped, not refused — history is pruned, so a bookmarked page 40 may
+have become nothing.
+
+**Only the live region is replaced by the refresh.** The list marks its rows
+and counts; its controls sit outside. That is what made it safe to offer a
+select at all — the same state whose destruction made the filter look broken
+twice. The cost is that the options do not gain a namespace first seen since
+the page loaded, until any navigation, which is the cheaper side of the
+trade by a wide margin.
+
+**What it costs, measured.** On 150 namespaces, 40 strategies and 10,000
+records, held in `internal/dashboard/scale_test.go` so the number is checked
+rather than claimed:
+
+| | before | after |
+| --- | --- | --- |
+| Building the list page | 49.7 ms | **1.2 ms** |
+| Building the overview | 0.96 ms | **0.7 ms** |
+
+The 49.7 ms was not slowness, it was shape: each filter option counted
+itself with its own pass over every record, so the cost was options ×
+records and grew as a product. Counting each dimension in one pass gives
+identical numbers. The version that was wrong read as obviously correct; the
+benchmark is what made it obviously wrong, which is why it is checked in.
+
 **The page reloads itself when the operator changes.** Only the content
 region is swapped by a refresh, so `<head>`, the stylesheet and this script
 are whatever the tab loaded — for ever, in a tab open across an upgrade,

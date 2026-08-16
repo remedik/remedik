@@ -24,6 +24,46 @@
   {{range .Groups}}
   <div class="filter-row">
     <span class="filter-label" id="filter-{{.Param}}">{{.Label}}</span>
+
+    {{if .AsSelect}}
+    {{/*
+      Too many values to draw as links. A select is not a lesser control
+      here — browsers give it keyboard type-ahead, which is exactly the
+      "find my namespace among a hundred and fifty" interaction, and it
+      costs no JavaScript. It is safe only because the refresh replaces
+      #live and leaves these controls alone.
+    */}}
+    <form class="filter-select" method="get" action="/remediations">
+      {{range .KeptParams}}
+      <input type="hidden" name="{{.Key}}" value="{{.Value}}">
+      {{end}}
+      <label class="visually-hidden" for="pick-{{.Param}}">{{.Label}}</label>
+      <select id="pick-{{.Param}}" name="{{.Param}}">
+        <option value="">All {{len .Options}} &mdash; type to search</option>
+        {{$current := .Param}}
+        {{range .Options}}
+        <option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Value}} ({{.Count}})</option>
+        {{end}}
+      </select>
+      <button type="submit">Go</button>
+    </form>
+
+    <ul class="filter-values" aria-labelledby="filter-{{.Param}}">
+      <li>
+        <a class="pill-link{{if .AllSelected}} is-on{{end}}" href="{{.AllURL}}"
+           {{if .AllSelected}}aria-current="true"{{end}}>All</a>
+      </li>
+      {{range .QuickPicks}}
+      <li>
+        <a class="pill-link{{if .Selected}} is-on{{end}}" href="{{.URL}}"
+           {{if .Selected}}aria-current="true" title="Click to stop filtering by this"{{end}}>
+          {{.Value}}<span class="pill-count">{{.Count}}</span>
+        </a>
+      </li>
+      {{end}}
+    </ul>
+
+    {{else}}
     <ul class="filter-values" aria-labelledby="filter-{{.Param}}">
       <li>
         <a class="pill-link{{if .AllSelected}} is-on{{end}}" href="{{.AllURL}}"
@@ -38,6 +78,7 @@
       </li>
       {{end}}
     </ul>
+    {{end}}
   </div>
   {{end}}
 
@@ -49,6 +90,13 @@
   {{end}}
 </section>
 {{end}}
+
+{{/*
+  Only this region is replaced by the ten-second refresh. The filter controls
+  above it hold what the reader typed or chose, and replacing those is what
+  made the filter appear broken twice before.
+*/}}
+<div id="live">
 
 {{if .HasRows}}
 <section aria-labelledby="list-heading">
@@ -99,12 +147,25 @@
     </table>
   </div>
 
-  {{if gt .Hidden 0}}
-  <p class="dim table-note">
-    {{.Hidden}} older record{{if ne .Hidden 1}}s{{end}} matched and {{if ne .Hidden 1}}were{{else}}was{{end}}
-    not drawn. Narrow the filter, or read them with
-    <code>kubectl get remediations -n {{.Namespace}}</code>.
-  </p>
+  {{if .Paging.Many}}
+  <nav class="paging" aria-label="Pages">
+    <span class="paging-where">
+      {{.Paging.First}}&ndash;{{.Paging.Last}} of {{.Total}}
+    </span>
+    <span class="paging-links">
+      {{if .Paging.PrevURL}}
+      <a class="pill-link" href="{{.Paging.PrevURL}}" rel="prev">&larr; Newer</a>
+      {{else}}
+      <span class="pill-link is-off">&larr; Newer</span>
+      {{end}}
+      <span class="paging-page">Page {{.Paging.Page}} of {{.Paging.Pages}}</span>
+      {{if .Paging.NextURL}}
+      <a class="pill-link" href="{{.Paging.NextURL}}" rel="next">Older &rarr;</a>
+      {{else}}
+      <span class="pill-link is-off">Older &rarr;</span>
+      {{end}}
+    </span>
+  </nav>
   {{end}}
 </section>
 
@@ -138,5 +199,7 @@
   </p>
 </div>
 {{end}}
+
+</div>
 
 {{end}}

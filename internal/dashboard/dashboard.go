@@ -32,6 +32,7 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -51,13 +52,14 @@ const DefaultBindAddress = ":8082"
 // every panel on the overview that counts something links to the view of it.
 const remediationsPath = "/remediations"
 
-// listLimit caps the executions drawn on the list page.
+// pageSize is how many executions the list draws at once.
 //
 // History is already bounded by pruning, so this is not what keeps the page
 // finite — it is what keeps rendering cheap. A dashboard that could draw
 // thousands of rows would be a way to make the operator slow at its real
-// job, which is remediation.
-const listLimit = 200
+// job, which is remediation. Everything beyond it is a page away, not
+// missing.
+const pageSize = 100
 
 // recentLimit is how many the overview shows before sending the reader to
 // the list. The front page answers "is anything wrong now?", and a long
@@ -188,6 +190,26 @@ func (h *Handler) Mux() http.Handler { return h }
 
 // ServeHTTP implements http.Handler.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// A bug in a view builder must not become an empty reply. net/http
+	// recovers the goroutine, so the operator survives either way, but the
+	// reader gets a closed connection and no idea why — and this is the page
+	// somebody opens when something is already wrong. It has happened once:
+	// an empty filter result made a row loop start at index -1.
+	//
+	// Pages are rendered into a buffer before anything is written, so a
+	// panic during rendering has not yet sent a byte and 500 is still
+	// available.
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			h.logger.Error("panic serving a dashboard page",
+				"path", r.URL.Path, "panic", recovered, "stack", string(debug.Stack()))
+			h.fail(w, r, http.StatusInternalServerError,
+				"Something went wrong rendering this page",
+				"The operator logged the details. Every other page still works, and "+
+					"nothing about your cluster has changed: the dashboard only reads.")
+		}
+	}()
+
 	// The method allowlist runs before routing, so it covers every path —
 	// including ones added later, and ones that do not exist. This is the
 	// second layer of the read-only guarantee; the first is that the
@@ -323,7 +345,8 @@ func (h *Handler) remediations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	view := buildRemediations(remediations.Items, ParseFilter(r.URL.Query()), h.now())
+	query := r.URL.Query()
+	view := buildRemediations(remediations.Items, ParseFilter(query), ParsePage(query), h.now())
 	view.Page = h.page("Remediations", navRemediations)
 	h.render(w, r, remediationsTemplate, view)
 }
