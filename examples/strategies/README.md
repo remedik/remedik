@@ -9,6 +9,13 @@ suit your alerts, and start with the operator in dry-run.
 | [pod-crashloop.yaml](pod-crashloop.yaml) | `KubePodCrashLooping` | Rolling restart of the Deployment |
 | [oom-restart.yaml](oom-restart.yaml) | `KubeContainerOOMKilled` | Restart, cautiously and rarely |
 | [scoped-to-one-namespace.yaml](scoped-to-one-namespace.yaml) | `KubePodCrashLooping` in one namespace | Narrower rule that wins over a broad one |
+| [statefulset-stuck.yaml](statefulset-stuck.yaml) | `KubeStatefulSetUpdateNotRolledOut` | Rolling restart of a StatefulSet |
+| [pod-not-ready.yaml](pod-not-ready.yaml) | `KubePodNotReady` | Evicts one pod, honouring PodDisruptionBudgets |
+| [job-failed.yaml](job-failed.yaml) | `KubeJobFailed` | Deletes the Job so its CronJob runs again |
+
+Every action a recipe uses must be enabled in the chart, because each one is
+a permission: `--set actions.podDelete.enabled=true`. The chart's
+`action-rbac.yaml` lists what each is allowed to touch, and why.
 
 ## Choosing guards
 

@@ -29,7 +29,7 @@ follow-up changes.
 | --- | --- | --- |
 | Gateway | Receives Alertmanager webhooks, authenticates, normalizes grouped alerts into events | shipped |
 | Engine | Matches events to strategies, evaluates guards, runs the per-execution state machine, writes audit | shipped |
-| Actions | `deployment.restart`; later `job`, `script`, `webhook.call`, `ActionPlugin` | shipped (first action) |
+| Actions | `deployment.restart`, `workload.restart`, `pod.delete`, `job.delete`; later scaling, rollback, node actions, `job`/`script`/`webhook.call`, `ActionPlugin` | shipped |
 | Metrics | Prometheus counters and histograms on the manager's metrics endpoint | shipped |
 | Slack bot | Socket Mode; rich notifications, Approve/Deny buttons, manual commands (`@remedik …`) | planned |
 | Escalation | PagerDuty / on-call channel when execution fails or approval times out | planned |
@@ -143,6 +143,45 @@ Three places, deliberately, because people look in three places:
   happen?".
 - **On the `Remediation` record**, and therefore on the dashboard: the full
   per-step trail.
+
+## The action catalogue
+
+Each action is a permission. The chart grants an action's rules only when it
+is enabled, and lists them with their reasoning in
+[`charts/remedik/action-rbac.yaml`](../charts/remedik/action-rbac.yaml) —
+one table, rather than a trail of conditionals through a template, because
+its reviewability is what invariant 4 rests on. The same values also decide
+which actions the operator registers, so a strategy naming a disabled action
+is reported as unusable when it is applied rather than failing during the
+incident it was written for.
+
+| Action | Does | Enabled by default | Notes |
+| --- | --- | --- | --- |
+| `deployment.restart` | Rolling restart of a Deployment | yes | Patches the pod template; never deletes pods |
+| `workload.restart` | The same, for Deployments, StatefulSets and DaemonSets | no | Takes its kind from the alert's label |
+| `pod.delete` | Evicts one pod | no | Eviction API, so a PodDisruptionBudget can refuse. Refuses a pod with no controller owner |
+| `job.delete` | Deletes a Job and its pods | no | So the owning CronJob makes a clean run |
+
+**Why eviction rather than deletion.** Deleting a pod ignores
+PodDisruptionBudgets entirely; the Eviction API is the only call that checks
+them, and returns 429 when the removal would breach the budget. remedik
+records that as a refusal naming the budget, and the pod stays up. The
+permission it holds says the same thing: `create` on `pods/eviction`, never
+`delete` on `pods`.
+
+**What remedik will not do.** Published deliberately, because a list of
+refusals says more about an automation than another verb does:
+
+- Delete a node or resize a node group. That is a cloud API with a different
+  trust model; cluster-api's MachineHealthCheck and the medik8s operators do
+  it properly.
+- Delete a pod nothing owns. Nothing recreates it, so that is deletion, not
+  remediation.
+- Patch resource requests or limits. It restarts every pod in the workload
+  and hides the problem it was called for.
+- Raise a ResourceQuota. A quota is a decision somebody made on purpose.
+- Act on control-plane alerts. Automation against a sick API server is how
+  one bad night becomes a bad quarter.
 
 ## Extensibility ladder
 

@@ -1,0 +1,31 @@
+# Evict one stuck pod, rather than restarting the whole workload.
+#
+# `pod.delete` goes through the Kubernetes Eviction API, not a delete. That
+# is the difference between remediation and an outage: eviction is the only
+# call that consults PodDisruptionBudgets, and a budget that refuses turns
+# into a recorded refusal instead of a missing last replica.
+#
+# It also refuses a pod with no controller owner, because nothing would
+# recreate it. If you genuinely want that, say so with requireOwner: "false"
+# on the step, where a reviewer can see it.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: pod-not-ready
+spec:
+  enabled: true
+  trigger:
+    match:
+      alertname: KubePodNotReady
+  guards:
+    # Per target: the same pod is not evicted twice in a row. A pod that
+    # comes back unready needs a person, not a second eviction.
+    cooldown: 30m
+    # An alert storm across a namespace must not become a rolling outage.
+    maxPerHour: 6
+  steps:
+    - action: pod.delete
+  onFailure:
+    # A PodDisruptionBudget refusing the eviction is a normal outcome worth
+    # retrying once, after the backoff: by then the budget may allow it.
+    retries: 1

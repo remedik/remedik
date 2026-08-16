@@ -1,0 +1,27 @@
+# Delete a failed Job so its CronJob produces a clean run.
+#
+# Nothing retries a failed Job on its own: it sits there with its pods,
+# holding their logs and their resources, until somebody notices. Deleting it
+# is what lets the schedule try again.
+#
+# The trade is real and worth knowing: the failed pods' logs go with it. If
+# your logs are shipped somewhere, this is free; if they are not, ship them
+# before enabling this.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: job-failed
+spec:
+  enabled: true
+  trigger:
+    match:
+      alertname: KubeJobFailed
+  guards:
+    # A CronJob that fails every run should page somebody rather than be
+    # cleaned up four times an hour for ever.
+    cooldown: 1h
+    maxPerHour: 3
+  steps:
+    - action: job.delete
+  onFailure:
+    retries: 0

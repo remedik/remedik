@@ -2,6 +2,12 @@
 Permissions are assembled from what is actually enabled. remedik never asks
 for cluster-admin: every rule below exists because a named feature needs
 it, and turning that feature off removes the rule.
+
+Action permissions come from action-rbac.yaml, one entry per action. That
+file is the thing to read when reviewing what remedik may do; keeping it
+out of the template means the answer is a table rather than a trail of
+conditionals, which is what makes the invariant checkable rather than
+merely stated.
 */}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -24,16 +30,13 @@ rules:
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch"]
-{{- if .Values.actions.deploymentRestart.enabled }}
-  # action: deployment.restart — patches the pod template annotation, which
-  # is what `kubectl rollout restart` does.
-  #
-  # Two verbs, deliberately: the action reads one Deployment by name and
-  # patches it. It needs no list or watch because it uses a direct client
-  # rather than a cache, and no delete because it never removes pods.
-  - apiGroups: ["apps"]
-    resources: ["deployments"]
-    verbs: ["get", "patch"]
+{{- $catalogue := .Files.Get "action-rbac.yaml" | fromYaml }}
+{{- range $action, $rules := $catalogue }}
+{{- $config := index $.Values.actions $action | default dict }}
+{{- if $config.enabled }}
+  # action: {{ $action }} — see action-rbac.yaml for why these verbs
+  {{- toYaml $rules | nindent 2 }}
+{{- end }}
 {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1

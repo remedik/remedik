@@ -17,6 +17,8 @@
 #   6. restart safety      — the cooldown still holds after the operator restarts
 #   7. dashboard           — every page renders, read-only, and the dry-run
 #                            report names what would have happened
+#   8. workload actions    — a StatefulSet is restarted, an owned pod is
+#                            evicted, and a pod nothing owns is refused
 #
 # Usage:  make e2e            (add KEEP_CLUSTER=1 to inspect afterwards)
 set -euo pipefail
@@ -119,6 +121,20 @@ wait_for_state() {
 	while [ "$elapsed" -lt "$timeout" ]; do
 		local states
 		states=$(kubectl -n "$NAMESPACE" get remediations \
+			-o jsonpath='{range .items[*]}{.status.state}{"\n"}{end}' 2>/dev/null || true)
+		echo "$states" | grep -qx "$want" && return 0
+		sleep 2
+		elapsed=$((elapsed + 2))
+	done
+	return 1
+}
+
+# wait_for_strategy_state <strategy> <state> [timeout-seconds]
+wait_for_strategy_state() {
+	local strategy="$1" want="$2" timeout="${3:-60}" elapsed=0
+	while [ "$elapsed" -lt "$timeout" ]; do
+		local states
+		states=$(kubectl -n "$NAMESPACE" get remediations -l "remedik.dev/strategy=${strategy}" \
 			-o jsonpath='{range .items[*]}{.status.state}{"\n"}{end}' 2>/dev/null || true)
 		echo "$states" | grep -qx "$want" && return 0
 		sleep 2
@@ -555,6 +571,136 @@ if [ "$status" = "404" ]; then
 	pass "an unknown remediation answered 404"
 else
 	fail "an unknown remediation answered $status, want 404"
+fi
+
+# --------------------------------------------------------------------------
+# Test 8 — the workload actions
+#
+# Three things unit tests cannot prove: that workload.restart really drives a
+# StatefulSet's rollout to completion, that pod.delete goes through the
+# Eviction API against a real API server, and that a pod nothing owns is
+# refused rather than removed.
+#
+# The actions are off by default, so enabling them is part of the test.
+# --------------------------------------------------------------------------
+step "8. Restarting a StatefulSet, and evicting a pod"
+
+helm upgrade remedik charts/remedik \
+	--namespace "$NAMESPACE" \
+	--set image.repository="${IMAGE%%:*}" \
+	--set image.tag="${IMAGE##*:}" \
+	--set image.pullPolicy=IfNotPresent \
+	--set gateway.auth.token="$TOKEN" \
+	--set dryRun=false \
+	--set dashboard.enabled=true \
+	--set dashboard.port="$DASHBOARD_PORT" \
+	--set dashboard.auth.token="$DASHBOARD_TOKEN" \
+	--set actions.workloadRestart.enabled=true \
+	--set actions.podDelete.enabled=true \
+	--wait --timeout 3m >/dev/null
+kubectl -n "$NAMESPACE" rollout status deploy/remedik --timeout=120s >/dev/null
+start_port_forward
+
+if kubectl -n "$NAMESPACE" logs deploy/remedik --tail=200 2>/dev/null \
+	| grep -q '"actions":\["deployment.restart","pod.delete","workload.restart"\]'; then
+	pass "the operator registered exactly the actions the chart granted"
+else
+	fail "the registered actions do not match what the chart enabled"
+fi
+
+# --- a StatefulSet ---------------------------------------------------------
+sts_before=$(kubectl -n e2e-payments get statefulset ledger \
+	-o jsonpath='{.spec.template.metadata.annotations.kubectl\.kubernetes\.io/restartedAt}' 2>/dev/null || true)
+
+send_workload_alert() {
+	curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+		-X POST "http://127.0.0.1:${LOCAL_PORT}/webhooks/alertmanager" \
+		-H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
+		-d "{\"version\":\"4\",\"alerts\":[{
+		      \"status\":\"firing\",
+		      \"labels\":{\"alertname\":\"$1\",\"namespace\":\"e2e-payments\",\"$2\":\"$3\"},
+		      \"startsAt\":\"2026-08-15T09:00:00Z\",
+		      \"fingerprint\":\"$4\"}]}"
+}
+
+status=$(send_workload_alert E2EStatefulSetStuck statefulset ledger sts-1)
+if [ "$status" = "200" ]; then
+	pass "gateway accepted the StatefulSet alert"
+else
+	fail "gateway answered $status for the StatefulSet alert"
+fi
+
+if wait_for_strategy_state e2e-statefulset Succeeded 120; then
+	sts_after=$(kubectl -n e2e-payments get statefulset ledger \
+		-o jsonpath='{.spec.template.metadata.annotations.kubectl\.kubernetes\.io/restartedAt}' 2>/dev/null || true)
+	if [ -n "$sts_after" ] && [ "$sts_after" != "$sts_before" ]; then
+		pass "the StatefulSet was restarted: ${sts_after}"
+	else
+		fail "the StatefulSet was never restarted"
+	fi
+else
+	fail "the StatefulSet remediation did not succeed within 120s"
+fi
+
+sts_verified=$(kubectl -n "$NAMESPACE" get remediations -l remedik.dev/strategy=e2e-statefulset \
+	-o jsonpath='{.items[0].status.steps[0].verified}' 2>/dev/null || true)
+if echo "$sts_verified" | grep -q 'ready'; then
+	pass "the StatefulSet rollout was confirmed: ${sts_verified}"
+else
+	fail "the StatefulSet rollout was not confirmed (verified=${sts_verified})"
+fi
+
+# --- a pod nothing owns ----------------------------------------------------
+status=$(send_workload_alert E2EPodStuck pod orphan orphan-1)
+if [ "$status" = "200" ]; then
+	pass "gateway accepted the bare-pod alert"
+else
+	fail "gateway answered $status for the bare-pod alert"
+fi
+
+for _ in $(seq 1 30); do
+	orphan_msg=$(kubectl -n "$NAMESPACE" get remediations -l remedik.dev/fingerprint=orphan-1 \
+		-o jsonpath='{.items[0].status.steps[0].message}' 2>/dev/null || true)
+	[ -n "$orphan_msg" ] && break
+	sleep 2
+done
+
+if echo "$orphan_msg" | grep -q 'no controller owner'; then
+	pass "a pod nothing owns was refused, not deleted"
+else
+	fail "the bare pod was not refused (message: ${orphan_msg})"
+fi
+if kubectl -n e2e-payments get pod orphan >/dev/null 2>&1; then
+	pass "the bare pod is still running"
+else
+	fail "the bare pod was removed despite the refusal"
+fi
+
+# --- an owned pod ----------------------------------------------------------
+owned_pod=$(kubectl -n e2e-payments get pods -l app=api2 \
+	-o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+if [ -z "$owned_pod" ]; then
+	fail "no owned pod to evict"
+else
+	status=$(send_workload_alert E2EPodStuck pod "$owned_pod" "evict-1")
+	if [ "$status" = "200" ]; then
+		pass "gateway accepted the eviction alert"
+	else
+		fail "gateway answered $status for the eviction alert"
+	fi
+
+	evicted=""
+	for _ in $(seq 1 45); do
+		evicted=$(kubectl -n "$NAMESPACE" get remediations -l remedik.dev/fingerprint=evict-1 \
+			-o jsonpath='{.items[0].status.steps[0].verified}' 2>/dev/null || true)
+		[ -n "$evicted" ] && break
+		sleep 2
+	done
+	if [ -n "$evicted" ]; then
+		pass "the pod was evicted and confirmed gone: ${evicted}"
+	else
+		fail "the eviction was never confirmed"
+	fi
 fi
 
 # --------------------------------------------------------------------------

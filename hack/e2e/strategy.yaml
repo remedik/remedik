@@ -14,3 +14,34 @@ spec:
     - action: deployment.restart
   onFailure:
     retries: 0
+---
+# Restart a StatefulSet. The alert carries a `statefulset` label, which names
+# the object and its kind at once.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: e2e-statefulset
+spec:
+  trigger:
+    match:
+      alertname: E2EStatefulSetStuck
+  steps:
+    - action: workload.restart
+  onFailure:
+    retries: 0
+---
+# Evict one pod. The guard is deliberately absent: the test sends two
+# alerts, one for an owned pod and one for a bare pod, and needs both to be
+# evaluated rather than the second refused by a cooldown.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: e2e-pod
+spec:
+  trigger:
+    match:
+      alertname: E2EPodStuck
+  steps:
+    - action: pod.delete
+  onFailure:
+    retries: 0

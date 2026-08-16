@@ -1,0 +1,31 @@
+# Restart a StatefulSet whose rollout is wedged.
+#
+# `workload.restart` takes its kind from the alert: KubeStatefulSetUpdateNotRolledOut
+# carries a `statefulset` label, which names the object and says what it is at
+# the same time. The same strategy shape works for DaemonSets.
+#
+# Restarting a StatefulSet is slower and more consequential than restarting a
+# Deployment — pods come back one at a time, in order, and each one is
+# somebody's database. The cooldown is long for that reason.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: statefulset-stuck
+spec:
+  enabled: true
+  trigger:
+    match:
+      alertname: KubeStatefulSetUpdateNotRolledOut
+  guards:
+    # An ordered rollout of a large StatefulSet can take a long time. Do not
+    # start a second restart while the first is still working through it.
+    cooldown: 1h
+    maxPerHour: 2
+  steps:
+    - action: workload.restart
+      with:
+        # StatefulSets roll one pod at a time, so give the rollout longer
+        # than a Deployment's default before calling it failed.
+        verifyTimeout: 5m
+  onFailure:
+    retries: 0

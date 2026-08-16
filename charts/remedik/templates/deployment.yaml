@@ -46,6 +46,10 @@ spec:
             - --probe-bind-address=:{{ .Values.probes.port }}
             - --history-limit={{ .Values.history.keepPerStrategy }}
             - --log-level={{ .Values.logLevel }}
+            {{- /* Exactly the actions this release granted permissions for.
+                   A strategy naming anything else is reported as not ready
+                   when it is applied, rather than failing mid-incident. */}}
+            - --actions={{ include "remedik.enabledActions" . }}
             {{- if .Values.dashboard.enabled }}
             {{- /* No flag at all when the dashboard is off: nothing listens,
                    and no handler exists to be reached. */}}

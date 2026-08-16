@@ -1,0 +1,55 @@
+# What each action is allowed to do.
+#
+# This is the artefact behind invariant 4: remedik grants a permission only
+# because a named, enabled feature needs it. The chart reads this file and
+# adds an action's rules to the ClusterRole only when `actions.<key>.enabled`
+# is true, so turning an action off removes its permissions with it.
+#
+# It lives here rather than in values.yaml because it is not a value. Nobody
+# should widen an action's permissions to make their strategy work; if an
+# action needs a verb it does not have, that is a change to the action.
+#
+# One key per action, matching the key under `actions:` in values.yaml.
+# Every rule carries a comment saying what needs it, because a reviewer's
+# question is never "which verbs?" but "why these?".
+
+# deployment.restart — patches the pod template annotation, which is what
+# `kubectl rollout restart` does.
+#
+# Two verbs, deliberately: the action reads one Deployment by name and
+# patches it. It needs no list or watch because it uses a direct client
+# rather than a cache, and no delete because it never removes pods.
+deploymentRestart:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "patch"]
+
+# workload.restart — the same patch, for the three workload kinds. Enabling
+# it grants patch on all three; a cluster that only wants Deployments
+# restarted should enable deployment.restart instead and get only that.
+workloadRestart:
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "patch"]
+
+# pod.delete — evicts one pod through the Eviction API.
+#
+# `create` on pods/eviction is the eviction itself; it is a different
+# permission from `delete` on pods, and deliberately so: remedik cannot
+# delete a pod outright, only ask for an eviction that a PodDisruptionBudget
+# is allowed to refuse.
+podDelete:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods/eviction"]
+    verbs: ["create"]
+
+# job.delete — removes a failed Job so its CronJob makes a clean one. The
+# pods go with it through the deletion's propagation policy, so no
+# permission on pods is needed here.
+jobDelete:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "delete"]

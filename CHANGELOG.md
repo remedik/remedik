@@ -14,6 +14,38 @@ rather than a proposal.
 
 ### Added
 
+- **Three more actions** (`add-workload-actions`), all reversible and scoped
+  to one object:
+
+  - **`workload.restart`** — the rolling restart, for StatefulSets and
+    DaemonSets as well as Deployments. It takes the kind from whichever of
+    the `deployment`, `statefulset` or `daemonset` labels the alert carries,
+    because in the kubernetes-mixin alerts the label naming the object also
+    says what it is. `deployment.restart` stays exactly as it was, so
+    existing strategies keep working and keep their narrower permission.
+  - **`pod.delete`** — evicts one pod **through the Eviction API, never a
+    delete**. Deleting a pod ignores PodDisruptionBudgets entirely; eviction
+    is the only call that checks them, and a 429 is recorded as a refusal
+    naming the budget, with the pod left running. The permission granted
+    says the same thing: `create` on `pods/eviction`, never `delete` on
+    `pods`. It also refuses a pod with no controller owner, because nothing
+    would recreate it — that is deletion, not remediation — unless the step
+    says `requireOwner: "false"`.
+  - **`job.delete`** — removes a failed Job and its pods so the CronJob that
+    owns it produces a clean run.
+
+  All three verify their own work: the rollout completes, the pod is gone or
+  replaced by one with a different UID, the Job no longer exists.
+
+- **The chart's action permissions are now a table.**
+  `charts/remedik/action-rbac.yaml` lists what each action may do and why;
+  the ClusterRole grants an action's rules only when it is enabled. The same
+  values decide which actions the operator registers, so a strategy naming a
+  disabled action is reported as unusable when it is applied rather than
+  failing during the incident it was written for. `make helm-lint` now
+  checks that with every action off, nothing is granted on any workload, and
+  that enabling one grants that one's rules.
+
 - **A step now reports whether the remediation worked, not just that the API
   call was accepted** (`add-action-contract-v2`). Actions may implement an
   optional `Verify`: a read-only post-condition the engine calls after

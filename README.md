@@ -39,18 +39,42 @@ pod-crashloop-x7k2q   pod-crashloop   deployment/payments/api   Succeeded   2m
 pod-crashloop-b91mm   pod-crashloop   deployment/checkout/web   Simulated   1h
 ```
 
+**Four actions ship today**, each a separate permission the chart grants only
+when you enable it:
+
+| Action | What it does |
+| --- | --- |
+| `deployment.restart` | Rolling restart of a Deployment |
+| `workload.restart` | The same, for StatefulSets and DaemonSets too |
+| `pod.delete` | Evicts one pod **through the Eviction API**, so a PodDisruptionBudget can refuse it |
+| `job.delete` | Deletes a failed Job so its CronJob makes a clean run |
+
+The eviction detail is not a detail. Deleting a pod ignores disruption
+budgets entirely; eviction is the only call that checks them. remedik cannot
+delete a pod even if it wanted to — the permission it holds is `create` on
+`pods/eviction`, never `delete` on `pods` — and it refuses a pod with no
+controller owner, because nothing would recreate it.
+
+There is also a read-only dashboard, off by default, that answers the same
+questions in a browser — how much a dry-run trial would have done, and why
+nothing happened during an incident.
+
 ## Try it in five minutes
 
 Needs Docker, [kind](https://kind.sigs.k8s.io/), kubectl and helm.
 
 ```bash
-make e2e     # throwaway cluster, real image, five assertions, then cleanup
+make e2e     # throwaway cluster, real image, the whole loop, then cleanup
 ```
 
-That test is the honest demo: it proves an unauthenticated delivery is
-refused, a dry run records a plan without touching anything, turning dry-run
-off actually restarts the Deployment, the cooldown refuses an immediate
-repeat, and an unmatched alert is accepted and ignored.
+That test is the honest demo. On a real cluster it proves: an
+unauthenticated delivery is refused; a dry run records a plan without
+touching anything; turning dry-run off actually restarts the Deployment, and
+the record confirms the rollout rather than the patch; the workload carries
+events explaining the change; the cooldown refuses an immediate repeat and
+survives an operator restart; an unmatched alert is accepted and ignored; a
+StatefulSet is restarted and a pod evicted; a pod nothing owns is refused;
+and every dashboard page renders read-only.
 
 To keep the cluster and poke at it yourself:
 
@@ -60,9 +84,7 @@ make dev-deploy    # build, load and install remedik (dry-run on)
 kubectl -n remedik get remediations -w
 ```
 
-There is also a read-only dashboard, off by default, that answers the same
-questions in a browser — how much a dry-run trial would have done, and why
-nothing happened during an incident:
+The dashboard, enabled:
 
 ```bash
 helm upgrade remedik ... --set dashboard.enabled=true \
@@ -113,8 +135,8 @@ the record still explains the run after the strategy is edited or deleted.
 
 - **v0.1.0 (in progress)** — alert gateway, `RemediationStrategy` and
   `Remediation` CRDs, deterministic engine with guards, dry-run and retries,
-  `deployment.restart`, read-only dashboard, Helm chart, Prometheus metrics,
-  signed releases.
+  `deployment.restart`, `workload.restart`, `pod.delete`, `job.delete`,
+  read-only dashboard, Helm chart, Prometheus metrics, signed releases.
 - **v0.2.0** — Slack bot with approval buttons and manual commands, more
   built-in actions, custom actions (`job`, `script`), audit sinks (Splunk
   HEC, Loki, Elasticsearch), namespace health.

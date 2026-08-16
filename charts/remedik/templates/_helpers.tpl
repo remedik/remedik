@@ -71,6 +71,33 @@ or the chart creates one from dashboard.auth.token.
 {{- end -}}
 
 {{/*
+The action names this release enables, as remedik spells them.
+
+Kept next to the RBAC table it mirrors: the chart grants an action's
+permissions and registers the action itself from the same decision, so the
+two cannot drift apart into an operator that may do something it cannot be
+asked to do, or vice versa.
+*/}}
+{{- define "remedik.actionNames" -}}
+deploymentRestart: deployment.restart
+workloadRestart: workload.restart
+podDelete: pod.delete
+jobDelete: job.delete
+{{- end -}}
+
+{{- define "remedik.enabledActions" -}}
+{{- $names := include "remedik.actionNames" . | fromYaml -}}
+{{- $enabled := list -}}
+{{- range $key, $verb := $names -}}
+{{- $config := index $.Values.actions $key | default dict -}}
+{{- if $config.enabled -}}
+{{- $enabled = append $enabled $verb -}}
+{{- end -}}
+{{- end -}}
+{{- join "," $enabled -}}
+{{- end -}}
+
+{{/*
 Fail early on a configuration that cannot work, with a message that says
 what to do about it.
 */}}

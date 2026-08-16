@@ -47,7 +47,10 @@ what the operator already reads.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| actions.deploymentRestart.enabled | bool | `true` | Enable the `deployment.restart` action. Disabling it also removes the RBAC rule that lets remedik patch Deployments. |
+| actions.deploymentRestart.enabled | bool | `true` | Enable `deployment.restart`: a rolling restart of a Deployment. Disabling it also removes the RBAC rule that lets remedik patch Deployments. |
+| actions.jobDelete.enabled | bool | `false` | Enable `job.delete`: deletes a failed Job, and its pods with it, so the CronJob that owns it creates a clean run. |
+| actions.podDelete.enabled | bool | `false` | Enable `pod.delete`: evicts one pod through the Eviction API, so a PodDisruptionBudget can refuse it. It cannot delete pods outright — the permission granted is `create` on `pods/eviction`, not `delete` on `pods`. Refuses a pod with no controller owner, since nothing would recreate it. |
+| actions.workloadRestart.enabled | bool | `false` | Enable `workload.restart`: the same rolling restart for Deployments, StatefulSets and DaemonSets. Off by default because it grants patch on all three; if you only ever restart Deployments, leave this off and use `deployment.restart`. |
 | affinity | object | `{}` | Affinity for the operator pod |
 | ai.enabled | bool | `false` | Read-only bring-your-own-LLM diagnosis — planned for v0.2.0 |
 | audit.sinks | list | `[]` | Structured audit export (Splunk HEC, Loki, Elasticsearch, S3) — planned for v0.2.0 |
