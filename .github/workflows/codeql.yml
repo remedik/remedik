@@ -1,0 +1,58 @@
+name: CodeQL
+
+# Static analysis for the kind of defect a linter does not find: a tainted
+# path reaching an exec, a value crossing a trust boundary. Worth having in
+# any Go project and hard to argue against in one that holds write access to
+# a cluster and runs containers a strategy names.
+#
+# It is separate from CI because it is slower and because its findings go to
+# the security tab rather than to a red check on a pull request.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, so a rule added upstream is found without waiting for somebody
+    # to touch the code it applies to.
+    - cron: "23 5 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: analyze
+    runs-on: ubuntu-latest
+
+    # Code scanning needs GitHub Advanced Security on a private repository,
+    # and is free on a public one. Rather than leave a permanently red
+    # workflow while this repository is private, it runs when it can — and
+    # starts working by itself the day it goes public.
+    if: github.event.repository.visibility == 'public'
+
+    permissions:
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: go
+          # Security-and-quality is the wider set. The noise it adds is
+          # worth reading once for a project this size.
+          queries: security-and-quality
+
+      - uses: github/codeql-action/autobuild@v3
+
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:go"

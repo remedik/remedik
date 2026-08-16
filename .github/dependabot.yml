@@ -1,23 +1,53 @@
+# Dependabot opens a pull request when a dependency moves. It is on because
+# this operator's whole dependency tree runs with write access to somebody's
+# cluster, and an update nobody noticed is the usual way that becomes a
+# problem.
+#
+# Grouped aggressively on purpose. Five separate pull requests for five
+# action bumps is five CI runs and five reviews for one decision, and a
+# maintainer who stops reading them is worse off than one who never turned
+# this on.
 version: 2
 updates:
   - package-ecosystem: gomod
     directory: /
     schedule:
       interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
     groups:
-      # Kubernetes libraries move together; separate PRs for each would
-      # never be mergeable on their own.
+      # Kubernetes libraries move together; separate pull requests for each
+      # would never be mergeable on their own.
       kubernetes:
         patterns:
           - "k8s.io/*"
           - "sigs.k8s.io/*"
+      # Everything else, patch and minor, as one review. A major version is
+      # left on its own because it is a decision, not an update.
+      go-minor:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      actions:
+        patterns: ["*"]
 
   - package-ecosystem: docker
     directory: /
     schedule:
       interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(docker)"
+    groups:
+      docker:
+        patterns: ["*"]
