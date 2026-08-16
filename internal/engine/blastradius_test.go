@@ -8,9 +8,9 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/ratyx/remedik/api/v1alpha1"
-	"github.com/ratyx/remedik/internal/alert"
-	"github.com/ratyx/remedik/internal/guards"
+	"github.com/remedik/remedik/api/v1alpha1"
+	"github.com/remedik/remedik/internal/alert"
+	"github.com/remedik/remedik/internal/guards"
 )
 
 // fixedWorkload answers the guard the same way every time.

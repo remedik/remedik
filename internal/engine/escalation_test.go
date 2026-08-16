@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/ratyx/remedik/api/v1alpha1"
-	"github.com/ratyx/remedik/internal/action"
+	"github.com/remedik/remedik/api/v1alpha1"
+	"github.com/remedik/remedik/internal/action"
 )
 
 // escalating builds a record whose remediation fails and whose onFailure plan

@@ -11,11 +11,11 @@ import (
 	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/ratyx/remedik/api/v1alpha1"
-	"github.com/ratyx/remedik/internal/action"
-	"github.com/ratyx/remedik/internal/alert"
-	"github.com/ratyx/remedik/internal/guards"
-	"github.com/ratyx/remedik/internal/matching"
+	"github.com/remedik/remedik/api/v1alpha1"
+	"github.com/remedik/remedik/internal/action"
+	"github.com/remedik/remedik/internal/alert"
+	"github.com/remedik/remedik/internal/guards"
+	"github.com/remedik/remedik/internal/matching"
 )
 
 // Sink turns alerts into Remediation resources.

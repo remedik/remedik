@@ -1,0 +1,28 @@
+# The sponsor button on this repository.
+#
+# Everything is commented out, deliberately: an entry pointing at a sponsor
+# account that does not exist yet renders a button that leads nowhere, which
+# is worse than no button on a project asking to be trusted with cluster
+# write access.
+#
+# Uncomment a line once the account behind it exists and has been opened.
+#
+# github:  GitHub Sponsors. The one to prefer if it is available for this
+#          account — it is on-platform, takes no fee, and a sponsor's
+#          identity is a GitHub account rather than a card, which some
+#          companies find easier to expense.
+#          Enable it at https://github.com/sponsors, then:
+# github: [remedik]
+#
+# custom:  Any URL, which is where a Stripe payment link goes. Stripe is the
+#          right choice for one-off company payments and invoices, which is
+#          how organisations usually pay for something they depend on.
+#          Create a payment link at https://dashboard.stripe.com/payment-links
+#          and put it here:
+# custom: ["https://donate.stripe.com/..."]
+#
+# Both can be listed at once. GitHub renders them as separate buttons.
+#
+# Whatever goes here, docs/funding.md should say what the money is for.
+# "Support this project" with no explanation converts badly and, for
+# infrastructure software, reads as unserious.

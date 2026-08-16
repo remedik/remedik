@@ -1,141 +1,216 @@
-{{define "toolbar"}}
-{{if or .Options.Any .Filtered}}
-<div class="toolbar">
-  <div class="wrap toolbar-inner">
-  {{if .Options.Any}}
-  <form class="filters" method="get" action="/">
-    <p class="visually-hidden" id="filter-help">
-      Narrows the executions on this page. Every count below follows it.
-    </p>
-
-    {{if gt (len .Options.Namespaces) 1}}
-    <label class="filter">
-      <span class="filter-label">Namespace</span>
-      <select name="namespace" aria-describedby="filter-help">
-        <option value="">All namespaces</option>
-        {{$current := .Filter.Namespace}}
-        {{range .Options.Namespaces}}
-        <option value="{{.}}"{{if eq . $current}} selected{{end}}>{{.}}</option>
-        {{end}}
-      </select>
-    </label>
-    {{end}}
-
-    {{if gt (len .Options.Strategies) 1}}
-    <label class="filter">
-      <span class="filter-label">Strategy</span>
-      <select name="strategy" aria-describedby="filter-help">
-        <option value="">All strategies</option>
-        {{$current := .Filter.Strategy}}
-        {{range .Options.Strategies}}
-        <option value="{{.}}"{{if eq . $current}} selected{{end}}>{{.}}</option>
-        {{end}}
-      </select>
-    </label>
-    {{end}}
-
-    {{if gt (len .Options.States) 1}}
-    <label class="filter">
-      <span class="filter-label">State</span>
-      <select name="state" aria-describedby="filter-help">
-        <option value="">Any state</option>
-        {{$current := .Filter.State}}
-        {{range .Options.States}}
-        <option value="{{.}}"{{if eq . $current}} selected{{end}}>{{.}}</option>
-        {{end}}
-      </select>
-    </label>
-    {{end}}
-
-    <button class="filter-apply" type="submit">Apply</button>
-  </form>
-  {{end}}
-
-  {{if .Filtered}}
-  <div class="active-filter" role="status">
-    <span class="active-filter-label">Filtered by</span>
-    <ul class="active-filter-chips">
-      {{range .Filter.Chips}}
-      <li>
-        <a class="chip chip-active" href="{{.RemoveURL}}"
-           title="Stop filtering by {{.Label}}">
-          <span class="chip-key">{{.Label}}</span><span class="chip-value">{{.Value}}</span>
-          <span class="chip-remove" aria-hidden="true">&times;</span>
-          <span class="visually-hidden">— remove this filter</span>
-        </a>
-      </li>
-      {{end}}
-    </ul>
-    <a class="filter-clear" href="/">Clear all</a>
-  </div>
-  {{end}}
-  </div>
-</div>
-{{end}}
-{{end}}
-
 {{define "content"}}
 
 <div class="page-head">
   <div>
     <h1>Overview</h1>
-    <p class="lede">
-      Every remediation remedik has recorded in namespace <code>{{.Namespace}}</code>.
-    </p>
+    <p class="lede">What remedik is allowed to do, and what it has been doing.</p>
   </div>
 </div>
 
-<section class="stats" aria-label="Totals">
-  {{range .Stats}}
-  <div class="stat stat-{{.Tone}}">
-    <span class="stat-label">{{.Label}}</span>
-    <span class="stat-value">{{.Value}}</span>
-    <span class="stat-detail">{{.Detail}}</span>
+{{/* Posture leads, because every number below means something different
+     depending on it — and "dryRun: true" over a cluster with one live
+     namespace is the single misreading this page exists to prevent. */}}
+<section class="panel panel-{{.PosturePanel.Tone}}" aria-labelledby="posture-heading">
+  <div class="panel-head">
+    <h2 id="posture-heading">Posture</h2>
+    <span class="mode mode-{{.PosturePanel.Tone}}">{{.PosturePanel.Headline}}</span>
   </div>
+  <p class="panel-lede">{{.PosturePanel.Detail}}</p>
+  {{if .PosturePanel.Mixed}}
+  <ul class="chips chips-sm">
+    {{range .PosturePanel.Live}}
+    <li class="chip"><span class="chip-key">acts in</span><span class="chip-value">{{.}}</span></li>
+    {{end}}
+    {{range .PosturePanel.Reporting}}
+    <li class="chip"><span class="chip-key">reports in</span><span class="chip-value">{{.}}</span></li>
+    {{end}}
+  </ul>
   {{end}}
 </section>
 
-{{with .DryRunning}}
-<section class="report" aria-labelledby="dryrun-heading">
-  <div class="report-head">
-    <h2 id="dryrun-heading">
-      {{if .Active}}What remedik would have done{{else}}What remedik would have done, before dry-run was turned off{{end}}
-    </h2>
-    {{if .Active}}
-    <span class="mode mode-dry">Dry-run is on</span>
-    {{end}}
+{{if .HasRecords}}
+
+<section aria-labelledby="attention-heading">
+  <div class="section-head">
+    <h2 id="attention-heading">Needs attention</h2>
   </div>
 
-  {{if gt .Simulated 0}}
-  <p class="report-lede">
-    <strong>{{.Simulated}}</strong> remediation{{if ne .Simulated 1}}s{{end}} would have run
-    {{if .Targets}}across <strong>{{.Targets}}</strong> target{{if ne .Targets 1}}s{{end}}{{end}}
-    {{if .Period}}over the past <strong>{{.Period}}</strong>, since {{.Since}}{{end}}.
+  {{if .Attention.Any}}
+  <div class="attention">
+    {{range .Attention.Items}}
+    <a class="attention-item attention-{{.Tone}}" href="{{.URL}}">
+      <span class="attention-count">{{.Count}}</span>
+      <span class="attention-body">
+        <span class="attention-label">{{.Label}}</span>
+        <span class="attention-detail">{{.Detail}}</span>
+      </span>
+    </a>
+    {{end}}
+  </div>
+  {{else}}
+  <p class="panel panel-ok panel-quiet">
+    Nothing has failed. Every execution remedik has kept either succeeded or was simulated.
+  </p>
+  {{end}}
+</section>
+
+<section aria-labelledby="stats-heading">
+  <h2 id="stats-heading" class="visually-hidden">Totals</h2>
+  <div class="stats">
+    {{range .Stats}}
+    <a class="stat stat-{{.Tone}}" href="{{.URL}}">
+      <span class="stat-label">{{.Label}}</span>
+      <span class="stat-value">{{.Value}}</span>
+      <span class="stat-detail">{{.Detail}}</span>
+    </a>
+    {{end}}
+  </div>
+</section>
+
+<div class="grid-2">
+  <section class="panel" aria-labelledby="activity-heading">
+    <div class="panel-head">
+      <h2 id="activity-heading">Activity</h2>
+      <span class="panel-meta">{{.Activity.Window}}</span>
+    </div>
+
+    {{if .Activity.Any}}
+    <div class="chart" role="img"
+         aria-label="Executions per hour over the last day. The same numbers are in the table below.">
+      {{range .Activity.Bars}}
+      <div class="chart-col" title="{{.Label}} — {{.Total}} execution{{if ne .Total 1}}s{{end}}">
+        <div class="chart-bar {{pct .Percent}}">
+          {{if .Failed}}<span class="chart-seg chart-failed {{pct .FailedPct}}"></span>{{end}}
+          {{if .Succeeded}}<span class="chart-seg chart-ok {{pct .SucceededPct}}"></span>{{end}}
+          {{if .Simulated}}<span class="chart-seg chart-dryrun {{pct .SimulatedPct}}"></span>{{end}}
+        </div>
+      </div>
+      {{end}}
+    </div>
+    <div class="chart-axis">
+      <span>{{(index .Activity.Bars 0).Label}}</span>
+      <span class="dim">peak {{.Activity.Busiest}}/h</span>
+      <span>now</span>
+    </div>
+    <p class="panel-foot">
+      {{.Activity.Total}} execution{{if ne .Activity.Total 1}}s{{end}} in the {{.Activity.Window}}.
+    </p>
+
+    <details class="chart-table">
+      <summary>Read the numbers</summary>
+      <div class="table-scroll">
+        <table class="table">
+          <caption class="visually-hidden">Executions per hour</caption>
+          <thead>
+            <tr>
+              <th scope="col">Hour</th>
+              <th scope="col" class="num">Succeeded</th>
+              <th scope="col" class="num">Failed</th>
+              <th scope="col" class="num">Simulated</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Activity.Bars}}{{if .Total}}
+            <tr>
+              <th scope="row">{{.Label}}</th>
+              <td class="num">{{.Succeeded}}</td>
+              <td class="num">{{.Failed}}</td>
+              <td class="num">{{.Simulated}}</td>
+            </tr>
+            {{end}}{{end}}
+          </tbody>
+        </table>
+      </div>
+    </details>
+    {{else}}
+    <p class="dim panel-foot">Nothing has run in the {{.Activity.Window}}.</p>
+    {{end}}
+  </section>
+
+  <section class="panel" aria-labelledby="where-heading">
+    <div class="panel-head">
+      <h2 id="where-heading">Where</h2>
+      <span class="panel-meta">busiest first</span>
+    </div>
+
+    {{if .Namespaces}}
+    <h3 class="panel-subtitle">Namespaces</h3>
+    <ul class="breakdown">
+      {{range .Namespaces}}
+      <li>
+        <a class="breakdown-row" href="{{.URL}}">
+          <span class="breakdown-name">{{.Name}}</span>
+          <span class="breakdown-track" aria-hidden="true">
+            <span class="breakdown-fill {{pct .Share}}"></span>
+          </span>
+          <span class="breakdown-count">{{.Total}}</span>
+          {{if .Failed}}<span class="breakdown-bad">{{.Failed}} failed</span>{{end}}
+        </a>
+      </li>
+      {{end}}
+    </ul>
+    {{end}}
+
+    {{if .Strategies}}
+    <h3 class="panel-subtitle">Strategies</h3>
+    <ul class="breakdown">
+      {{range .Strategies}}
+      <li>
+        <a class="breakdown-row" href="{{.URL}}">
+          <span class="breakdown-name">{{.Name}}</span>
+          <span class="breakdown-track" aria-hidden="true">
+            <span class="breakdown-fill {{pct .Share}}"></span>
+          </span>
+          <span class="breakdown-count">{{.Total}}</span>
+          {{if .Failed}}<span class="breakdown-bad">{{.Failed}} failed</span>{{end}}
+        </a>
+      </li>
+      {{end}}
+    </ul>
+    {{end}}
+  </section>
+</div>
+
+{{if .DryRunning}}
+<section class="panel" aria-labelledby="dryrun-heading">
+  <div class="panel-head">
+    <h2 id="dryrun-heading">
+      {{if .DryRunning.Active}}What remedik would have done{{else}}What remedik would have done, before dry-run was turned off{{end}}
+    </h2>
+    {{if .DryRunning.Active}}<span class="mode mode-dryrun">Dry-run is on</span>{{end}}
+  </div>
+
+  {{if gt .DryRunning.Simulated 0}}
+  <p class="panel-lede">
+    <strong>{{.DryRunning.Simulated}}</strong> remediation{{if ne .DryRunning.Simulated 1}}s{{end}} would have run
+    {{if .DryRunning.Targets}}across <strong>{{.DryRunning.Targets}}</strong> target{{if ne .DryRunning.Targets 1}}s{{end}}{{end}}
+    {{if .DryRunning.Period}}over the past <strong>{{.DryRunning.Period}}</strong>, since {{.DryRunning.Since}}{{end}}.
     Nothing in the cluster was changed.
   </p>
 
+  {{if .DryRunning.ByStrategy}}
   <div class="table-scroll">
     <table class="table">
       <caption class="visually-hidden">Simulated remediations by strategy</caption>
       <thead>
         <tr>
           <th scope="col">Strategy</th>
-          <th scope="col" class="num">Would have run</th>
+          <th scope="col" class="num">Simulated</th>
           <th scope="col" class="num">Targets</th>
           <th scope="col">Share</th>
           <th scope="col">Most recent plan</th>
-          <th scope="col" class="num">Last</th>
+          <th scope="col" class="num">Last run</th>
         </tr>
       </thead>
       <tbody>
-        {{range .ByStrategy}}
+        {{range .DryRunning.ByStrategy}}
         <tr>
           <th scope="row"><code>{{.Strategy}}</code></th>
           <td class="num"><strong>{{.Count}}</strong></td>
           <td class="num">{{.Targets}}</td>
           <td class="share-cell">
-            <span class="bar" aria-hidden="true"><span class="bar-fill" style="width:{{.Share}}%"></span></span>
-            <span class="share-num">{{.Share}}%</span>
+            <span class="share-track" aria-hidden="true"><span class="share-fill {{pct .Share}}"></span></span>
+            <span class="share-value">{{.Share}}%</span>
           </td>
           <td>{{if .Example}}<code class="plan">{{.Example}}</code>{{else}}<span class="dim">no plan recorded</span>{{end}}</td>
           <td class="num dim">{{.LastRun}}</td>
@@ -144,16 +219,18 @@
       </tbody>
     </table>
   </div>
+  {{end}}
 
-  {{if .Active}}
-  <p class="report-foot">
+  {{if .DryRunning.Active}}
+  <p class="panel-foot">
     When these look right, turn dry-run off with
-    <code>helm upgrade &hellip; --set dryRun=false</code>. Guards keep applying either way.
+    <code>helm upgrade &hellip; --set dryRun=false</code>, or make one namespace live with
+    <code>--set namespacePosture.staging=live</code>. Guards keep applying either way.
   </p>
   {{end}}
 
   {{else}}
-  <p class="report-lede">
+  <p class="panel-lede">
     Dry-run is on and nothing has been simulated yet. Once an alert matches a strategy,
     the plan it would have run is recorded here.
   </p>
@@ -163,41 +240,19 @@
 
 <section aria-labelledby="recent-heading">
   <div class="section-head">
-    <h2 id="recent-heading">Recent executions</h2>
-    {{if .HasRecords}}
-    <p class="section-meta">
-      showing {{.Shown}} of {{.Total}}{{if gt .Hidden 0}} &mdash; {{.Hidden}} older record{{if ne .Hidden 1}}s{{end}} not listed{{end}}{{if .Filtered}} &mdash; {{.Excluded}} hidden by the filter{{end}}
-    </p>
-    {{end}}
+    <h2 id="recent-heading">Latest</h2>
+    <a class="section-link" href="/remediations">All {{.Total}} remediations &rarr;</a>
   </div>
 
-  {{if and .Filtered (not .HasRecords)}}
-  <div class="empty">
-    <h3>Nothing matches this filter</h3>
-    <p>
-      {{.TotalUnfiltered}} execution{{if ne .TotalUnfiltered 1}}s{{end}} recorded, none of them
-      {{- if .Filter.Namespace}} in <code>{{.Filter.Namespace}}</code>{{end}}
-      {{- if and .Filter.Namespace (or .Filter.Strategy .Filter.State)}} and{{end}}
-      {{- if .Filter.Strategy}} from <code>{{.Filter.Strategy}}</code>{{end}}
-      {{- if and .Filter.Strategy .Filter.State}} and{{end}}
-      {{- if .Filter.State}} in state <code>{{.Filter.State}}</code>{{end -}}
-      . <a href="/">Show everything</a>.
-    </p>
-  </div>
-  {{end}}
-
-  {{if .HasRecords}}
   <div class="table-scroll">
     <table class="table table-hover">
-      <caption class="visually-hidden">The {{.Shown}} most recent remediations, newest first</caption>
+      <caption class="visually-hidden">The most recent remediations, newest first</caption>
       <thead>
         <tr>
           <th scope="col">Remediation</th>
-          <th scope="col">Strategy</th>
           <th scope="col">Target</th>
           <th scope="col">Alert</th>
           <th scope="col">State</th>
-          <th scope="col" class="num">Took</th>
           <th scope="col" class="num">Age</th>
         </tr>
       </thead>
@@ -205,7 +260,6 @@
         {{range .Recent}}
         <tr>
           <th scope="row"><a class="row-link" href="{{.URL}}"><code>{{.Name}}</code></a></th>
-          <td><code class="dim">{{.Strategy}}</code></td>
           <td>{{if .Target}}<code class="dim">{{.Target}}</code>{{else}}<span class="dim">&mdash;</span>{{end}}</td>
           <td>{{if .Alert}}{{.Alert}}{{else}}<span class="dim">&mdash;</span>{{end}}</td>
           <td>
@@ -216,31 +270,32 @@
             <span class="tag tag-loud" title="This failure was escalated and the escalation itself failed. Assume nobody was told.">page failed</span>
             {{end}}
           </td>
-          <td class="num dim">{{if .Duration}}{{.Duration}}{{else}}&mdash;{{end}}</td>
           <td class="num dim"><time title="{{.AgeExact}}">{{.Age}}</time></td>
         </tr>
         {{end}}
       </tbody>
     </table>
   </div>
+</section>
 
-  {{else if not .Filtered}}
-  <div class="empty">
-    <svg class="empty-mark" viewBox="0 0 48 48" aria-hidden="true" focusable="false">
-      <circle cx="24" cy="24" r="17" fill="none" stroke="currentColor" stroke-width="2"
-              stroke-dasharray="4 5" stroke-linecap="round"/>
-      <path d="M17 24h5l2.5-5 3 10 2.5-5H35" fill="none" stroke="currentColor"
-            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-    </svg>
+{{else}}
 
-    {{if eq .StrategyCount 0}}
-    <h3>No strategies, so nothing can run</h3>
-    <p>
-      remedik accepts every alert Alertmanager sends and ignores the ones no strategy
-      matches. Right now that is all of them, because the cluster has no
-      <code>RemediationStrategy</code>.
-    </p>
-    <pre class="code"><code>kubectl apply -f - &lt;&lt;'YAML'
+<div class="empty">
+  <svg class="empty-mark" viewBox="0 0 48 48" aria-hidden="true" focusable="false">
+    <circle cx="24" cy="24" r="17" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-dasharray="4 5" stroke-linecap="round"/>
+    <path d="M17 24h5l2.5-5 3 10 2.5-5H35" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+
+  {{if eq .StrategyCount 0}}
+  <h3>No strategies, so nothing can run</h3>
+  <p>
+    remedik accepts every alert Alertmanager sends and ignores the ones no strategy
+    matches. Right now that is all of them, because the cluster has no
+    <code>RemediationStrategy</code>.
+  </p>
+  <pre class="code"><code>kubectl apply -f - &lt;&lt;'YAML'
 apiVersion: remedik.dev/v1alpha1
 kind: RemediationStrategy
 metadata:
@@ -255,34 +310,22 @@ spec:
   steps:
     - action: deployment.restart
 YAML</code></pre>
-
-    {{else if eq .EnabledCount 0}}
-    <h3>Every strategy is disabled</h3>
-    <p>
-      {{.StrategyCount}} strateg{{if eq .StrategyCount 1}}y exists{{else}}ies exist{{end}},
-      and none of them can match an alert. A disabled strategy keeps its history and
-      intent; it simply never runs.
-    </p>
-    <pre class="code"><code>kubectl get remediationstrategies</code></pre>
-
-    {{else}}
-    <h3>Nothing has run yet</h3>
-    <p>
-      {{.EnabledCount}} strateg{{if eq .EnabledCount 1}}y is{{else}}ies are{{end}} enabled,
-      but no alert has matched one. Three things are worth checking, in this order:
-    </p>
-    <ol class="checklist">
-      <li>Alertmanager is routing to the remedik receiver, and its deliveries are
-        being accepted &mdash; the <code>remedik_alerts_received_total</code> metric moves.</li>
-      <li>The alert's labels equal every matcher on a strategy. Matching is exact,
-        so <code>alertname: KubePodCrashLooping</code> does not match
-        <code>KubePodCrashLoopBackOff</code>.</li>
-      <li>Nothing is being refused by a guard &mdash; those are published as events:
-        <code>kubectl get events --field-selector reason=GuardRejected -A</code>.</li>
-    </ol>
-    {{end}}
-  </div>
+  {{else if eq .EnabledCount 0}}
+  <h3>Every strategy is disabled</h3>
+  <p>
+    The cluster has {{plural .StrategyCount "strategy-strategies"}}, and none of them
+    may match an alert. <a href="/strategies">See which</a>.
+  </p>
+  {{else}}
+  <h3>Nothing has matched yet</h3>
+  <p>
+    {{plural .EnabledCount "strategy-strategies"}} can match, and no alert has.
+    Either Alertmanager is not pointed at the gateway yet, or nothing has fired
+    that these strategies are written for. <a href="/strategies">See what they match</a>.
+  </p>
   {{end}}
-</section>
+</div>
+
+{{end}}
 
 {{end}}

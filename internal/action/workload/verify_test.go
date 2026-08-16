@@ -10,7 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/ratyx/remedik/internal/action"
+	"github.com/remedik/remedik/internal/action"
 )
 
 // rollingClient hands out a scripted sequence of Deployment states, one per

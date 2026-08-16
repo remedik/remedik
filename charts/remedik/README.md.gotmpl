@@ -12,7 +12,7 @@
 The gateway needs a bearer token so only Alertmanager can submit alerts:
 
 ```bash
-helm install remedik oci://ghcr.io/ratyx/charts/remedik \
+helm install remedik oci://ghcr.io/remedik/charts/remedik \
   --namespace remedik --create-namespace \
   --set gateway.auth.token="$(openssl rand -hex 24)"
 ```
@@ -51,9 +51,9 @@ by the new version is rejected with `unknown field`. Apply them yourself,
 before the upgrade:
 
 ```console
-helm pull oci://ghcr.io/ratyx/charts/remedik --version <new> --untar
+helm pull oci://ghcr.io/remedik/charts/remedik --version <new> --untar
 kubectl apply --server-side --force-conflicts -f remedik/crds/
-helm upgrade remedik oci://ghcr.io/ratyx/charts/remedik --version <new> -n remedik
+helm upgrade remedik oci://ghcr.io/remedik/charts/remedik --version <new> -n remedik
 ```
 
 `--server-side` avoids the annotation size limit these CRDs are large enough

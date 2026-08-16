@@ -7,8 +7,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ratyx/remedik/api/v1alpha1"
-	"github.com/ratyx/remedik/internal/action"
+	"github.com/remedik/remedik/api/v1alpha1"
+	"github.com/remedik/remedik/internal/action"
 )
 
 // recordedEvent is one publication, captured so a test can assert on what

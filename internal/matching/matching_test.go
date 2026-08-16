@@ -3,7 +3,7 @@ package matching
 import (
 	"testing"
 
-	"github.com/ratyx/remedik/internal/alert"
+	"github.com/remedik/remedik/internal/alert"
 )
 
 // crashLoop is the alert used across these tests.

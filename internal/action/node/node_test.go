@@ -15,7 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/ratyx/remedik/internal/action"
+	"github.com/remedik/remedik/internal/action"
 )
 
 var nodeTarget = action.Target{Kind: "Node", Name: "aks-np1-0003"}

@@ -16,6 +16,17 @@
   var INTERVAL_MS = 10000;
   var STORAGE_KEY = "remedik.autorefresh";
 
+  // The running build's asset fingerprint. Only #content is swapped, so the
+  // stylesheet, this script and the whole page shell are whatever the tab
+  // loaded — for ever, in a tab left open across an operator upgrade. Its
+  // data would keep updating through last week's markup, which is the most
+  // convincing way for a page to be wrong.
+  var assetMeta = document.querySelector('meta[name="remedik-asset"]');
+  var asset = assetMeta ? assetMeta.content : "";
+
+  // LIVE_ID is the region a page may mark as the only part worth replacing.
+  var LIVE_ID = "live";
+
   var toggle = document.getElementById("refresh-toggle");
   var content = document.getElementById("content");
   var updated = document.getElementById("updated");
@@ -83,19 +94,30 @@
         // The footer's timestamp lives outside <main>, so it survives the
         // swap and can be updated in place.
         var doc = new DOMParser().parseFromString(html, "text/html");
-        var next = doc.getElementById("content");
-        if (!next) {
+
+        // A new build is serving this page. Swapping only #content would
+        // render it through the stylesheet and script the tab still holds,
+        // so take the whole page instead.
+        var fresh = doc.querySelector('meta[name="remedik-asset"]');
+        if (asset && fresh && fresh.content && fresh.content !== asset) {
+          window.location.reload();
           return;
         }
 
-        // Only #content is swapped, and the filter controls are outside it
-        // on purpose — see layout.html — so a half-made selection cannot be
-        // destroyed by a refresh.
-        content.innerHTML = next.innerHTML;
+        // A page may mark a narrower live region. The list does, because its
+        // filter controls hold what the reader typed or chose, and replacing
+        // them every ten seconds is what made the filter appear broken twice
+        // before. Pages with no live region swap their whole content.
+        var target = document.getElementById(LIVE_ID) || content;
+        var next = doc.getElementById(target.id);
+        if (!next) {
+          return;
+        }
+        target.innerHTML = next.innerHTML;
 
-        var fresh = doc.getElementById("updated");
-        if (updated && fresh) {
-          updated.textContent = fresh.textContent;
+        var stamp = doc.getElementById("updated");
+        if (updated && stamp) {
+          updated.textContent = stamp.textContent;
           updated.classList.remove("is-stale");
         }
       })

@@ -10,8 +10,9 @@
 <meta name="referrer" content="no-referrer">
 <meta name="robots" content="noindex, nofollow">
 <title>{{if .Cluster}}{{.Cluster}} &middot; {{end}}{{.Title}} &middot; remedik</title>
+<meta name="remedik-asset" content="{{.Asset}}">
 <link rel="stylesheet" href="/static/app.css?v={{.Asset}}">
-<link rel="icon" href="/static/favicon.svg?v={{.Asset}}" type="image/svg+xml">
+<link rel="icon" href="/static/favicon.png?v={{.Asset}}" type="image/png">
 </head>
 <body>
 <a class="skip-link" href="#content">Skip to content</a>
@@ -32,6 +33,7 @@
 
     <nav class="nav" aria-label="Primary">
       <a class="nav-link{{if eq .Nav "overview"}} is-active{{end}}" href="/">Overview</a>
+      <a class="nav-link{{if eq .Nav "remediations"}} is-active{{end}}" href="/remediations">Remediations</a>
       <a class="nav-link{{if eq .Nav "strategies"}} is-active{{end}}" href="/strategies">Strategies</a>
     </nav>
 
@@ -75,21 +77,6 @@
     </div>
   </div>
 </header>
-
-{{/*
-  The toolbar sits outside <main>, deliberately.
-
-  The auto-refresh swaps the contents of #content every ten seconds. Anything
-  inside it that holds reader state — a half-made filter selection — is
-  destroyed faster than anybody reaches the Apply button. Keeping the
-  controls out here makes that impossible rather than something the
-  JavaScript has to remember not to do, which is the same reasoning as
-  read-only being a constructor argument and dry-run being a separate method.
-
-  The cost is that the options do not gain a namespace seen since the page
-  loaded, until it is reloaded. That is the cheaper of the two failure modes.
-*/}}
-{{block "toolbar" .}}{{end}}
 
 <main id="content" class="wrap">
 {{template "content" .}}

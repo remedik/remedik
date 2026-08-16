@@ -4,12 +4,12 @@ description: Predictably boring auto-remediation for Kubernetes alerts.
 type: application
 # Chart version and application version move together while the project is
 # pre-1.0; they are decoupled at the first stable release.
-version: 0.1.0-alpha.1
-appVersion: "0.1.0-alpha.1"
-home: https://github.com/ratyx/remedik
-icon: https://raw.githubusercontent.com/ratyx/remedik/main/docs/logo.svg
+version: 0.1.0-rc.3
+appVersion: "0.1.0-rc.3"
+home: https://github.com/remedik/remedik
+icon: https://raw.githubusercontent.com/remedik/remedik/main/docs/brand/remedik-mark.png
 sources:
-  - https://github.com/ratyx/remedik
+  - https://github.com/remedik/remedik
 keywords:
   - remediation
   - alertmanager

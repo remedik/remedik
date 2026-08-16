@@ -15,7 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/ratyx/remedik/internal/action"
+	"github.com/remedik/remedik/internal/action"
 )
 
 // capturedEvent is one event as the API server would have stored it.

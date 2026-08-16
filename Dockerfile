@@ -7,14 +7,29 @@
 # Both are declared here, before any FROM: an ARG used in a FROM
 # instruction must live in the global scope, because arguments declared
 # inside a stage are not visible to the next stage's FROM.
-ARG GO_IMAGE=golang:1.26-alpine
+ARG GO_IMAGE=golang:1.26.6-alpine
 ARG RUNTIME_IMAGE=gcr.io/distroless/static:nonroot
 
 # Build stage. Dependencies always come from the module proxy, never from a
 # local vendor directory (.dockerignore excludes it), so the image builds
 # identically on a laptop and in CI.
-FROM ${GO_IMAGE} AS build
+#
+# --platform=$BUILDPLATFORM pins this stage to the machine doing the
+# building, and the compiler is told what to target instead. Without it,
+# buildx runs the whole stage under QEMU for every foreign architecture — so
+# `go build` for linux/arm64 is emulated instruction by instruction on an
+# amd64 runner. That is not a small tax: it took the first release's build
+# past twenty minutes, against roughly two for the same work compiled
+# natively.
+#
+# It is free to avoid because this binary is CGO_ENABLED=0 pure Go, which
+# Go cross-compiles perfectly. Anything linking C would have to go back to
+# emulation, or to a cross toolchain.
+FROM --platform=${BUILDPLATFORM} ${GO_IMAGE} AS build
 
+# Supplied by buildx, one value per platform being built.
+ARG TARGETOS
+ARG TARGETARCH
 ARG VERSION=dev
 WORKDIR /src
 
@@ -27,8 +42,8 @@ COPY . .
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -trimpath \
-      -ldflags "-s -w -X github.com/ratyx/remedik/internal/version.version=${VERSION}" \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
+      -ldflags "-s -w -X github.com/remedik/remedik/internal/version.version=${VERSION}" \
       -o /out/remedik ./cmd/remedik
 
 # Runtime stage: distroless, non-root, no shell. There is nothing in this

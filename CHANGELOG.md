@@ -7,12 +7,102 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-Everything below is implemented and verified: `make verify` for the unit
-suite, `make e2e` for the whole loop on a real cluster. Every OpenSpec
-change is archived, so `openspec/specs/` is the current contract rather than
-a proposal.
+Nothing yet.
+
+## [0.1.0-rc.3] - 2026-08-16
+
+The first release that completed found two things the pipeline had never had
+a chance to be wrong about, both of the same shape: a release candidate
+presenting itself as the current version.
+
+- The GitHub release was created with `prerelease: false`, so `v0.1.0-rc.2`
+  showed as the latest release. Somebody following the README would install
+  a release candidate believing it was stable.
+- The image pushed `:latest` unconditionally, so `docker pull
+  ghcr.io/remedik/remedik` would hand back the same candidate.
+
+Both now key off the tag: a hyphen in a semantic version means prerelease,
+and a prerelease moves neither `:latest` nor the release pointer. `rc.2` was
+marked as a prerelease retroactively.
+
+## [0.1.0-rc.2] - 2026-08-16
+
+`rc.1` was cancelled: its image build passed twenty minutes and was still
+running. The build stage carried no `--platform`, so buildx ran all of it
+under QEMU for `linux/arm64` — `go build` emulated instruction by
+instruction on an amd64 runner. Pinning the stage to the build platform and
+passing the target to the compiler moves it back to native speed, which is
+free for a `CGO_ENABLED=0` binary.
+
+Nothing else changed. Everything below still applies.
+
+## [0.1.0-rc.1] - 2026-08-16 [cancelled]
+
+The first published artifact, and a release candidate for one reason: the
+release pipeline itself had never run. Everything below is implemented and
+verified — `make verify` for the unit suite, `make e2e` for the whole loop
+on a real cluster, and CI green on the commit this was cut from — but a
+multi-arch build, keyless signing, an SBOM attestation and a chart push to
+OCI are four things that had only ever been read, never executed.
+
+If this tag produces a signed image, a verifiable attestation and an
+installable chart, the next one is v0.1.0.
+
+Every OpenSpec change is archived, so `openspec/specs/` is the current
+contract rather than a proposal.
 
 ### Added
+
+- **The dashboard holds up at any cluster size** (`scale-the-dashboard`).
+  Measured on 150 namespaces, 40 strategies and 10,000 records — a mid-sized
+  platform team, not an outlier — it rendered **190 filter links** and took
+  **49.7 ms** to build one list page.
+
+  The 49.7 ms was shape, not slowness: every filter option counted itself
+  with its own pass over every record, so the cost was options × records and
+  grew as a product. At 500 namespaces it would have been seconds, per page
+  load, on the operator that is also running remediation. Counting each
+  dimension in one pass gives identical numbers in **1.2 ms**. The slow
+  version read as obviously correct; the benchmark is what made it obviously
+  wrong, and it is now checked in so the claim stays a measurement.
+
+  The controls now follow the cardinality. A handful of values stays links —
+  one click, no menu. Above a threshold the dimension becomes a select
+  carrying every value with its count, beside links for the busiest few:
+  browsers give a select keyboard type-ahead, which is exactly the "find my
+  namespace among 150" interaction, for no JavaScript. Its form sends the
+  other clauses back as hidden fields, so choosing a namespace does not
+  clear a state somebody already chose.
+
+  The list pages rather than truncating, and paging composes with the
+  filters. A page beyond the end is clamped, because history is pruned and a
+  bookmarked page 40 may have become nothing.
+
+  Offering a select was only safe once the refresh stopped replacing the
+  controls: the list marks its rows and counts as the live region and keeps
+  its controls outside it.
+
+- **The dashboard is four pages, and the front one is a dashboard**
+  (`rework-dashboard-pages`). The overview carried the stats, the dry-run
+  report, the filters and a fifty-row table; it read as a list with
+  decoration, so "is anything wrong right now?" was three scrolls down under
+  a filter for a different question.
+
+  `/` is now panels — posture, what needs attention, activity over the last
+  day as bars, and where remediation is happening — each one a claim with a
+  link to its evidence. The "needs attention" panel orders by how much
+  silence each entry represents, so a failed escalation, which means nobody
+  was told, is listed above a failure that was reported. Every figure links
+  to the list that explains it.
+
+  `/remediations` is the list, with the filters and the counts. A panel is
+  one struct, one builder and one template block, and a page is a route, a
+  view, a template and a nav entry — so "namespace health" is an addition
+  rather than a rearrangement.
+
+  No new dependency and no request leaving the cluster: the activity chart
+  is bars in CSS from numbers the server already has, with the same numbers
+  in a table underneath.
 
 - **Per-namespace posture** (`add-namespace-posture`). `dryRun` was one flag
   on the operator, so a cluster was either all simulation or all action —
@@ -475,6 +565,58 @@ a proposal.
   release, so drift is visible without hunting through files.
 
 ### Fixed
+
+- **The first CI run on GitHub failed twice, for reasons worth keeping.**
+  `verify` passed both times; `vuln` and `e2e` did not, which is why this was
+  pushed before it was tagged.
+
+  `go.mod` pinned `go 1.26.0` and CI installs exactly what `go.mod` says, so
+  every job ran on a toolchain carrying eleven standard-library advisories.
+  Nothing in this repository's own code was implicated. It was invisible
+  locally because govulncheck ran only in CI and the local toolchain happened
+  to be newer — a check passing by accident of the machine. `make verify`
+  runs it now, and CI runs `make vuln` rather than installing
+  `govulncheck@latest` inline, so there is one definition and a green run
+  yesterday means the same thing today.
+
+  `e2e` could not install kind: `/usr/local/bin` is root-owned on the hosted
+  runner, so the download landed and the chmod was refused.
+
+  Then a flake: the strategies page is served from the manager's cache, and a
+  page can answer 200 before that cache holds what the page is about — most
+  visibly just after a `helm upgrade` restarts the pod. The assertion now
+  waits for the content, like the guard-event assertions already did, and
+  says what it saw when it does fail.
+
+- **The dashboard filter did not work, and neither of the first two fixes
+  reached anybody.** The stylesheet, the script and the page shell live
+  outside the content region, and the auto-refresh replaces only that
+  region. A tab left open across an operator upgrade therefore keeps the old
+  assets and the old markup for ever, refreshing its data through them —
+  which is the most convincing way for a page to be wrong, and why "the
+  filter still does not work" was the correct report each time.
+
+  The page now carries its asset fingerprint, and the refresh reloads when
+  the one it fetches differs. That is a defect in its own right: after any
+  upgrade, an open dashboard was rendering new data through old markup.
+
+  Filtering is now navigation. Every choice is a link, so there is no state
+  between choosing and applying — nothing a refresh can destroy, no Apply
+  button to reach before a timer fires, and no JavaScript on the path at
+  all. Clicking the value in force removes it, so the same control narrows
+  and widens, and each carries the count its choice would yield.
+
+- **The list panicked on a filter that matched nothing**, returning an empty
+  reply rather than a page. The display's "0 of 0" made the row loop start at
+  index -1. Caught by `make e2e`, which is the only test here that fetches
+  the page the way a browser does.
+
+  A panic in a view builder now renders a 500 page saying what happened and
+  that nothing in the cluster changed, instead of a closed connection — this
+  is the page somebody opens when something is already wrong.
+
+- **`/remediations` answered 307.** Only the trailing-slash form was
+  registered, so the mux redirected every link on every page.
 
 - **An action with no target no longer reports "on /".** `webhook.call`,
   `job.run` and `script.run` act outside the cluster and resolve to nothing,

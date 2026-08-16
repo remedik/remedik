@@ -14,7 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/ratyx/remedik/internal/action"
+	"github.com/remedik/remedik/internal/action"
 )
 
 // RestartAnnotation is the annotation patched onto a pod template to

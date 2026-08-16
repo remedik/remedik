@@ -74,6 +74,10 @@ row "helm-docs" \
 	"$(grep -oE 'HELM_DOCS_VERSION\s+:= \S+' Makefile | awk '{print $3}')" \
 	"$(latest_tag norwoodj/helm-docs 'v1[0-9.]+')"
 
+row "govulncheck" \
+	"$(grep -oE 'GOVULNCHECK_VERSION\s+:= \S+' Makefile | awk '{print $3}')" \
+	"$(latest_tag golang/vuln 'v1[0-9.]+')"
+
 row "helm" \
 	"$(grep -oE 'HELM_VERSION: \S+' .github/workflows/ci.yml | awk '{print $2}')" \
 	"$(latest_tag helm/helm 'v3[0-9.]+')"

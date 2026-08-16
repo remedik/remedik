@@ -16,49 +16,51 @@
 :root {
   color-scheme: light dark;
 
-  --bg: #f6f7f9;
+  --bg: #f7f8f5;
   --surface: #ffffff;
-  --surface-2: #f2f4f7;
-  --border: #e3e7ee;
-  --border-strong: #cfd6e2;
+  --surface-2: #eef0ea;
+  --border: #e1e4dd;
+  --border-strong: #c8ccc3;
 
-  --text: #101828;
-  --text-2: #475467;
+  --text: #101311;
+  --text-2: #474a45;
   /* Secondary text is small and carries real information — ages, durations,
      targets — so it stays above 4.5:1 on both surfaces rather than fading
      to a decorative grey. */
-  --text-3: #667085;
+  --text-3: #676a64;
 
-  --accent: #4f46e5;
+  --accent: #10604f;
   --accent-text: #ffffff;
-  --accent-bg: #eef2ff;
+  --accent-bg: #e2f0ec;
 
-  --ok: #067647;
-  --ok-bg: #ecfdf3;
-  --ok-border: #a9e9c4;
+  --ok: #1a6b42;
+  --ok-bg: #e6f4ec;
+  --ok-border: #b3dcc5;
 
   --failed: #b42318;
   --failed-bg: #fef3f2;
   --failed-border: #fecdca;
 
-  --dryrun: #5925dc;
-  --dryrun-bg: #f4f3ff;
-  --dryrun-border: #d9d6fe;
+  --dryrun: #2b5f9e;
+  --dryrun-bg: #e9f1fa;
+  --dryrun-border: #bcd5ec;
 
-  --running: #b54708;
-  --running-bg: #fffaeb;
-  --running-border: #fedf89;
+  --running: #9a4b07;
+  --running-bg: #fdf6ec;
+  --running-border: #f3d9ab;
 
-  --waiting: #475467;
-  --waiting-bg: #f2f4f7;
-  --waiting-border: #dde2ea;
+  --waiting: #4a4d47;
+  --waiting-bg: #eef0ea;
+  --waiting-border: #d8dbd3;
 
-  --muted: #667085;
-  --muted-bg: #f2f4f7;
-  --muted-border: #e3e7ee;
+  --muted: #676a64;
+  --muted-bg: #eef0ea;
+  --muted-border: #e1e4dd;
 
-  --shadow: 0 1px 2px rgb(16 24 40 / 4%), 0 1px 3px rgb(16 24 40 / 6%);
-  --shadow-lg: 0 4px 6px -2px rgb(16 24 40 / 3%), 0 12px 16px -4px rgb(16 24 40 / 8%);
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 6.5 8 10.5 12 6.5' fill='none' stroke='%23676a64' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+
+  --shadow: 0 1px 2px rgb(16 19 17 / 4%), 0 1px 3px rgb(16 19 17 / 6%);
+  --shadow-lg: 0 4px 6px -2px rgb(16 19 17 / 3%), 0 12px 16px -4px rgb(16 19 17 / 8%);
 
   --radius: 12px;
   --radius-sm: 8px;
@@ -71,46 +73,48 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0b0e14;
-    --surface: #121722;
-    --surface-2: #171d2a;
-    --border: #232b3a;
-    --border-strong: #333d51;
+    --bg: #0c0e0d;
+    --surface: #141715;
+    --surface-2: #1b1f1c;
+    --border: #262b27;
+    --border-strong: #373d38;
 
-    --text: #e6ebf4;
-    --text-2: #a4aec1;
-    --text-3: #77839a;
+    --text: #f2f3ef;
+    --text-2: #b0b4ad;
+    --text-3: #878c85;
 
-    --accent: #8b8cf9;
-    --accent-text: #0b0e14;
-    --accent-bg: #1a1b38;
+    --accent: #64d3b4;
+    --accent-text: #0c0e0d;
+    --accent-bg: #102a24;
 
-    --ok: #47d18b;
-    --ok-bg: #0e2a1e;
-    --ok-border: #1f5c40;
+    --ok: #6dd58c;
+    --ok-bg: #102a1b;
+    --ok-border: #24603d;
 
     --failed: #ff8b80;
     --failed-bg: #2a1310;
     --failed-border: #5f2521;
 
-    --dryrun: #b7a6ff;
-    --dryrun-bg: #1b1734;
-    --dryrun-border: #3d3072;
+    --dryrun: #85b8f0;
+    --dryrun-bg: #101f2e;
+    --dryrun-border: #25445f;
 
     --running: #f5b449;
     --running-bg: #2a1e09;
     --running-border: #5c4014;
 
-    --waiting: #a4aec1;
-    --waiting-bg: #1a2029;
-    --waiting-border: #2b3342;
+    --waiting: #b0b4ad;
+    --waiting-bg: #1a1e1b;
+    --waiting-border: #2b312d;
 
-    --muted: #8d99ad;
-    --muted-bg: #171d2a;
-    --muted-border: #262f3e;
+    --muted: #8f948c;
+    --muted-bg: #1b1f1c;
+    --muted-border: #272d28;
 
-    --shadow: 0 1px 2px rgb(0 0 0 / 30%);
-    --shadow-lg: 0 12px 24px -8px rgb(0 0 0 / 45%);
+    --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 6.5 8 10.5 12 6.5' fill='none' stroke='%23878c85' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+
+    --shadow: 0 1px 2px rgb(0 0 0 / 34%);
+    --shadow-lg: 0 12px 24px -8px rgb(0 0 0 / 48%);
   }
 }
 
@@ -349,12 +353,17 @@ code {
   white-space: nowrap;
 }
 
+/* Named for the tone the view emits (dryrun, ok, failed, running, muted),
+   not for a word chosen by hand: the posture panel renders mode-{{.Tone}},
+   so a chip whose class does not exist is invisible rather than wrong. */
+.mode-dryrun,
 .mode-dry {
   color: var(--dryrun);
   background: var(--dryrun-bg);
   border-color: var(--dryrun-border);
 }
 
+.mode-ok,
 .mode-live {
   color: var(--ok);
   background: var(--ok-bg);
@@ -364,6 +373,7 @@ code {
 /* Mixed posture: some namespaces act, others only report. It is deliberately
    the loudest of the three, because it is the state somebody is most likely
    to misread — "dryRun: true" in a values file over a cluster that acts. */
+.mode-running,
 .mode-mixed {
   color: var(--running);
   background: var(--running-bg);
@@ -377,6 +387,8 @@ code {
   font-variant-numeric: tabular-nums;
 }
 
+.mode-muted,
+.mode-failed,
 .mode-off {
   color: var(--muted);
   background: var(--muted-bg);
@@ -403,6 +415,10 @@ code {
   color: var(--text);
 }
 
+.refresh-label {
+  font-variant-numeric: tabular-nums;
+}
+
 .refresh-dot {
   width: 7px;
   height: 7px;
@@ -412,7 +428,11 @@ code {
   animation: pulse 2.4s ease-in-out infinite;
 }
 
-.refresh[aria-pressed="false"] .refresh-dot {
+.refresh[aria-pressed="false"] .refresh-label {
+  font-variant-numeric: tabular-nums;
+}
+
+.refresh-dot {
   background: var(--text-3);
   box-shadow: none;
   animation: none;
@@ -430,7 +450,11 @@ code {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .refresh-dot {
+  .refresh-label {
+  font-variant-numeric: tabular-nums;
+}
+
+.refresh-dot {
     animation: none;
   }
 }
@@ -557,6 +581,10 @@ main.wrap {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 16px;
+  /* Panels take their own height. Stretching a short one to match a tall
+     neighbour left the activity chart with a third of a screen of empty
+     card below it. */
+  align-items: start;
 }
 
 .stats {
@@ -621,6 +649,364 @@ main.wrap {
   font-size: 0.75rem;
 }
 
+/* Every figure links to the list it counts. A number nobody can click is a
+   number they have to go and look for, which on a dashboard is the same as
+   not having it. */
+a.stat {
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+
+a.stat:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  a.stat:hover {
+    transform: none;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Panels
+
+   The overview is panels: each one a claim, with a link to its evidence.
+   Adding "namespace health" later is a struct, a builder and a block — not a
+   rearrangement of the page — so the panel is the unit worth styling once.
+   -------------------------------------------------------------------------- */
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px 18px 18px;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.panel-head h2 {
+  font-size: 0.95rem;
+}
+
+.panel-meta {
+  color: var(--text-3);
+  font-size: 0.76rem;
+}
+
+.panel-subtitle {
+  margin: 16px 0 8px;
+  color: var(--text-3);
+  font-size: 0.72rem;
+  font-weight: 620;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.panel-subtitle:first-of-type {
+  margin-top: 4px;
+}
+
+.panel-lede {
+  color: var(--text-2);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.panel-foot {
+  margin-top: 12px;
+  color: var(--text-3);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.panel-quiet {
+  color: var(--text-2);
+  font-size: 0.88rem;
+}
+
+.panel-ok {
+  border-color: var(--ok-border);
+  background: var(--ok-bg);
+}
+
+.panel-dryrun {
+  border-color: var(--dryrun-border);
+  background: var(--dryrun-bg);
+}
+
+.panel-running {
+  border-color: var(--running-border);
+  background: var(--running-bg);
+}
+
+.panel-failed {
+  border-color: var(--failed-border);
+  background: var(--failed-bg);
+}
+
+/* --------------------------------------------------------------------------
+   Needs attention
+
+   The one panel that should be loud, and empty most of the time.
+   -------------------------------------------------------------------------- */
+
+.attention {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 12px;
+}
+
+.attention-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  text-decoration: none;
+  color: inherit;
+}
+
+.attention-item:hover {
+  border-color: var(--border-strong);
+}
+
+.attention-count {
+  font-size: 1.6rem;
+  font-weight: 680;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.attention-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.attention-label {
+  font-weight: 620;
+  font-size: 0.88rem;
+}
+
+.attention-detail {
+  color: var(--text-3);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.attention-failed {
+  border-color: var(--failed-border);
+  background: var(--failed-bg);
+}
+
+.attention-failed .attention-count {
+  color: var(--failed);
+}
+
+.attention-waiting {
+  border-color: var(--waiting-border);
+  background: var(--waiting-bg);
+}
+
+.attention-waiting .attention-count {
+  color: var(--text-2);
+}
+
+/* --------------------------------------------------------------------------
+   Activity
+
+   Twenty-four bars from numbers the server already has. A charting library
+   to draw twenty-four rectangles would cost a bundler, a release artifact
+   and a request leaving the cluster, which this page's CSP forbids anyway.
+   The same numbers are in a <details> table underneath.
+   -------------------------------------------------------------------------- */
+
+.chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 120px;
+  padding: 4px 0;
+}
+
+.chart-col {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  min-width: 0;
+}
+
+.chart-bar {
+  width: 100%;
+  height: var(--pct, 0%);
+  min-height: 2px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+
+.chart-seg {
+  display: block;
+  height: var(--pct, 0%);
+  min-height: 2px;
+}
+
+.chart-ok {
+  background: var(--ok);
+}
+
+.chart-failed {
+  background: var(--failed);
+}
+
+.chart-dryrun {
+  background: var(--dryrun);
+}
+
+.chart-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  color: var(--text-3);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-table {
+  margin-top: 12px;
+}
+
+.chart-table summary {
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: 0.8rem;
+}
+
+.chart-table summary:hover {
+  color: var(--accent);
+}
+
+/* --------------------------------------------------------------------------
+   Proportions
+
+   The dashboard serves style-src 'self' with no 'unsafe-inline', so a
+   style="width:33%" attribute is dropped by the browser and the element
+   falls back to its default size. Four bar charts rendered at full width
+   for exactly that reason, silently, from the day each was written.
+
+   Proportions therefore arrive as a class. Five-percent steps are
+   indistinguishable on a bar and keep this to twenty-one rules; each sets
+   one custom property and the component decides which axis uses it.
+   -------------------------------------------------------------------------- */
+
+.pct-0 { --pct: 0%; }
+.pct-5 { --pct: 5%; }
+.pct-10 { --pct: 10%; }
+.pct-15 { --pct: 15%; }
+.pct-20 { --pct: 20%; }
+.pct-25 { --pct: 25%; }
+.pct-30 { --pct: 30%; }
+.pct-35 { --pct: 35%; }
+.pct-40 { --pct: 40%; }
+.pct-45 { --pct: 45%; }
+.pct-50 { --pct: 50%; }
+.pct-55 { --pct: 55%; }
+.pct-60 { --pct: 60%; }
+.pct-65 { --pct: 65%; }
+.pct-70 { --pct: 70%; }
+.pct-75 { --pct: 75%; }
+.pct-80 { --pct: 80%; }
+.pct-85 { --pct: 85%; }
+.pct-90 { --pct: 90%; }
+.pct-95 { --pct: 95%; }
+.pct-100 { --pct: 100%; }
+
+/* --------------------------------------------------------------------------
+   Where: a name, a bar, a count, and the list behind it
+   -------------------------------------------------------------------------- */
+
+.breakdown {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.breakdown-row {
+  display: grid;
+  /* The last two columns are fixed, not auto. With `auto` each row sizes its
+     own columns, so a row carrying a "3 failed" label got a narrower bar
+     track than one without — and bars of different lengths measured against
+     different tracks cannot be compared, which is worse than no bars. */
+  grid-template-columns: minmax(0, 9rem) 1fr 2.5rem 5rem;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  color: inherit;
+}
+
+.breakdown-row:hover {
+  background: var(--surface-2);
+}
+
+.breakdown-name {
+  font-family: var(--mono);
+  font-size: 0.79rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.breakdown-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.breakdown-fill {
+  display: block;
+  width: var(--pct, 0%);
+  height: 100%;
+  background: var(--accent);
+  opacity: 0.55;
+  border-radius: 3px;
+}
+
+.breakdown-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 620;
+  font-size: 0.82rem;
+  text-align: right;
+}
+
+.breakdown-bad {
+  color: var(--failed);
+  font-size: 0.72rem;
+  white-space: nowrap;
+  text-align: right;
+}
+
 /* --------------------------------------------------------------------------
    The dry-run report
    -------------------------------------------------------------------------- */
@@ -673,7 +1059,10 @@ main.wrap {
   min-width: 130px;
 }
 
-.bar {
+/* Renamed from .bar/.bar-fill when the overview was rebuilt: the template
+   moved to share-track/share-fill and these did not, so this column had no
+   styling at all until a screenshot showed it. */
+.share-track {
   display: inline-block;
   vertical-align: middle;
   width: 84px;
@@ -684,14 +1073,15 @@ main.wrap {
   margin-right: 8px;
 }
 
-.bar-fill {
+.share-fill {
   display: block;
+  width: var(--pct, 0%);
   height: 100%;
   border-radius: 999px;
   background: var(--dryrun);
 }
 
-.share-num {
+.share-value {
   font-variant-numeric: tabular-nums;
   color: var(--text-2);
   font-size: 0.8rem;
@@ -777,6 +1167,13 @@ main.wrap {
   font-size: 0.74rem;
   font-weight: 600;
   white-space: nowrap;
+}
+
+.pill-muted,
+.pill-waiting {
+  color: var(--muted);
+  background: var(--muted-bg);
+  border-color: var(--muted-border);
 }
 
 .pill-lg {
@@ -1340,139 +1737,40 @@ main.wrap {
 /* --------------------------------------------------------------------------
    Filters
 
-   A plain GET form. The dashboard allowlists GET and HEAD before routing, so
-   a filter that needed a write could not exist here — and the consequence is
-   a filtered view that is a URL, which is what somebody wants during an
-   incident. It works with JavaScript disabled, which the auto-refresh does
-   not need to.
+   Links, not a form. A <select> plus a submit button holds state between the
+   choice and the submission, and that state was destroyed by the ten-second
+   refresh — twice, in two different ways. A link has nothing to lose: one
+   click filters, with no JavaScript on the path at all.
    -------------------------------------------------------------------------- */
-
-/* The band sits between the top bar and <main>, which is where the filter
-   lives in the markup too — outside the region the auto-refresh replaces. */
-.toolbar {
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-}
-
-.toolbar-inner {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 12px 18px;
-  padding-block: 12px;
-}
 
 .filters {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
+  flex-direction: column;
   gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
 }
 
-.filter {
+.filter-row {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 10px;
 }
 
 .filter-label {
+  min-width: 5.5rem;
+  color: var(--text-3);
   font-size: 0.72rem;
   font-weight: 620;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--text-3);
 }
 
-.filters select {
-  appearance: none;
-  font: inherit;
-  font-size: 0.83rem;
-  padding: 6px 30px 6px 10px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-strong);
-  background-color: var(--surface);
-  color: var(--text);
-  max-width: 15rem;
-  /* An inline chevron, so no request leaves the page. */
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 6.5 8 10.5 12 6.5' fill='none' stroke='%23667085' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-  background-size: 14px;
-}
-
-.filters select:hover {
-  border-color: var(--accent);
-}
-
-.filter-apply {
-  font: inherit;
-  font-size: 0.83rem;
-  font-weight: 600;
-  padding: 6px 16px;
-  border-radius: var(--radius-sm);
-  border: 1px solid transparent;
-  background: var(--accent);
-  color: var(--accent-text);
-  cursor: pointer;
-}
-
-.filter-apply:hover {
-  filter: brightness(1.08);
-}
-
-.filter-clear {
-  font-size: 0.83rem;
-  padding: 6px 4px;
-  color: var(--text-2);
-  text-decoration: none;
-}
-
-.filter-clear:hover {
-  color: var(--accent);
-  text-decoration: underline;
-}
-
-@media (width <= 560px) {
-  .toolbar-inner,
-  .filters {
-    align-items: stretch;
-  }
-
-  .active-filter {
-    margin-left: 0;
-  }
-
-  .filter,
-  .filters select,
-  .filter-apply {
-    width: 100%;
-    max-width: none;
-  }
-}
-
-/* The applied filter, stated rather than implied. "2 hidden by the filter" in
-   the section meta is true and easy to read past; a page that is showing a
-   subset should look like it is. Each chip is the link that lifts just that
-   clause. */
-
-.active-filter {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-}
-
-.active-filter-label {
-  font-size: 0.76rem;
-  font-weight: 620;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: var(--text-3);
-}
-
-.active-filter-chips {
+.filter-values {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -1481,26 +1779,186 @@ main.wrap {
   list-style: none;
 }
 
-.chip-active {
+.pill-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 0.78rem;
+  font-weight: 540;
   text-decoration: none;
+  white-space: nowrap;
+}
+
+.pill-link:hover {
   border-color: var(--accent);
-  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.pill-link.is-on {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 620;
+}
+
+.pill-count {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.72rem;
+  opacity: 0.7;
+}
+
+/* Above a handful of values a dimension becomes a select. The browser's own
+   keyboard type-ahead is the search, which is why this is not a compromise
+   at a hundred and fifty namespaces. */
+.filter-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.filter-select select {
+  appearance: none;
+  font: inherit;
+  font-size: 0.78rem;
+  max-width: 16rem;
+  padding: 3px 26px 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background-color: var(--surface);
+  color: var(--text);
+  /* An inline chevron, so no request leaves the page. */
+  /* A data: URI cannot read a custom property, so this is the one colour in
+     the stylesheet written per theme rather than taken from a token. It is
+     redefined under prefers-color-scheme below; leaving it at the light
+     value would draw a near-black chevron on a near-black control. */
+  background-image: var(--select-chevron);
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  background-size: 13px;
+}
+
+.filter-select select:hover {
+  border-color: var(--accent);
+}
+
+.filter-select button {
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 620;
+  padding: 3px 12px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: var(--accent);
+  color: var(--accent-text);
   cursor: pointer;
 }
 
-.chip-active .chip-key {
-  color: var(--accent);
+.filter-select button:hover {
+  filter: brightness(1.08);
 }
 
-.chip-active:hover {
-  filter: brightness(0.97);
+/* --------------------------------------------------------------------------
+   Paging
+   -------------------------------------------------------------------------- */
+
+.paging {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 14px;
 }
 
-.chip-remove {
-  margin-left: 6px;
-  font-weight: 700;
-  color: var(--accent);
-  line-height: 1;
+.paging-where {
+  color: var(--text-3);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.paging-links {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.paging-page {
+  color: var(--text-3);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.pill-link.is-off {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.filter-summary {
+  margin: 2px 0 0;
+  color: var(--text-3);
+  font-size: 0.8rem;
+}
+
+.tallies {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-3);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.tallies li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.dot-ok {
+  background: var(--ok);
+}
+
+.dot-failed {
+  background: var(--failed);
+}
+
+.dot-dryrun {
+  background: var(--dryrun);
+}
+
+.dot-running {
+  background: var(--running);
+}
+
+.table-note {
+  margin-top: 10px;
+  font-size: 0.8rem;
+}
+
+.section-link {
+  font-size: 0.8rem;
+  font-weight: 560;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.section-link:hover {
+  text-decoration: underline;
 }
 
 /* --------------------------------------------------------------------------

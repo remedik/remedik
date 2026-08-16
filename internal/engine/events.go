@@ -11,7 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/events"
 
-	"github.com/ratyx/remedik/internal/action"
+	"github.com/remedik/remedik/internal/action"
 )
 
 // Event reasons published on a remediated object. They are a closed set

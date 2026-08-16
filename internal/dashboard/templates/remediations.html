@@ -1,0 +1,205 @@
+{{define "content"}}
+
+<div class="page-head">
+  <div>
+    <h1>Remediations</h1>
+    <p class="lede">
+      Every execution remedik has kept, newest first.
+      {{if .Filtered}}Filtered — {{.Total}} of {{.TotalUnfiltered}}.{{end}}
+    </p>
+  </div>
+</div>
+
+{{if not .Empty}}
+{{/*
+  Filtering is navigation. Every choice is a link, so there is no selection
+  held between choosing and submitting — nothing a background refresh can
+  destroy, no Apply button to reach before a timer fires, and no JavaScript
+  on this path at all. Clicking the value already in force removes it, so
+  the same control both narrows and widens.
+*/}}
+<section class="filters" aria-labelledby="filters-heading">
+  <h2 id="filters-heading" class="visually-hidden">Filters</h2>
+
+  {{range .Groups}}
+  <div class="filter-row">
+    <span class="filter-label" id="filter-{{.Param}}">{{.Label}}</span>
+
+    {{if .AsSelect}}
+    {{/*
+      Too many values to draw as links. A select is not a lesser control
+      here — browsers give it keyboard type-ahead, which is exactly the
+      "find my namespace among a hundred and fifty" interaction, and it
+      costs no JavaScript. It is safe only because the refresh replaces
+      #live and leaves these controls alone.
+    */}}
+    <form class="filter-select" method="get" action="/remediations">
+      {{range .KeptParams}}
+      <input type="hidden" name="{{.Key}}" value="{{.Value}}">
+      {{end}}
+      <label class="visually-hidden" for="pick-{{.Param}}">{{.Label}}</label>
+      <select id="pick-{{.Param}}" name="{{.Param}}">
+        <option value="">All {{len .Options}} &mdash; type to search</option>
+        {{$current := .Param}}
+        {{range .Options}}
+        <option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Value}} ({{.Count}})</option>
+        {{end}}
+      </select>
+      <button type="submit">Go</button>
+    </form>
+
+    <ul class="filter-values" aria-labelledby="filter-{{.Param}}">
+      <li>
+        <a class="pill-link{{if .AllSelected}} is-on{{end}}" href="{{.AllURL}}"
+           {{if .AllSelected}}aria-current="true"{{end}}>All</a>
+      </li>
+      {{range .QuickPicks}}
+      <li>
+        <a class="pill-link{{if .Selected}} is-on{{end}}" href="{{.URL}}"
+           {{if .Selected}}aria-current="true" title="Click to stop filtering by this"{{end}}>
+          {{.Value}}<span class="pill-count">{{.Count}}</span>
+        </a>
+      </li>
+      {{end}}
+    </ul>
+
+    {{else}}
+    <ul class="filter-values" aria-labelledby="filter-{{.Param}}">
+      <li>
+        <a class="pill-link{{if .AllSelected}} is-on{{end}}" href="{{.AllURL}}"
+           {{if .AllSelected}}aria-current="true"{{end}}>All</a>
+      </li>
+      {{range .Options}}
+      <li>
+        <a class="pill-link{{if .Selected}} is-on{{end}}" href="{{.URL}}"
+           {{if .Selected}}aria-current="true" title="Click to stop filtering by this"{{end}}>
+          {{.Value}}<span class="pill-count">{{.Count}}</span>
+        </a>
+      </li>
+      {{end}}
+    </ul>
+    {{end}}
+  </div>
+  {{end}}
+
+  {{if .Filtered}}
+  <p class="filter-summary">
+    Showing {{.Total}} of {{.TotalUnfiltered}} — {{.Excluded}} hidden.
+    <a href="/remediations">Clear all filters</a>
+  </p>
+  {{end}}
+</section>
+{{end}}
+
+{{/*
+  Only this region is replaced by the ten-second refresh. The filter controls
+  above it hold what the reader typed or chose, and replacing those is what
+  made the filter appear broken twice before.
+*/}}
+<div id="live">
+
+{{if .HasRows}}
+<section aria-labelledby="list-heading">
+  <div class="section-head">
+    <h2 id="list-heading" class="visually-hidden">Executions</h2>
+    <ul class="tallies">
+      {{if .Succeeded}}<li><span class="dot dot-ok" aria-hidden="true"></span>{{.Succeeded}} succeeded</li>{{end}}
+      {{if .Failed}}<li><span class="dot dot-failed" aria-hidden="true"></span>{{.Failed}} failed</li>{{end}}
+      {{if .Simulated}}<li><span class="dot dot-dryrun" aria-hidden="true"></span>{{.Simulated}} simulated</li>{{end}}
+      {{if .InFlight}}<li><span class="dot dot-running" aria-hidden="true"></span>{{.InFlight}} in flight</li>{{end}}
+    </ul>
+  </div>
+
+  <div class="table-scroll">
+    <table class="table table-hover">
+      <caption class="visually-hidden">Executions, newest first</caption>
+      <thead>
+        <tr>
+          <th scope="col">Remediation</th>
+          <th scope="col">Strategy</th>
+          <th scope="col">Target</th>
+          <th scope="col">Alert</th>
+          <th scope="col">State</th>
+          <th scope="col" class="num">Took</th>
+          <th scope="col" class="num">Age</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Rows}}
+        <tr>
+          <th scope="row"><a class="row-link" href="{{.URL}}"><code>{{.Name}}</code></a></th>
+          <td><code class="dim">{{.Strategy}}</code></td>
+          <td>{{if .Target}}<code class="dim">{{.Target}}</code>{{else}}<span class="dim">&mdash;</span>{{end}}</td>
+          <td>{{if .Alert}}{{.Alert}}{{else}}<span class="dim">&mdash;</span>{{end}}</td>
+          <td>
+            <span class="pill pill-{{.Tone}}">{{.State}}</span>
+            {{if eq .Escalated "sent"}}
+            <span class="tag tag-quiet" title="This failure was escalated, and the escalation went out.">paged</span>
+            {{else if eq .Escalated "failed"}}
+            <span class="tag tag-loud" title="This failure was escalated and the escalation itself failed. Assume nobody was told.">page failed</span>
+            {{end}}
+          </td>
+          <td class="num dim">{{if .Duration}}{{.Duration}}{{else}}&mdash;{{end}}</td>
+          <td class="num dim"><time title="{{.AgeExact}}">{{.Age}}</time></td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+
+  {{if .Paging.Many}}
+  <nav class="paging" aria-label="Pages">
+    <span class="paging-where">
+      {{.Paging.First}}&ndash;{{.Paging.Last}} of {{.Total}}
+    </span>
+    <span class="paging-links">
+      {{if .Paging.PrevURL}}
+      <a class="pill-link" href="{{.Paging.PrevURL}}" rel="prev">&larr; Newer</a>
+      {{else}}
+      <span class="pill-link is-off">&larr; Newer</span>
+      {{end}}
+      <span class="paging-page">Page {{.Paging.Page}} of {{.Paging.Pages}}</span>
+      {{if .Paging.NextURL}}
+      <a class="pill-link" href="{{.Paging.NextURL}}" rel="next">Older &rarr;</a>
+      {{else}}
+      <span class="pill-link is-off">Older &rarr;</span>
+      {{end}}
+    </span>
+  </nav>
+  {{end}}
+</section>
+
+{{else if .Filtered}}
+<div class="empty">
+  <h3>Nothing matches this filter</h3>
+  <p>
+    {{.TotalUnfiltered}} execution{{if ne .TotalUnfiltered 1}}s{{end}} recorded, none of them
+    {{- if .Filter.Namespace}} in <code>{{.Filter.Namespace}}</code>{{end}}
+    {{- if and .Filter.Namespace (or .Filter.Strategy .Filter.State)}} and{{end}}
+    {{- if .Filter.Strategy}} from <code>{{.Filter.Strategy}}</code>{{end}}
+    {{- if and .Filter.Strategy .Filter.State}} and{{end}}
+    {{- if .Filter.State}} in state <code>{{.Filter.State}}</code>{{end -}}
+    . <a href="/remediations">Show everything</a>.
+  </p>
+</div>
+
+{{else}}
+<div class="empty">
+  <svg class="empty-mark" viewBox="0 0 48 48" aria-hidden="true" focusable="false">
+    <circle cx="24" cy="24" r="17" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-dasharray="4 5" stroke-linecap="round"/>
+    <path d="M17 24h5l2.5-5 3 10 2.5-5H35" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <h3>Nothing has run yet</h3>
+  <p>
+    No alert has matched a strategy since remedik started. That is the normal
+    state of a healthy cluster; the <a href="/">overview</a> says whether
+    remedik is configured to do anything when one does.
+  </p>
+</div>
+{{end}}
+
+</div>
+
+{{end}}

@@ -7,7 +7,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/ratyx/remedik/api/v1alpha1"
+	"github.com/remedik/remedik/api/v1alpha1"
 )
 
 // fakeReader is an in-memory stand-in for the manager's cache.

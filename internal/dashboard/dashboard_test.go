@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -8,7 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ratyx/remedik/api/v1alpha1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/remedik/remedik/api/v1alpha1"
 )
 
 // newHandler builds a handler over the given fixtures.
@@ -331,7 +334,7 @@ func TestOverviewEmptyStates(t *testing.T) {
 		{
 			name:       "enabled, but nothing has matched",
 			strategies: []v1alpha1.RemediationStrategy{enabledStrategy()},
-			want:       "Nothing has run yet",
+			want:       "Nothing has matched yet",
 		},
 	}
 
@@ -346,7 +349,9 @@ func TestOverviewEmptyStates(t *testing.T) {
 	}
 }
 
-func TestOverviewCapsTheListAndSaysSo(t *testing.T) {
+// The overview shows a short tail and sends the reader to the list, which is
+// the whole point of the list existing.
+func TestOverviewShowsATailAndLinksToTheList(t *testing.T) {
 	records := make([]v1alpha1.Remediation, 0, recentLimit+5)
 	for i := range recentLimit + 5 {
 		records = append(records, succeededRemediation("ok-"+strconv.Itoa(i), i))
@@ -355,8 +360,38 @@ func TestOverviewCapsTheListAndSaysSo(t *testing.T) {
 	h, _ := newHandler(t, Config{Reader: &fakeReader{remediations: records}})
 	body := get(t, h, "/", nil).Body.String()
 
-	mustContain(t, body, "showing 50 of 55", "state how much of the history is listed")
-	mustContain(t, body, "5 older records not listed", "say what was left out")
+	if rows := strings.Count(body, `<tr>`); rows > recentLimit+4 {
+		t.Errorf("the overview drew %d rows; it is a summary, not the list", rows)
+	}
+	mustContain(t, body, `href="/remediations"`, "link to the full list")
+	mustContain(t, body, "All 13 remediations", "say how many there are in total")
+}
+
+// The list pages rather than truncating. "200 shown, 9,800 not drawn" is not
+// a list of what happened; it is a truncation with an apology.
+func TestRemediationsListPages(t *testing.T) {
+	records := make([]v1alpha1.Remediation, 0, pageSize+5)
+	for i := range pageSize + 5 {
+		records = append(records, succeededRemediation("ok-"+strconv.Itoa(i), i))
+	}
+
+	h, _ := newHandler(t, Config{Reader: &fakeReader{remediations: records}})
+
+	first := get(t, h, "/remediations", nil).Body.String()
+	mustContain(t, first, "Page 1 of 2", "say where the reader is")
+	mustContain(t, first, `href="/remediations?page=2"`, "offer the next page")
+
+	second := get(t, h, "/remediations?page=2", nil).Body.String()
+	mustContain(t, second, "Page 2 of 2", "say where the reader is on page two")
+	mustContain(t, second, "101&ndash;105 of 105", "say which rows are drawn")
+
+	// A bookmarked page beyond the end shows the last page rather than an
+	// error: history is pruned, so yesterday's page 40 is today's nothing.
+	beyond := get(t, h, "/remediations?page=99", nil)
+	if beyond.Code != http.StatusOK {
+		t.Errorf("GET ?page=99 = %d, want 200", beyond.Code)
+	}
+	mustContain(t, beyond.Body.String(), "Page 2 of 2", "clamp to the last page")
 }
 
 // --------------------------------------------------------------------------
@@ -443,16 +478,16 @@ func TestUnknownRemediationIs404(t *testing.T) {
 		"explain that terminal records do not live forever")
 }
 
-func TestRemediationsIndexRedirectsToTheOverview(t *testing.T) {
-	h, _ := newHandler(t, Config{Reader: &fakeReader{}})
+func TestRemediationsIndexIsTheList(t *testing.T) {
+	h, _ := newHandler(t, Config{Reader: &fakeReader{
+		remediations: []v1alpha1.Remediation{succeededRemediation("ok-1", 5)},
+	}})
 
 	rec := get(t, h, "/remediations/", nil)
-	if rec.Code != http.StatusSeeOther {
-		t.Fatalf("GET /remediations/ = %d, want 303", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /remediations/ = %d, want 200", rec.Code)
 	}
-	if loc := rec.Header().Get("Location"); loc != "/" {
-		t.Errorf("Location = %q, want /", loc)
-	}
+	mustContain(t, rec.Body.String(), "ok-1", "list the executions")
 }
 
 // --------------------------------------------------------------------------
@@ -539,4 +574,30 @@ func TestNewRejectsAnIncompleteConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A bug in a view builder must not become a closed connection. This is the
+// page somebody opens when something is already wrong.
+func TestPanicRendersAPageRatherThanNothing(t *testing.T) {
+	h, _ := newHandler(t, Config{Reader: &fakeReader{}})
+
+	// A reader that panics stands in for any builder bug; the real one was
+	// an empty filter result making a row loop start at index -1.
+	h.reader = panickingReader{}
+
+	rec := get(t, h, "/", nil)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("GET / = %d, want 500", rec.Code)
+	}
+	body := rec.Body.String()
+	mustContain(t, body, "Something went wrong", "say that the page failed")
+	mustContain(t, body, "nothing about your cluster has changed",
+		"reassure the reader that the dashboard only reads")
+}
+
+type panickingReader struct{ client.Reader }
+
+func (panickingReader) List(context.Context, client.ObjectList, ...client.ListOption) error {
+	panic("a builder bug")
 }

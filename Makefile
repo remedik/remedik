@@ -1,5 +1,5 @@
 BIN     := remedik
-MODULE  := github.com/ratyx/remedik
+MODULE  := github.com/remedik/remedik
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X $(MODULE)/internal/version.version=$(VERSION)
 
@@ -13,6 +13,7 @@ CONTROLLER_GEN_VERSION := v0.21.0
 GOLANGCI_LINT_VERSION := v2.12.2
 YAMLFMT_VERSION       := v0.21.0
 HELM_DOCS_VERSION     := v1.14.2
+GOVULNCHECK_VERSION   := v1.1.4
 # kube-prometheus-stack chart version used by the dev cluster.
 KPS_CHART_VERSION ?= 88.3.0
 
@@ -21,6 +22,7 @@ CONTROLLER_GEN := $(TOOLS_BIN)/controller-gen
 GOLANGCI  := $(TOOLS_BIN)/golangci-lint
 YAMLFMT   := $(TOOLS_BIN)/yamlfmt
 HELMDOCS  := $(TOOLS_BIN)/helm-docs
+GOVULN    := $(TOOLS_BIN)/govulncheck
 
 KIND_CLUSTER := remedik-dev
 
@@ -105,7 +107,15 @@ helm-lint: ## Lint the Helm chart (requires helm)
 helm-docs: $(HELMDOCS) ## Regenerate chart README.md from values.yaml annotations
 	$(HELMDOCS) --chart-search-root charts
 
-verify: fmt vet lint yaml-lint helm-lint verify-docs specs test ## Everything CI runs
+verify: fmt vet lint yaml-lint helm-lint verify-docs specs vuln test ## Everything CI runs
+
+# Advisories against the toolchain go.mod pins, which is what CI installs.
+# It was CI-only, so the eleven standard-library advisories in go1.26.0 were
+# invisible here — the local toolchain happened to be newer, which is the
+# worst way for a check to pass. `verify` says it is everything CI runs; it
+# is only worth saying if it is true.
+vuln: $(GOVULN) ## Check for known vulnerabilities
+	$(GOVULN) ./...
 
 specs: ## Check that the spec-first workflow was followed
 	./hack/openspec-check.sh
@@ -135,7 +145,7 @@ verify-docs: $(HELMDOCS) ## Fail if the chart README does not match its template
 
 ##@ Tools (installed pinned, into hack/bin)
 
-tools: $(CONTROLLER_GEN) $(GOLANGCI) $(YAMLFMT) $(HELMDOCS) ## Install all pinned dev tools
+tools: $(CONTROLLER_GEN) $(GOLANGCI) $(YAMLFMT) $(HELMDOCS) $(GOVULN) ## Install all pinned dev tools
 
 $(CONTROLLER_GEN):
 	@mkdir -p $(TOOLS_BIN)
@@ -154,9 +164,12 @@ $(HELMDOCS):
 	@mkdir -p $(TOOLS_BIN)
 	GOBIN=$(TOOLS_BIN) go install github.com/norwoodj/helm-docs/cmd/helm-docs@$(HELM_DOCS_VERSION)
 
+$(GOVULN):
+	GOBIN=$(TOOLS_BIN) go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
+
 ##@ Container image
 
-IMAGE_REPO ?= ghcr.io/ratyx/remedik
+IMAGE_REPO ?= ghcr.io/remedik/remedik
 IMAGE_TAG  ?= $(VERSION)
 
 docker-build: ## Build the container image

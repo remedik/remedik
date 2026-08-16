@@ -12,7 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/ratyx/remedik/internal/action"
+	"github.com/remedik/remedik/internal/action"
 )
 
 // Parameters of pvc.expand.

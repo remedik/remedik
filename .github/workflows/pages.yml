@@ -1,0 +1,53 @@
+name: Pages
+
+# Publishes website/ to GitHub Pages.
+#
+# There is no build step and nothing to install: the site is one HTML file
+# with its stylesheet inline and its images beside it, for the same reason
+# the operator's dashboard is — a page that needs a CDN is a page that breaks
+# when the CDN does.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "website/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deployment at a time, and a run already in flight is allowed to finish:
+# cancelling a half-done deployment is how a site ends up serving nothing.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    # Pages needs a public repository or a paid plan, so this waits rather
+    # than failing every push until then.
+    if: github.event.repository.visibility == 'public'
+
+    permissions:
+      pages: write
+      id-token: write
+      contents: read
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+
+      - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
+        with:
+          path: website
+
+      - id: deploy
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ratyx/remedik/api/v1alpha1"
+	"github.com/remedik/remedik/api/v1alpha1"
 )
 
 func TestStaticAssetsAreServedFromTheBinary(t *testing.T) {
@@ -19,7 +19,7 @@ func TestStaticAssetsAreServedFromTheBinary(t *testing.T) {
 	}{
 		{path: "/static/app.css", contentType: "text/css; charset=utf-8"},
 		{path: "/static/app.js", contentType: "text/javascript; charset=utf-8"},
-		{path: "/static/favicon.svg", contentType: "image/svg+xml"},
+		{path: "/static/favicon.png", contentType: "image/png"},
 	}
 
 	for _, tc := range tests {
@@ -228,14 +228,12 @@ func TestEveryPageIsCompleteHTML(t *testing.T) {
 	}
 }
 
-// The filter controls must render outside #content, which is what the
-// auto-refresh replaces. Inside it, a selection made and not yet applied is
-// destroyed within ten seconds and the filter appears not to work — the bug
-// this guards, which no handler test can see because it needs a browser and
-// a clock.
-func TestOverview_FilterControlsRenderOutsideTheRefreshedRegion(t *testing.T) {
-	// Two namespaces and two states, so the controls have something to
-	// offer and are rendered at all.
+// Filtering must hold no state between choosing and applying. A <select>
+// plus a submit button does, and that state was destroyed by the ten-second
+// refresh — twice, in two different ways. Links have nothing to lose, which
+// is why the controls are links and why this test exists to keep them that
+// way.
+func TestFilteringUsesLinksAndNoForm(t *testing.T) {
 	payments := simulatedRemediation("sim-payments", "deployment/payments/api", 20)
 	checkout := succeededRemediation("ok-checkout", 10)
 	checkout.Spec.Target = "deployment/checkout/web"
@@ -247,24 +245,80 @@ func TestOverview_FilterControlsRenderOutsideTheRefreshedRegion(t *testing.T) {
 		},
 		Posture: Posture{DryRun: true},
 	})
-	page := get(t, h, "/", nil).Body.String()
 
-	toolbar := strings.Index(page, `<div class="toolbar">`)
-	main := strings.Index(page, `<main id="content"`)
-	form := strings.Index(page, `<form class="filters"`)
+	for _, path := range []string{"/", "/remediations", "/remediations?namespace=payments"} {
+		t.Run(path, func(t *testing.T) {
+			body := get(t, h, path, nil).Body.String()
 
-	switch {
-	case toolbar < 0:
-		t.Fatal("the page has no filter toolbar")
-	case main < 0:
-		t.Fatal("the page has no <main id=\"content\">")
-	case form < 0:
-		t.Fatal("the page has no filter form")
+			if strings.Contains(body, "<form") {
+				t.Error("the page has a form; filtering must be navigation, with no state to lose")
+			}
+			if strings.Contains(body, "<select") || strings.Contains(body, "<input") {
+				t.Error("the page has an input; filtering must be navigation")
+			}
+		})
 	}
-	if form > main {
-		t.Error("the filter form is inside #content, so the auto-refresh will destroy a pending selection")
+
+	// And the links are really there.
+	body := get(t, h, "/remediations", nil).Body.String()
+	mustContain(t, body, `href="/remediations?namespace=payments"`,
+		"offer a link that filters by namespace")
+}
+
+// The dashboard serves style-src 'self' with no 'unsafe-inline', so a
+// style attribute is dropped by the browser and the element falls back to
+// its default size. Four bar charts rendered at full width for exactly that
+// reason, silently, from the day each was written — a defect no handler
+// test can see, because the markup was correct and the browser refused it.
+func TestTemplatesCarryNoInlineStyles(t *testing.T) {
+	entries, err := fs.Glob(files, "templates/*.html")
+	if err != nil {
+		t.Fatalf("Glob() error = %v", err)
 	}
-	if toolbar > main {
-		t.Error("the toolbar is inside #content")
+	if len(entries) == 0 {
+		t.Fatal("no templates found")
+	}
+
+	for _, name := range entries {
+		body, err := fs.ReadFile(files, name)
+		if err != nil {
+			t.Fatalf("ReadFile(%s) error = %v", name, err)
+		}
+		for i, line := range strings.Split(string(body), "\n") {
+			if strings.Contains(line, `style="`) {
+				t.Errorf("%s line %d has an inline style, which the CSP drops: %s",
+					name, i+1, strings.TrimSpace(line))
+			}
+		}
+	}
+}
+
+// Every class a template names must exist in the stylesheet. Renaming one
+// half of a pair leaves markup that renders with no styling at all, which
+// looks like a layout bug and is invisible to every test that checks the
+// HTML — it happened twice in one evening: share-track against .bar, and
+// mode-dryrun against .mode-dry.
+func TestEveryTemplateClassIsStyled(t *testing.T) {
+	css, err := fs.ReadFile(files, "assets/app.css")
+	if err != nil {
+		t.Fatalf("ReadFile(app.css) error = %v", err)
+	}
+	defined := map[string]bool{}
+	for _, match := range regexp.MustCompile(`\.([a-z][a-z0-9-]*)`).FindAllStringSubmatch(string(css), -1) {
+		defined[match[1]] = true
+	}
+
+	entries, _ := fs.Glob(files, "templates/*.html")
+	class := regexp.MustCompile(`class="([^"{}]*)"`)
+
+	for _, name := range entries {
+		body, _ := fs.ReadFile(files, name)
+		for _, match := range class.FindAllStringSubmatch(string(body), -1) {
+			for _, used := range strings.Fields(match[1]) {
+				if !defined[used] {
+					t.Errorf("%s uses class %q, which the stylesheet does not define", name, used)
+				}
+			}
+		}
 	}
 }

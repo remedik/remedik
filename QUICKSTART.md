@@ -18,7 +18,7 @@ does not scrape anything itself.
 record what it would have done, changing nothing.
 
 ```bash
-helm install remedik oci://ghcr.io/ratyx/charts/remedik \
+helm install remedik oci://ghcr.io/remedik/charts/remedik \
   --namespace remedik --create-namespace \
   --set gateway.auth.token="$(openssl rand -hex 24)"
 ```
@@ -140,7 +140,7 @@ release. `make help` lists every target.
 ### Build and test
 
 ```bash
-git clone https://github.com/ratyx/remedik.git
+git clone https://github.com/remedik/remedik.git
 cd remedik
 make verify   # gofmt, vet, golangci-lint, yamllint, helm lint, race tests
 make build    # ./bin/remedik

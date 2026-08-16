@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ratyx/remedik/internal/alert"
+	"github.com/remedik/remedik/internal/alert"
 )
 
 const testToken = "s3cr3t-token"

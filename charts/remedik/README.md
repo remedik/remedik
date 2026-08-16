@@ -1,6 +1,6 @@
 # remedik
 
-![Version: 0.1.0-alpha.1](https://img.shields.io/badge/Version-0.1.0--alpha.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.1.0-alpha.1](https://img.shields.io/badge/AppVersion-0.1.0--alpha.1-informational?style=flat-square)
+![Version: 0.1.0-rc.3](https://img.shields.io/badge/Version-0.1.0--rc.3-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.1.0-rc.3](https://img.shields.io/badge/AppVersion-0.1.0--rc.3-informational?style=flat-square)
 
 Predictably boring auto-remediation for Kubernetes alerts.
 
@@ -12,7 +12,7 @@ Predictably boring auto-remediation for Kubernetes alerts.
 The gateway needs a bearer token so only Alertmanager can submit alerts:
 
 ```bash
-helm install remedik oci://ghcr.io/ratyx/charts/remedik \
+helm install remedik oci://ghcr.io/remedik/charts/remedik \
   --namespace remedik --create-namespace \
   --set gateway.auth.token="$(openssl rand -hex 24)"
 ```
@@ -51,9 +51,9 @@ by the new version is rejected with `unknown field`. Apply them yourself,
 before the upgrade:
 
 ```console
-helm pull oci://ghcr.io/ratyx/charts/remedik --version <new> --untar
+helm pull oci://ghcr.io/remedik/charts/remedik --version <new> --untar
 kubectl apply --server-side --force-conflicts -f remedik/crds/
-helm upgrade remedik oci://ghcr.io/ratyx/charts/remedik --version <new> -n remedik
+helm upgrade remedik oci://ghcr.io/remedik/charts/remedik --version <new> -n remedik
 ```
 
 `--server-side` avoids the annotation size limit these CRDs are large enough
@@ -121,7 +121,7 @@ what the operator already reads.
 | guards.blastRadius.enabled | bool | `false` | Allow strategies to use the `blastRadius` guard, which refuses to remediate a workload that is already too degraded. Enabling it grants read-only access to workloads, pods and replicasets so the guard can see how much is available.  A strategy that sets `blastRadius` in a cluster where this is off will be **refused, not allowed**: a guard that cannot evaluate its own condition must not permit the execution. The refusal names the missing permission on the strategy's events. |
 | history.keepPerStrategy | int | `200` | Terminal Remediation records retained per strategy |
 | image.pullPolicy | string | `"IfNotPresent"` | Image pull policy |
-| image.repository | string | `"ghcr.io/ratyx/remedik"` | Container image repository |
+| image.repository | string | `"ghcr.io/remedik/remedik"` | Container image repository |
 | image.tag | string | `""` | Image tag; defaults to the chart appVersion |
 | logLevel | string | `"info"` | Log level: debug, info, warn or error |
 | metrics.port | int | `8080` | Port the Prometheus metrics endpoint listens on |

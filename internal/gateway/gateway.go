@@ -27,7 +27,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/ratyx/remedik/internal/alert"
+	"github.com/remedik/remedik/internal/alert"
 )
 
 // DefaultPath is the webhook path Alertmanager posts to.

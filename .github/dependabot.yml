@@ -1,23 +1,69 @@
+# Dependabot is two separate things, and only one of them is in this file.
+#
+# The one that is NOT here — Dependabot alerts and security updates — is a
+# repository setting, and it is the one that matters. It stays on. It is
+# silent until an advisory is published against something this operator
+# depends on, and then it opens one pull request with the fix, without
+# waiting for any schedule. For a thing that runs with write access to
+# somebody's cluster, being told about a CVE in a dependency is not
+# optional.
+#
+# This file is the other one: routine version updates, on a schedule,
+# whether or not anything is wrong. It is PAUSED.
+#
+# Why, and until when: it opened eleven pull requests before the project had
+# a single release. Each is a CI run and a review, and four of them changed
+# the actions that build, sign and publish the operator — while the workflow
+# that does all three had never run once. Changing what a pipeline uses
+# while testing whether the pipeline works makes a failure ambiguous, and an
+# ambiguous failure on a release is the expensive kind.
+#
+# Turn this back on after v0.1.0 ships, by restoring the schedules below.
+# The grouping is kept because it was the part worth keeping: minor and
+# patch together, majors on their own, since a major bump of an action in
+# release.yml is a decision rather than an update.
 version: 2
 updates:
   - package-ecosystem: gomod
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
+    # Zero means Dependabot opens none. The configuration stays readable and
+    # comes back by changing one number, which a deleted file would not.
+    open-pull-requests-limit: 0
+    commit-message:
+      prefix: "chore(deps)"
     groups:
-      # Kubernetes libraries move together; separate PRs for each would
-      # never be mergeable on their own.
+      # Kubernetes libraries move together; separate pull requests for each
+      # would never be mergeable on their own.
       kubernetes:
         patterns:
           - "k8s.io/*"
           - "sigs.k8s.io/*"
+      go-minor:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
+    open-pull-requests-limit: 0
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: docker
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
+    open-pull-requests-limit: 0
+    commit-message:
+      prefix: "chore(docker)"
+    groups:
+      docker:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]

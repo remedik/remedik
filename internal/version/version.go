@@ -5,7 +5,7 @@ import "runtime/debug"
 
 // version is overridden at build time via:
 //
-//	-ldflags "-X github.com/ratyx/remedik/internal/version.version=v0.1.0"
+//	-ldflags "-X github.com/remedik/remedik/internal/version.version=v0.1.0"
 var version = "dev"
 
 // String returns the human-readable version, falling back to the VCS
