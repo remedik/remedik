@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The page follows the reader's system theme. There is no toggle: an
+     operator opening this at 3am has already told their machine which one
+     they want. -->
+<meta name="color-scheme" content="light dark">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<title>{{.Title}} &middot; remedik</title>
+<link rel="stylesheet" href="/static/app.css?v={{.Asset}}">
+<link rel="icon" href="/static/favicon.svg?v={{.Asset}}" type="image/svg+xml">
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="/">
+      <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M12 2.6 4.2 6v6.1c0 4.6 3.2 8.4 7.8 9.3 4.6-.9 7.8-4.7 7.8-9.3V6Z"
+              fill="none" stroke="currentColor" stroke-width="1.7"
+              stroke-linejoin="round"/>
+        <path d="M8.4 12.2h2.1l1.1-2.4 1.4 4.4 1.1-2h1.5"
+              fill="none" stroke="currentColor" stroke-width="1.7"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="brand-name">remedik</span>
+    </a>
+
+    <nav class="nav" aria-label="Primary">
+      <a class="nav-link{{if eq .Nav "overview"}} is-active{{end}}" href="/">Overview</a>
+      <a class="nav-link{{if eq .Nav "strategies"}} is-active{{end}}" href="/strategies">Strategies</a>
+    </nav>
+
+    <div class="topbar-meta">
+      <span class="ns" title="Remediation records live in this namespace">
+        <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false" class="icon">
+          <path d="M2.5 4.5 8 1.8l5.5 2.7v6.9L8 14.2 2.5 11.4Z" fill="none"
+                stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+        </svg>
+        {{.Namespace}}
+      </span>
+      {{if .DryRun}}
+      <span class="mode mode-dry" title="Alerts are matched and recorded; nothing is changed">Dry-run</span>
+      {{else}}
+      <span class="mode mode-live" title="Matching alerts are remediated">Live</span>
+      {{end}}
+      <button class="refresh" type="button" id="refresh-toggle" aria-pressed="true"
+              title="Reload the page content every 10 seconds">
+        <span class="refresh-dot" aria-hidden="true"></span>
+        <span class="refresh-label">Auto</span>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main id="content" class="wrap">
+{{template "content" .}}
+</main>
+
+<footer class="footer">
+  <div class="wrap footer-inner">
+    <span>remedik {{if .Version}}{{.Version}}{{else}}(version unknown){{end}}</span>
+    <span class="footer-sep" aria-hidden="true">&middot;</span>
+    <span>read-only &mdash; every change is made with kubectl</span>
+    <span class="footer-sep" aria-hidden="true">&middot;</span>
+    <span>rendered <time id="updated">{{.RenderedAt}}</time></span>
+  </div>
+</footer>
+
+<script src="/static/app.js?v={{.Asset}}" defer></script>
+</body>
+</html>

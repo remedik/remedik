@@ -1,0 +1,190 @@
+{{define "content"}}
+
+<div class="page-head">
+  <div>
+    <h1>Overview</h1>
+    <p class="lede">
+      Every remediation remedik has recorded in namespace <code>{{.Namespace}}</code>.
+    </p>
+  </div>
+</div>
+
+<section class="stats" aria-label="Totals">
+  {{range .Stats}}
+  <div class="stat stat-{{.Tone}}">
+    <span class="stat-label">{{.Label}}</span>
+    <span class="stat-value">{{.Value}}</span>
+    <span class="stat-detail">{{.Detail}}</span>
+  </div>
+  {{end}}
+</section>
+
+{{with .DryRunning}}
+<section class="report" aria-labelledby="dryrun-heading">
+  <div class="report-head">
+    <h2 id="dryrun-heading">
+      {{if .Active}}What remedik would have done{{else}}What remedik would have done, before dry-run was turned off{{end}}
+    </h2>
+    {{if .Active}}
+    <span class="mode mode-dry">Dry-run is on</span>
+    {{end}}
+  </div>
+
+  {{if gt .Simulated 0}}
+  <p class="report-lede">
+    <strong>{{.Simulated}}</strong> remediation{{if ne .Simulated 1}}s{{end}} would have run
+    {{if .Targets}}across <strong>{{.Targets}}</strong> target{{if ne .Targets 1}}s{{end}}{{end}}
+    {{if .Period}}over the past <strong>{{.Period}}</strong>, since {{.Since}}{{end}}.
+    Nothing in the cluster was changed.
+  </p>
+
+  <div class="table-scroll">
+    <table class="table">
+      <caption class="visually-hidden">Simulated remediations by strategy</caption>
+      <thead>
+        <tr>
+          <th scope="col">Strategy</th>
+          <th scope="col" class="num">Would have run</th>
+          <th scope="col" class="num">Targets</th>
+          <th scope="col">Share</th>
+          <th scope="col">Most recent plan</th>
+          <th scope="col" class="num">Last</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .ByStrategy}}
+        <tr>
+          <th scope="row"><code>{{.Strategy}}</code></th>
+          <td class="num"><strong>{{.Count}}</strong></td>
+          <td class="num">{{.Targets}}</td>
+          <td class="share-cell">
+            <span class="bar" aria-hidden="true"><span class="bar-fill" style="width:{{.Share}}%"></span></span>
+            <span class="share-num">{{.Share}}%</span>
+          </td>
+          <td>{{if .Example}}<code class="plan">{{.Example}}</code>{{else}}<span class="dim">no plan recorded</span>{{end}}</td>
+          <td class="num dim">{{.LastRun}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+
+  {{if .Active}}
+  <p class="report-foot">
+    When these look right, turn dry-run off with
+    <code>helm upgrade &hellip; --set dryRun=false</code>. Guards keep applying either way.
+  </p>
+  {{end}}
+
+  {{else}}
+  <p class="report-lede">
+    Dry-run is on and nothing has been simulated yet. Once an alert matches a strategy,
+    the plan it would have run is recorded here.
+  </p>
+  {{end}}
+</section>
+{{end}}
+
+<section aria-labelledby="recent-heading">
+  <div class="section-head">
+    <h2 id="recent-heading">Recent executions</h2>
+    {{if .HasRecords}}
+    <p class="section-meta">
+      showing {{.Shown}} of {{.Total}}{{if gt .Hidden 0}} &mdash; {{.Hidden}} older record{{if ne .Hidden 1}}s{{end}} not listed{{end}}
+    </p>
+    {{end}}
+  </div>
+
+  {{if .HasRecords}}
+  <div class="table-scroll">
+    <table class="table table-hover">
+      <caption class="visually-hidden">The {{.Shown}} most recent remediations, newest first</caption>
+      <thead>
+        <tr>
+          <th scope="col">Remediation</th>
+          <th scope="col">Strategy</th>
+          <th scope="col">Target</th>
+          <th scope="col">Alert</th>
+          <th scope="col">State</th>
+          <th scope="col" class="num">Took</th>
+          <th scope="col" class="num">Age</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Recent}}
+        <tr>
+          <th scope="row"><a class="row-link" href="{{.URL}}"><code>{{.Name}}</code></a></th>
+          <td><code class="dim">{{.Strategy}}</code></td>
+          <td>{{if .Target}}<code class="dim">{{.Target}}</code>{{else}}<span class="dim">&mdash;</span>{{end}}</td>
+          <td>{{if .Alert}}{{.Alert}}{{else}}<span class="dim">&mdash;</span>{{end}}</td>
+          <td><span class="pill pill-{{.Tone}}">{{.State}}</span></td>
+          <td class="num dim">{{if .Duration}}{{.Duration}}{{else}}&mdash;{{end}}</td>
+          <td class="num dim"><time title="{{.AgeExact}}">{{.Age}}</time></td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+
+  {{else}}
+  <div class="empty">
+    <svg class="empty-mark" viewBox="0 0 48 48" aria-hidden="true" focusable="false">
+      <circle cx="24" cy="24" r="17" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-dasharray="4 5" stroke-linecap="round"/>
+      <path d="M17 24h5l2.5-5 3 10 2.5-5H35" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+
+    {{if eq .StrategyCount 0}}
+    <h3>No strategies, so nothing can run</h3>
+    <p>
+      remedik accepts every alert Alertmanager sends and ignores the ones no strategy
+      matches. Right now that is all of them, because the cluster has no
+      <code>RemediationStrategy</code>.
+    </p>
+    <pre class="code"><code>kubectl apply -f - &lt;&lt;'YAML'
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: pod-crashloop
+spec:
+  trigger:
+    match:
+      alertname: KubePodCrashLooping
+  guards:
+    cooldown: 15m
+    maxPerHour: 4
+  steps:
+    - action: deployment.restart
+YAML</code></pre>
+
+    {{else if eq .EnabledCount 0}}
+    <h3>Every strategy is disabled</h3>
+    <p>
+      {{.StrategyCount}} strateg{{if eq .StrategyCount 1}}y exists{{else}}ies exist{{end}},
+      and none of them can match an alert. A disabled strategy keeps its history and
+      intent; it simply never runs.
+    </p>
+    <pre class="code"><code>kubectl get remediationstrategies</code></pre>
+
+    {{else}}
+    <h3>Nothing has run yet</h3>
+    <p>
+      {{.EnabledCount}} strateg{{if eq .EnabledCount 1}}y is{{else}}ies are{{end}} enabled,
+      but no alert has matched one. Three things are worth checking, in this order:
+    </p>
+    <ol class="checklist">
+      <li>Alertmanager is routing to the remedik receiver, and its deliveries are
+        being accepted &mdash; the <code>remedik_alerts_received_total</code> metric moves.</li>
+      <li>The alert's labels equal every matcher on a strategy. Matching is exact,
+        so <code>alertname: KubePodCrashLooping</code> does not match
+        <code>KubePodCrashLoopBackOff</code>.</li>
+      <li>Nothing is being refused by a guard &mdash; those are published as events:
+        <code>kubectl get events --field-selector reason=GuardRejected -A</code>.</li>
+    </ol>
+    {{end}}
+  </div>
+  {{end}}
+</section>
+
+{{end}}
