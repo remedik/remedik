@@ -139,11 +139,13 @@ the record still explains the run after the strategy is edited or deleted.
 
 - **v0.1.0 (in progress)** — alert gateway, `RemediationStrategy` and
   `Remediation` CRDs, deterministic engine with guards, dry-run and retries,
-  `deployment.restart`, `workload.restart`, `pod.delete`, `job.delete`,
-  read-only dashboard, Helm chart, Prometheus metrics, signed releases.
-- **v0.2.0** — Slack bot with approval buttons and manual commands, more
-  built-in actions, custom actions (`job`, `script`), audit sinks (Splunk
-  HEC, Loki, Elasticsearch), namespace health.
+  seven actions — `deployment.restart`, `workload.restart`, `pod.delete`,
+  `job.delete`, `webhook.call`, `job.run`, `script.run` — read-only
+  dashboard, Helm chart, Prometheus metrics with a Grafana dashboard and
+  alerts, signed releases.
+- **v0.2.0** — the `blastRadius` guard, node actions (`cordon`, `drain`,
+  `uncordon`), scaling and rollback, the Slack bot with approval buttons and
+  manual commands, audit sinks (Splunk HEC, Loki, Elasticsearch).
 - **Later** — hub/spoke multi-cluster, cloud packs, `ActionPlugin` CRD, MCP
   server, workload-aware cost recommendations.
 
