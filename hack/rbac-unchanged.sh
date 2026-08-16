@@ -47,7 +47,7 @@ render() {
 # --------------------------------------------------------------------------
 render >"$WORK/none.yaml"
 
-for forbidden in deployments statefulsets daemonsets pods jobs secrets configmaps pods/log; do
+for forbidden in deployments statefulsets daemonsets replicasets pods jobs secrets configmaps pods/log; do
 	if grep -q -- "- $forbidden\$" "$WORK/none.yaml"; then
 		fail "with every action disabled, the ClusterRole still grants '$forbidden'"
 	fi
@@ -78,6 +78,15 @@ check_action jobDelete jobs
 check_action webhookCall secrets
 check_action jobRun pods/log
 check_action scriptRun configmaps
+
+# The blastRadius guard is not an action, but it is the same kind of thing:
+# a named feature holding a read-only permission only while it is enabled.
+render --set guards.blastRadius.enabled=true >"$WORK/blastRadius.yaml"
+if grep -q -- "- replicasets\$" "$WORK/blastRadius.yaml"; then
+	echo "  blastRadius grants replicasets only when enabled"
+else
+	fail "enabling the blastRadius guard did not grant the reads it needs"
+fi
 
 # --------------------------------------------------------------------------
 # 3. The dashboard changes nothing

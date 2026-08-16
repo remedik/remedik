@@ -14,6 +14,30 @@ rather than a proposal.
 
 ### Added
 
+- **A third guard: `blastRadius`** (`add-blast-radius-guard`). The other two
+  ask about time — how recently, how often. This one asks about state: how
+  broken is this workload already? `minAvailable` refuses while it has that
+  many available replicas or fewer ("never touch the last one");
+  `maxUnavailablePercent` refuses while that share is already unavailable
+  ("do not add to something already struggling").
+
+  It is what bounds the actions that *remove* capacity rather than replacing
+  it, and it lands **before** the node actions rather than after — shipping
+  destructive verbs and bounding them later means every cluster that
+  upgraded in between ran them unbounded.
+
+  It is a second opinion beside a PodDisruptionBudget, not a substitute: the
+  PDB was written by whoever owns the workload, this by whoever decided an
+  automated system may act on it unattended. Most workloads have no PDB at
+  all.
+
+  **The guard fails closed.** If the workload cannot be read — no
+  permission, an API error — it refuses, and the refusal names the missing
+  permission on the strategy's events. A guard that permits an execution
+  when it could not evaluate its own condition is not a guard, it is a
+  comment. "Nothing to measure" is treated as a different answer: a node has
+  no replica count, so the guard allows rather than paralysing the cluster.
+
 - **Three escape hatches** (`add-escape-hatches`), because four built-in
   verbs will never cover what people need at 3am and "remedik cannot do X"
   is a reason not to install it at all:

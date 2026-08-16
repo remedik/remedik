@@ -278,6 +278,7 @@ func run(logger *slog.Logger, opts options) error {
 		Client:    mgr.GetClient(),
 		Registry:  registry,
 		History:   history,
+		Workloads: &engine.WorkloadHealth{Reader: directClient},
 		Namespace: opts.namespace,
 		DryRun:    opts.dryRun,
 		Metrics:   metrics.Engine{},

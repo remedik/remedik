@@ -1,0 +1,38 @@
+# Evict a stuck pod, but never one that would leave the workload too thin.
+#
+# `pod.delete` already goes through the Eviction API, so a PodDisruptionBudget
+# can refuse it. `blastRadius` is a second opinion held by a different person:
+# the PDB was written by whoever owns the workload, this is written by whoever
+# decided an automated system may act on it unattended.
+#
+# The guard reads the workload behind the pod, so the chart must allow it:
+#
+#   --set guards.blastRadius.enabled=true
+#
+# Without that permission the guard **refuses** rather than allows. A guard
+# that permits an execution when it could not evaluate its own condition is
+# not a guard, and the refusal names the missing permission on the strategy's
+# events.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: bounded-eviction
+spec:
+  enabled: true
+  trigger:
+    match:
+      alertname: KubePodNotReady
+  guards:
+    cooldown: 30m
+    maxPerHour: 6
+    blastRadius:
+      # Never take the last available replica. A service with one pod left is
+      # a service one eviction away from an outage.
+      minAvailable: 1
+      # If a quarter of it is already down, it is having a bad enough day
+      # without remedik joining in.
+      maxUnavailablePercent: 25
+  steps:
+    - action: pod.delete
+  onFailure:
+    retries: 1

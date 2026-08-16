@@ -9,7 +9,13 @@
 # should widen an action's permissions to make their strategy work; if an
 # action needs a verb it does not have, that is a change to the action.
 #
-# One key per action, matching the key under `actions:` in values.yaml, and
+# The `blastRadius` guard has an entry here too, keyed `blastRadius` and
+# toggled by `guards.blastRadius.enabled`. It is not an action, but it is the
+# same kind of thing: a named feature that needs read access to do its job,
+# and holds none when it is off.
+#
+# One key per feature, matching its key under `actions:` (or `guards:`) in
+# values.yaml, and
 # under it either `cluster:` or `namespaced:` — the first goes into the
 # ClusterRole, the second into the Role scoped to the release namespace.
 # Which one an action uses is itself a statement about its reach.
@@ -108,4 +114,23 @@ scriptRun:
       verbs: ["get"]
     - apiGroups: [""]
       resources: ["configmaps"]
+      verbs: ["get"]
+
+# blastRadius — the guard that asks how degraded a workload already is.
+#
+# Reads only, and only what it must: the three workload kinds, the pod named
+# by an alert, and the ReplicaSet in between a pod and its Deployment. No
+# list and no watch, because it reads one object at a time by name through a
+# direct client.
+#
+# Without these the guard refuses rather than allows, which is deliberate: a
+# guard that permits an execution when it could not evaluate its own
+# condition is not a guard.
+blastRadius:
+  cluster:
+    - apiGroups: ["apps"]
+      resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+      verbs: ["get"]
+    - apiGroups: [""]
+      resources: ["pods"]
       verbs: ["get"]

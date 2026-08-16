@@ -81,10 +81,38 @@ Concurrency becomes a setting when there is a reason to raise it.
 
 ## Guards
 
-Declarative, per strategy: `cooldown` (per strategy and target) and
-`maxPerHour` (per strategy, trailing hour). Both are opt-in — zero means
-unenforced — because stopping a strategy is `enabled: false`, never an unset
-field. `blastRadius` is planned.
+Declarative, per strategy, and all opt-in — zero means unenforced, because
+stopping a strategy is `enabled: false`, never an unset field.
+
+| Guard | Asks | Scope |
+| --- | --- | --- |
+| `cooldown` | how recently did this run here? | strategy + target |
+| `maxPerHour` | how often has this run? | strategy, trailing hour |
+| `blastRadius` | how broken is this workload already? | the workload behind the target |
+
+The first two are about time and need nothing from the cluster.
+`blastRadius` is about state: `minAvailable` refuses while the workload has
+that many available replicas or fewer, and `maxUnavailablePercent` refuses
+while that share of it is already unavailable. It is what bounds the actions
+that *remove* capacity rather than replacing it, and it is a second opinion
+beside a PodDisruptionBudget rather than a substitute — the PDB was written
+by whoever owns the workload, this by whoever decided an automated system
+may act on it unattended.
+
+Two properties of `blastRadius` are worth stating plainly:
+
+- **It fails closed.** If the workload cannot be read — no permission, an API
+  error — the guard refuses. A guard that permits an execution when it could
+  not evaluate its own condition is not a guard, it is a comment. The
+  refusal names the missing permission on the strategy's events.
+- **"Nothing to measure" is not the same as "could not measure".** A node has
+  no replica count and an action that touches nothing has no workload, so
+  the guard allows. Conflating the two would make failing closed either
+  useless or paralysing.
+
+It reads the cluster, so it is a permission like any other:
+`guards.blastRadius.enabled=true` grants `get` on the three workload kinds,
+on pods, and on replicasets to walk a pod to its Deployment.
 
 Two switches stop remediation without uninstalling anything: `enabled:
 false` on a single strategy, and `dryRun: true` globally, which keeps

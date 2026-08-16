@@ -77,6 +77,7 @@ what the operator already reads.
 | grafanaDashboard.label | string | `"grafana_dashboard"` | Label the Grafana sidecar watches for |
 | grafanaDashboard.labelValue | string | `"1"` | Value of that label |
 | grafanaDashboard.namespace | string | `""` | Namespace for the ConfigMap; defaults to the release namespace. The Grafana sidecar usually only watches its own namespace. |
+| guards.blastRadius.enabled | bool | `false` | Allow strategies to use the `blastRadius` guard, which refuses to remediate a workload that is already too degraded. Enabling it grants read-only access to workloads, pods and replicasets so the guard can see how much is available.  A strategy that sets `blastRadius` in a cluster where this is off will be **refused, not allowed**: a guard that cannot evaluate its own condition must not permit the execution. The refusal names the missing permission on the strategy's events. |
 | history.keepPerStrategy | int | `200` | Terminal Remediation records retained per strategy |
 | image.pullPolicy | string | `"IfNotPresent"` | Image pull policy |
 | image.repository | string | `"ghcr.io/ratyx/remedik"` | Container image repository |

@@ -14,6 +14,7 @@ suit your alerts, and start with the operator in dry-run.
 | [job-failed.yaml](job-failed.yaml) | `KubeJobFailed` | Deletes the Job so its CronJob runs again |
 | [escalate-to-pipeline.yaml](escalate-to-pipeline.yaml) | `KubeNodeNotReady` | Hands the incident to a pipeline outside the cluster |
 | [run-a-runbook.yaml](run-a-runbook.yaml) | `KubePodCrashLooping` | Runs a script from a ConfigMap as a Job |
+| [bounded-eviction.yaml](bounded-eviction.yaml) | `KubePodNotReady` | Evicts a pod, but never the last healthy replica |
 
 Every action a recipe uses must be enabled in the chart, because each one is
 a permission: `--set actions.podDelete.enabled=true`. The chart's
@@ -25,6 +26,15 @@ a permission: `--set actions.podDelete.enabled=true`. The chart's
 target again?". Set it longer than the time it takes to know whether the
 remediation worked — a rollout plus a couple of scrape intervals. Too short
 and a flapping alert becomes a restart loop.
+
+**`blastRadius`** answers "is this workload already too broken to touch?".
+The other two are about time; this one is about state, and it is what bounds
+the actions that remove capacity rather than replacing it. `minAvailable: 1`
+is the rule almost everyone wants and almost nobody writes down.
+
+It reads the workload, so it needs `guards.blastRadius.enabled=true` in the
+chart — and **refuses rather than allows** when it cannot read: a guard that
+permits an execution it could not evaluate is not a guard.
 
 **`maxPerHour`** answers "how bad can an alert storm get?". Think about how
 many of these you would be willing to see happen unattended in an hour. It

@@ -32,8 +32,13 @@ type Sink struct {
 	// Registry resolves a strategy's first action, to work out the target
 	// the cooldown guard is scoped by.
 	Registry *action.Registry
-	// History backs the guards.
+	// History backs the time-based guards.
 	History *guards.MemoryHistory
+	// Workloads backs the blastRadius guard, which is the only one that has
+	// to look at the cluster. Optional: without it, a strategy configuring
+	// blastRadius is refused rather than allowed, because a guard that
+	// cannot evaluate must not permit.
+	Workloads guards.WorkloadReader
 	// Namespace is where Remediation resources are created.
 	Namespace string
 	// DryRun is recorded on each resource so the outcome explains itself.
@@ -103,7 +108,13 @@ func (s *Sink) consumeOne(ctx context.Context, a alert.Alert) error {
 		log.Warn("cannot resolve the target; the execution will be recorded as failed", "err", err)
 	}
 
-	decision := guards.Evaluate(guardConfig(strategy), s.History, rule.Name, target.String(), s.now())
+	decision := guards.Evaluate(guardConfig(strategy), s.History, rule.Name, targetString(target), s.now())
+	if decision.Allowed {
+		// blastRadius last: it is the only guard that reads the cluster, so
+		// the cheap answers are given a chance to refuse first.
+		decision = guards.EvaluateBlastRadius(
+			ctx, blastRadiusConfig(strategy), s.Workloads, targetString(target))
+	}
 	if !decision.Allowed {
 		s.metrics().GuardRejected(rule.Name, decision.Guard)
 		log.Info("guard rejected the execution",
@@ -259,4 +270,17 @@ func guardConfig(strategy *v1alpha1.RemediationStrategy) guards.Config {
 		cfg.Cooldown = d.Duration
 	}
 	return cfg
+}
+
+// blastRadiusConfig converts the third guard's settings. An unset block is
+// the zero value, which the guard reads as unenforced.
+func blastRadiusConfig(strategy *v1alpha1.RemediationStrategy) guards.BlastRadius {
+	b := strategy.Spec.Guards.BlastRadius
+	if b == nil {
+		return guards.BlastRadius{}
+	}
+	return guards.BlastRadius{
+		MinAvailable:          int(b.MinAvailable),
+		MaxUnavailablePercent: int(b.MaxUnavailablePercent),
+	}
 }

@@ -201,6 +201,22 @@ actions:
     # get code executed by the operator.
     enabled: false
 
+# Guards bound what a strategy may do. Two of them — cooldown and maxPerHour
+# — need nothing from the cluster and are always available. The third reads
+# the workload it is protecting, so it is a permission like any other.
+guards:
+  blastRadius:
+    # -- Allow strategies to use the `blastRadius` guard, which refuses to
+    # remediate a workload that is already too degraded. Enabling it grants
+    # read-only access to workloads, pods and replicasets so the guard can
+    # see how much is available.
+    #
+    # A strategy that sets `blastRadius` in a cluster where this is off will
+    # be **refused, not allowed**: a guard that cannot evaluate its own
+    # condition must not permit the execution. The refusal names the missing
+    # permission on the strategy's events.
+    enabled: false
+
 serviceAccount:
   # -- Create a ServiceAccount for the operator
   create: true

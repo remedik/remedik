@@ -123,3 +123,29 @@ Next, in the order the risk says they should land:
 3. **Slack bot with approval** — brings the identity model that makes
    `mode: approval` auditable, which is what the *careful* tier of actions
    is waiting for.
+
+### Asked for by the owner, not yet designed
+
+Recorded here so they survive a cold pickup. None has a change written yet.
+
+- **Per-namespace posture.** `dryRun` is global today: one flag on the
+  operator. The owner wants the combination — act in some namespaces, only
+  report in others. This is probably the most valuable item on the list,
+  because it is how people actually adopt a tool that holds write access:
+  live in `staging`, dry-run in `prod`, until the reports earn the change.
+  It needs a decision about where the setting lives — the chart, the
+  strategy, or a `Namespace` label — and each answer has a different failure
+  mode when the setting and the RBAC disagree.
+- **Namespace filtering in the dashboard.** Straightforward; the pages
+  already read everything they would filter.
+- **Cluster filtering in the dashboard.** Implies hub/spoke, which is
+  "Later" on the roadmap: today's operator sees one cluster because it runs
+  in one.
+- **Continuous capability checks with SLI/SLO output.** A workload that
+  continuously exercises what a cluster can do — schedule a Deployment,
+  reach an Ingress, egress, container runtime, etcd and API latency — and
+  turns it into quantifiable service levels. Effectively a second product
+  beside this one, and it deserves its own change and its own argument about
+  what it measures. The nearest existing art is the Kubernetes e2e suite and
+  synthetic monitoring; the interesting part is making the results a service
+  level rather than a pass/fail.

@@ -41,10 +41,10 @@ rules:
     resources: ["events"]
     verbs: ["create", "patch"]
 {{- $catalogue := .Files.Get "action-rbac.yaml" | fromYaml }}
-{{- range $action, $scopes := $catalogue }}
-{{- $config := index $.Values.actions $action | default dict }}
+{{- range $feature, $scopes := $catalogue }}
+{{- $config := include "remedik.featureConfig" (dict "root" $ "key" $feature) | fromYaml }}
 {{- if and $config.enabled $scopes.cluster }}
-  # action: {{ $action }} — see action-rbac.yaml for why these verbs
+  # feature: {{ $feature }} — see action-rbac.yaml for why these verbs
   {{- toYaml $scopes.cluster | nindent 2 }}
 {{- end }}
 {{- end }}
@@ -83,10 +83,10 @@ rules:
     resources: ["remediations/status"]
     verbs: ["get", "update", "patch"]
 {{- $catalogue := .Files.Get "action-rbac.yaml" | fromYaml }}
-{{- range $action, $scopes := $catalogue }}
-{{- $config := index $.Values.actions $action | default dict }}
+{{- range $feature, $scopes := $catalogue }}
+{{- $config := include "remedik.featureConfig" (dict "root" $ "key" $feature) | fromYaml }}
 {{- if and $config.enabled $scopes.namespaced }}
-  # action: {{ $action }} — namespaced deliberately; see action-rbac.yaml
+  # feature: {{ $feature }} — namespaced deliberately; see action-rbac.yaml
   {{- toYaml $scopes.namespaced | nindent 2 }}
 {{- end }}
 {{- end }}

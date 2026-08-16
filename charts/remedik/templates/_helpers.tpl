@@ -71,6 +71,25 @@ or the chart creates one from dashboard.auth.token.
 {{- end -}}
 
 {{/*
+Look up a feature's config by the key action-rbac.yaml uses.
+
+Most keys are actions; blastRadius is a guard. Both are named features that
+hold a permission only while they are enabled, so both are looked up the
+same way rather than the template growing a special case.
+*/}}
+{{- define "remedik.featureConfig" -}}
+{{- $root := .root -}}
+{{- $key := .key -}}
+{{- if hasKey $root.Values.actions $key -}}
+{{- index $root.Values.actions $key | toYaml -}}
+{{- else if hasKey $root.Values.guards $key -}}
+{{- index $root.Values.guards $key | toYaml -}}
+{{- else -}}
+{}
+{{- end -}}
+{{- end -}}
+
+{{/*
 The action names this release enables, as remedik spells them.
 
 Kept next to the RBAC table it mirrors: the chart grants an action's
