@@ -698,7 +698,14 @@ strategies=$(dashboard_body /strategies)
 if echo "$strategies" | grep -q "E2ECrashLooping" && echo "$strategies" | grep -q "30m"; then
 	pass "the strategies page shows the matcher and the cooldown guard"
 else
+	# An assertion that does not show what it saw costs a round trip every
+	# time it fails, and this one failed only on a runner.
 	fail "the strategies page is missing the matcher or the guard"
+	info "bytes=$(printf '%s' "$strategies" | wc -c)"
+	info "has E2ECrashLooping: $(echo "$strategies" | grep -c 'E2ECrashLooping')"
+	info "has 30m: $(echo "$strategies" | grep -c '30m')"
+	info "strategy names on the page: $(echo "$strategies" | grep -oE 'e2e-[a-z-]+' | sort -u | tr '\n' ' ')"
+	info "cooldowns on the page: $(echo "$strategies" | grep -oE '<code>[0-9]+[hms]</code>' | sort -u | tr '\n' ' ')"
 fi
 
 status=$(dashboard_status /remediations/does-not-exist)
