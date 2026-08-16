@@ -82,10 +82,21 @@ type Config struct {
 	// labels, namespaces and workload names.
 	Token string
 
-	// DryRun reports whether the operator is running in dry-run, so the
-	// pages can say so rather than leaving a reader to infer it from the
-	// records.
-	DryRun bool
+	// Posture is what remedik is allowed to do, and where, so the pages can
+	// say so rather than leaving a reader to infer it from the records. Its
+	// zero value is dry-run everywhere, which is the safe reading of
+	// "nothing was configured".
+	Posture Posture
+
+	// Cluster names the cluster this operator watches. Optional, and shown
+	// in the header when set.
+	//
+	// It is a label, not a filter. remedik sees one cluster because it runs
+	// in one, so a control offering a choice of clusters would be offering
+	// a choice of one — filtering across clusters needs the hub/spoke work.
+	// What this solves is real today and smaller: three port-forwards on
+	// three clusters produce three identical-looking tabs.
+	Cluster string
 
 	// Version is shown in the footer, so a screenshot says which build
 	// produced it.
@@ -104,7 +115,8 @@ type Handler struct {
 	reader    Reader
 	namespace string
 	token     []byte
-	dryRun    bool
+	posture   Posture
+	cluster   string
 	version   string
 	logger    *slog.Logger
 	now       func() time.Time
@@ -127,7 +139,8 @@ func New(cfg Config) (*Handler, error) {
 		reader:    cfg.Reader,
 		namespace: cfg.Namespace,
 		token:     []byte(cfg.Token),
-		dryRun:    cfg.DryRun,
+		posture:   cfg.Posture,
+		cluster:   cfg.Cluster,
 		version:   cfg.Version,
 		logger:    cfg.Logger,
 		now:       cfg.Now,
@@ -279,7 +292,8 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	view := buildOverview(remediations.Items, strategies.Items, h.dryRun, h.now())
+	filter := ParseFilter(r.URL.Query())
+	view := buildOverview(remediations.Items, strategies.Items, h.posture.DryRun, filter, h.now())
 	view.Page = h.page("Overview", navOverview)
 	h.render(w, r, overviewTemplate, view)
 }
@@ -347,8 +361,10 @@ func (h *Handler) page(title, nav string) Page {
 	return Page{
 		Title:      title,
 		Nav:        nav,
-		DryRun:     h.dryRun,
+		DryRun:     h.posture.DryRun,
+		Posture:    h.posture,
 		Namespace:  h.namespace,
+		Cluster:    h.cluster,
 		Version:    h.version,
 		Asset:      assetVersion,
 		RenderedAt: FormatClock(h.now()),

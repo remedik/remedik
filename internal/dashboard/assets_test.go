@@ -178,7 +178,7 @@ func TestRenderedPagesFetchNothingExternal(t *testing.T) {
 			remediations: []v1alpha1.Remediation{hostile},
 			strategies:   []v1alpha1.RemediationStrategy{enabledStrategy(), disabledStrategy()},
 		},
-		DryRun: true,
+		Posture: Posture{DryRun: true},
 	})
 
 	for _, path := range []string{"/", "/strategies", "/remediations/sim-hostile", "/nope"} {

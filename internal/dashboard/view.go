@@ -35,16 +35,51 @@ const (
 	toneMuted   = "muted"
 )
 
+// Posture is what remedik is allowed to do, as the pages need to say it.
+//
+// It is declared here rather than imported from internal/engine for the same
+// reason engine.Snapshot is declared there: the dashboard renders, it does
+// not depend on the engine, and the conversion happens once in main.
+type Posture struct {
+	// DryRun is the default: true when a namespace with no override only
+	// reports.
+	DryRun bool
+	// Live and DryRunOnly are the namespaces that differ from the default,
+	// sorted.
+	Live       []string
+	DryRunOnly []string
+}
+
+// Mixed reports whether any namespace differs from the default.
+//
+// A badge reading "Dry-run" over a cluster where two namespaces are live is
+// the most misleading thing per-namespace posture could produce, so the
+// pages ask this before they say anything about posture at all.
+func (p Posture) Mixed() bool { return len(p.Live) > 0 || len(p.DryRunOnly) > 0 }
+
+// Exceptions is the namespaces that differ, whichever way they differ.
+func (p Posture) Exceptions() []string {
+	if p.DryRun {
+		return p.Live
+	}
+	return p.DryRunOnly
+}
+
 // Page carries what every page's chrome needs.
 type Page struct {
 	// Title is the browser title and the page heading.
 	Title string
 	// Nav marks the active navigation entry.
 	Nav string
-	// DryRun reports the operator's current posture.
+	// DryRun reports the operator's default posture.
 	DryRun bool
+	// Posture is the whole picture, including the namespaces that differ.
+	Posture Posture
 	// Namespace is where the records being shown live.
 	Namespace string
+	// Cluster names the cluster, when the operator was given a name. Empty
+	// hides the chip entirely rather than showing a placeholder.
+	Cluster string
 	// Version is the operator build.
 	Version string
 	// Asset fingerprints the stylesheet and script, so an upgraded operator
@@ -114,7 +149,23 @@ type OverviewView struct {
 	// different problems with different fixes.
 	StrategyCount int
 	EnabledCount  int
+
+	// Filter is what is currently being narrowed, and Options are the
+	// choices offered. Everything above — the stats included — describes
+	// the filtered set, because numbers that disagreed with the table
+	// below them would be worse than no filter at all.
+	Filter  Filter
+	Options FilterOptions
+	// TotalUnfiltered is how many records exist regardless of the filter,
+	// so the page can say what is being hidden rather than looking empty.
+	TotalUnfiltered int
 }
+
+// Filtered reports whether the page is showing a subset.
+func (v OverviewView) Filtered() bool { return v.Filter.Active() }
+
+// Excluded is how many records the filter is hiding.
+func (v OverviewView) Excluded() int { return v.TotalUnfiltered - v.Total }
 
 // HasRecords reports whether anything has run.
 func (v OverviewView) HasRecords() bool { return v.Total > 0 }
@@ -326,9 +377,17 @@ func buildOverview(
 	remediations []v1alpha1.Remediation,
 	strategies []v1alpha1.RemediationStrategy,
 	dryRun bool,
+	filter Filter,
 	now time.Time,
 ) OverviewView {
 	sortNewestFirst(remediations)
+
+	// The options come from everything, the rest of the page from what
+	// survives: a control whose choices shrank as you used it would be a
+	// control you can get stuck in.
+	options := BuildFilterOptions(remediations)
+	total := len(remediations)
+	remediations = applyFilter(remediations, filter)
 
 	var succeeded, failed, simulated, inFlight int
 	for i := range remediations {
@@ -350,8 +409,11 @@ func buildOverview(
 	}
 
 	view := OverviewView{
-		Total:         len(remediations),
-		StrategyCount: len(strategies),
+		Total:           len(remediations),
+		TotalUnfiltered: total,
+		StrategyCount:   len(strategies),
+		Filter:          filter,
+		Options:         options,
 	}
 	for i := range strategies {
 		if strategies[i].IsEnabled() {
@@ -556,6 +618,21 @@ func buildRemediation(rem *v1alpha1.Remediation, now time.Time) RemediationView 
 	view.Escalation = buildEscalation(rem)
 	view.Summary = summarise(rem, view.Steps)
 	return view
+}
+
+// applyFilter keeps the records the filter admits, without copying when
+// nothing is being narrowed.
+func applyFilter(remediations []v1alpha1.Remediation, filter Filter) []v1alpha1.Remediation {
+	if !filter.Active() {
+		return remediations
+	}
+	kept := make([]v1alpha1.Remediation, 0, len(remediations))
+	for i := range remediations {
+		if filter.Matches(&remediations[i]) {
+			kept = append(kept, remediations[i])
+		}
+	}
+	return kept
 }
 
 // buildSteps joins the plan with what happened to it.

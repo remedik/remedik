@@ -90,10 +90,75 @@
     <h2 id="recent-heading">Recent executions</h2>
     {{if .HasRecords}}
     <p class="section-meta">
-      showing {{.Shown}} of {{.Total}}{{if gt .Hidden 0}} &mdash; {{.Hidden}} older record{{if ne .Hidden 1}}s{{end}} not listed{{end}}
+      showing {{.Shown}} of {{.Total}}{{if gt .Hidden 0}} &mdash; {{.Hidden}} older record{{if ne .Hidden 1}}s{{end}} not listed{{end}}{{if .Filtered}} &mdash; {{.Excluded}} hidden by the filter{{end}}
     </p>
     {{end}}
   </div>
+
+  {{if .Options.Any}}
+  <form class="filters" method="get" action="/">
+    <p class="visually-hidden" id="filter-help">
+      Narrows the executions below. The counts above follow the filter.
+    </p>
+
+    {{if gt (len .Options.Namespaces) 1}}
+    <label class="filter">
+      <span class="filter-label">Namespace</span>
+      <select name="namespace" aria-describedby="filter-help">
+        <option value="">All namespaces</option>
+        {{$current := .Filter.Namespace}}
+        {{range .Options.Namespaces}}
+        <option value="{{.}}"{{if eq . $current}} selected{{end}}>{{.}}</option>
+        {{end}}
+      </select>
+    </label>
+    {{end}}
+
+    {{if gt (len .Options.Strategies) 1}}
+    <label class="filter">
+      <span class="filter-label">Strategy</span>
+      <select name="strategy" aria-describedby="filter-help">
+        <option value="">All strategies</option>
+        {{$current := .Filter.Strategy}}
+        {{range .Options.Strategies}}
+        <option value="{{.}}"{{if eq . $current}} selected{{end}}>{{.}}</option>
+        {{end}}
+      </select>
+    </label>
+    {{end}}
+
+    {{if gt (len .Options.States) 1}}
+    <label class="filter">
+      <span class="filter-label">State</span>
+      <select name="state" aria-describedby="filter-help">
+        <option value="">Any state</option>
+        {{$current := .Filter.State}}
+        {{range .Options.States}}
+        <option value="{{.}}"{{if eq . $current}} selected{{end}}>{{.}}</option>
+        {{end}}
+      </select>
+    </label>
+    {{end}}
+
+    <button class="filter-apply" type="submit">Apply</button>
+    {{if .Filtered}}<a class="filter-clear" href="/">Clear</a>{{end}}
+  </form>
+  {{end}}
+
+  {{if and .Filtered (not .HasRecords)}}
+  <div class="empty">
+    <h3>Nothing matches this filter</h3>
+    <p>
+      {{.TotalUnfiltered}} execution{{if ne .TotalUnfiltered 1}}s{{end}} recorded, none of them
+      {{- if .Filter.Namespace}} in <code>{{.Filter.Namespace}}</code>{{end}}
+      {{- if and .Filter.Namespace (or .Filter.Strategy .Filter.State)}} and{{end}}
+      {{- if .Filter.Strategy}} from <code>{{.Filter.Strategy}}</code>{{end}}
+      {{- if and .Filter.Strategy .Filter.State}} and{{end}}
+      {{- if .Filter.State}} in state <code>{{.Filter.State}}</code>{{end -}}
+      . <a href="/">Show everything</a>.
+    </p>
+  </div>
+  {{end}}
 
   {{if .HasRecords}}
   <div class="table-scroll">
@@ -133,7 +198,7 @@
     </table>
   </div>
 
-  {{else}}
+  {{else if not .Filtered}}
   <div class="empty">
     <svg class="empty-mark" viewBox="0 0 48 48" aria-hidden="true" focusable="false">
       <circle cx="24" cy="24" r="17" fill="none" stroke="currentColor" stroke-width="2"

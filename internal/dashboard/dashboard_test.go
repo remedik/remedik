@@ -248,7 +248,7 @@ func TestOverviewRendersEveryOutcome(t *testing.T) {
 			},
 			strategies: []v1alpha1.RemediationStrategy{enabledStrategy(), disabledStrategy()},
 		},
-		DryRun: true,
+		Posture: Posture{DryRun: true},
 	})
 
 	rec := get(t, h, "/", nil)
@@ -283,7 +283,7 @@ func TestOverviewSummarisesADryRunTrial(t *testing.T) {
 			},
 			strategies: []v1alpha1.RemediationStrategy{enabledStrategy()},
 		},
-		DryRun: true,
+		Posture: Posture{DryRun: true},
 	})
 
 	body := get(t, h, "/", nil).Body.String()
