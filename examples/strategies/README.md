@@ -15,6 +15,8 @@ suit your alerts, and start with the operator in dry-run.
 | [escalate-to-pipeline.yaml](escalate-to-pipeline.yaml) | `KubeNodeNotReady` | Hands the incident to a pipeline outside the cluster |
 | [run-a-runbook.yaml](run-a-runbook.yaml) | `KubePodCrashLooping` | Runs a script from a ConfigMap as a Job |
 | [bounded-eviction.yaml](bounded-eviction.yaml) | `KubePodNotReady` | Evicts a pod, but never the last healthy replica |
+| [rollback-a-bad-deploy.yaml](rollback-a-bad-deploy.yaml) | `KubeDeploymentReplicasMismatch` | Puts the previous revision back; refuses under GitOps |
+| [hpa-maxed-out.yaml](hpa-maxed-out.yaml) | `KubeHpaMaxedOut` | Raises the autoscaler's ceiling |
 
 Every action a recipe uses must be enabled in the chart, because each one is
 a permission: `--set actions.podDelete.enabled=true`. The chart's

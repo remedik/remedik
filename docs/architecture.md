@@ -189,6 +189,9 @@ incident it was written for.
 | `workload.restart` | The same, for Deployments, StatefulSets and DaemonSets | no | Takes its kind from the alert's label |
 | `pod.delete` | Evicts one pod | no | Eviction API, so a PodDisruptionBudget can refuse. Refuses a pod with no controller owner |
 | `job.delete` | Deletes a Job and its pods | no | So the owning CronJob makes a clean run |
+| `deployment.rollback` | Puts the previous revision back | no | Refuses a workload Argo CD or Flux manages: they would revert it |
+| `deployment.scale` | Sets or increases replicas | no | Refuses a Deployment an HPA owns; a relative increase must state a ceiling |
+| `hpa.scale` | Raises an autoscaler's `maxReplicas` | no | Never lowers one |
 | `webhook.call` | POSTs the incident to a URL | no | Credential from a Secret in remedik's namespace only; non-2xx fails the step |
 | `job.run` | Runs an image as a Job | no | In remedik's namespace, under a ServiceAccount the step names — never remedik's |
 | `script.run` | `job.run`, script from a ConfigMap | no | ConfigMap read from remedik's namespace only |

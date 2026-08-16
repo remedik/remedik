@@ -14,6 +14,30 @@ rather than a proposal.
 
 ### Added
 
+- **Scaling and rollback** (`add-scaling-and-rollback`), the *careful* tier
+  the `blastRadius` guard was built to bound:
+
+  - **`deployment.rollback`** — what `kubectl rollout undo` does, and the
+    highest-value action in the catalogue: the usual cause of a crash loop
+    at 3am is the deploy at 2:50. It **refuses a workload Argo CD or Flux
+    manages**, because those controllers revert a rollback within minutes —
+    remedik would record a success while the outage continued, and the
+    incident would spend its time discovering that two systems are fighting.
+    The refusal names the controller and says to revert the commit instead.
+  - **`deployment.scale`** — sets or increases replicas, and **refuses a
+    Deployment a HorizontalPodAutoscaler targets**, because the autoscaler
+    reverts it on its next interval. A relative increase must state a
+    ceiling: "increase by" with no maximum is an alert storm with a credit
+    card, and a default here would be a number invented for somebody else's
+    budget. Verification waits for the replicas to become *available* —
+    replicas that cannot schedule are not capacity.
+  - **`hpa.scale`** — raises an autoscaler's `maxReplicas`, the one
+    mechanical answer to `KubeHpaMaxedOut`. It never lowers one: reducing
+    headroom during an incident is not a remediation.
+
+  There is deliberately no scale-down verb. Every alert that reaches remedik
+  says something is unhealthy, and "run less of it" is not an answer to that.
+
 - **A third guard: `blastRadius`** (`add-blast-radius-guard`). The other two
   ask about time — how recently, how often. This one asks about state: how
   broken is this workload already? `minAvailable` refuses while it has that

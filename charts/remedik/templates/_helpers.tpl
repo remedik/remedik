@@ -102,6 +102,9 @@ deploymentRestart: deployment.restart
 workloadRestart: workload.restart
 podDelete: pod.delete
 jobDelete: job.delete
+deploymentRollback: deployment.rollback
+deploymentScale: deployment.scale
+hpaScale: hpa.scale
 webhookCall: webhook.call
 jobRun: job.run
 scriptRun: script.run

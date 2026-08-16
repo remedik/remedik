@@ -179,6 +179,23 @@ actions:
     # -- Enable `job.delete`: deletes a failed Job, and its pods with it, so
     # the CronJob that owns it creates a clean run.
     enabled: false
+  deploymentRollback:
+    # -- Enable `deployment.rollback`: puts the previous revision back, the
+    # way `kubectl rollout undo` does. The highest-value action here — the
+    # usual cause of a 3am crash loop is the deploy ten minutes earlier — and
+    # the one most likely to surprise: it refuses a workload Argo CD or Flux
+    # manages, because they would revert it within minutes while remedik
+    # recorded a success.
+    enabled: false
+  deploymentScale:
+    # -- Enable `deployment.scale`: sets or increases replicas, bounded by a
+    # maximum the strategy must state. Refuses a Deployment a
+    # HorizontalPodAutoscaler owns, since the autoscaler would revert it.
+    enabled: false
+  hpaScale:
+    # -- Enable `hpa.scale`: raises an autoscaler's `maxReplicas`, the one
+    # mechanical answer to `KubeHpaMaxedOut`. It never lowers one.
+    enabled: false
   webhookCall:
     # -- Enable `webhook.call`: POSTs the alert, the strategy and the plan to
     # a URL you configure, optionally with a token from a Secret in remedik's

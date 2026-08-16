@@ -116,6 +116,52 @@ scriptRun:
       resources: ["configmaps"]
       verbs: ["get"]
 
+# deployment.rollback — puts the previous revision's pod template back, which
+# is what `kubectl rollout undo` does.
+#
+# `list` on replicasets is the revision history: the Deployment controller
+# records which revision each ReplicaSet holds, and there is no other way to
+# find the one before this. No delete, because a rollback creates nothing and
+# removes nothing — the controller reconciles from the changed template.
+deploymentRollback:
+  cluster:
+    - apiGroups: ["apps"]
+      resources: ["deployments"]
+      verbs: ["get", "patch"]
+    - apiGroups: ["apps"]
+      resources: ["replicasets"]
+      verbs: ["get", "list"]
+
+# deployment.scale — changes the replica count through the scale subresource.
+#
+# The `list` on horizontalpodautoscalers is the safety check, not an
+# oversight: setting replicas on an autoscaled Deployment is reverted on the
+# autoscaler's next interval, so the action refuses when it finds one. That
+# is a read-only permission on a resource holding no secrets, in exchange for
+# preventing a whole class of "the remediation did not stick" incidents.
+deploymentScale:
+  cluster:
+    - apiGroups: ["apps"]
+      resources: ["deployments"]
+      verbs: ["get"]
+    - apiGroups: ["apps"]
+      resources: ["deployments/scale"]
+      verbs: ["patch"]
+    - apiGroups: ["autoscaling"]
+      resources: ["horizontalpodautoscalers"]
+      verbs: ["list"]
+
+# hpa.scale — raises an autoscaler's maxReplicas.
+#
+# It never lowers one: the action refuses a target below the current ceiling,
+# because reducing an autoscaler's headroom during an incident is not a
+# remediation.
+hpaScale:
+  cluster:
+    - apiGroups: ["autoscaling"]
+      resources: ["horizontalpodautoscalers"]
+      verbs: ["get", "patch"]
+
 # blastRadius — the guard that asks how degraded a workload already is.
 #
 # Reads only, and only what it must: the three workload kinds, the pod named
