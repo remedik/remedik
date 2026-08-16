@@ -45,3 +45,67 @@ spec:
     - action: pod.delete
   onFailure:
     retries: 0
+---
+# Cordon a node. The safest action there is: nothing moves, nothing restarts.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: e2e-node-cordon
+spec:
+  trigger:
+    match:
+      alertname: E2ENodeNotReady
+  steps:
+    - action: node.cordon
+  onFailure:
+    retries: 0
+---
+# Drain a node: cordon, then evict everything eligible through the Eviction
+# API. The widest thing remedik can do.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: e2e-node-drain
+spec:
+  trigger:
+    match:
+      alertname: E2ENodeUnreachable
+  steps:
+    - action: node.drain
+      with:
+        verifyTimeout: 3m
+  onFailure:
+    retries: 0
+---
+# A strategy the blastRadius guard must refuse: minAvailable is set higher
+# than the workload can ever have, so remedik must decline to act on it.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: e2e-blast-radius
+spec:
+  trigger:
+    match:
+      alertname: E2EBlastRadius
+  guards:
+    blastRadius:
+      minAvailable: 5
+  steps:
+    - action: deployment.restart
+  onFailure:
+    retries: 0
+---
+# Put a node back into service. The undo, so the test leaves the cluster as
+# it found it.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: e2e-node-uncordon
+spec:
+  trigger:
+    match:
+      alertname: E2ENodeSchedulable
+  steps:
+    - action: node.uncordon
+  onFailure:
+    retries: 0

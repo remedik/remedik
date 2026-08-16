@@ -147,7 +147,13 @@ func (a *DeploymentRollback) Verify(
 	ctx, cancel := action.WithVerifyDeadline(ctx)
 	defer cancel()
 
-	restart := &Restart{client: a.client, poll: a.poll, name: a.Name(), pinnedKind: "Deployment"}
+	// A fully-formed Restart, clock included: the verification path does not
+	// read the clock today, and a struct that would panic if it ever did is
+	// a trap for whoever changes it next.
+	restart := &Restart{
+		client: a.client, now: time.Now, poll: a.poll,
+		name: a.Name(), pinnedKind: "Deployment",
+	}
 	return restart.Verify(ctx, req, action.Result{})
 }
 

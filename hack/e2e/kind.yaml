@@ -3,5 +3,17 @@
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 name: remedik-e2e
+#
+# One node. A worker was tried, so that a drain could be run against a real
+# node with somewhere to move the work — and kube-proxy fails to start on
+# kind workers in this environment, so pods there cannot reach the API
+# server at all. A test that does not run where the maintainer works is
+# worse than no test.
+#
+# What that costs, and how it is covered instead: `node.drain` is exercised
+# here through dry-run, which reads the real node's pods and produces the
+# plan, and by unit tests for the parts a dry run cannot reach — the
+# eviction loop, the retry on a PodDisruptionBudget refusal, and a partial
+# drain failing the step.
 nodes:
   - role: control-plane

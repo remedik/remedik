@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -288,9 +289,11 @@ func checkGrowth(want, current resource.Quantity) (resource.Quantity, error) {
 	return want, nil
 }
 
+// parsePercent is strict on purpose. Sscanf would read "50abc" as 50 and
+// drop the rest, so a typo would become a remediation nobody wrote.
 func parsePercent(raw string) (int, error) {
-	var share int
-	if _, err := fmt.Sscanf(raw, "%d", &share); err != nil || share <= 0 {
+	share, err := strconv.Atoi(raw)
+	if err != nil || share <= 0 {
 		return 0, fmt.Errorf("parameter %q: %q is not a positive percentage",
 			IncreasePercentParam, raw)
 	}

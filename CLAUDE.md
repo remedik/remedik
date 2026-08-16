@@ -104,25 +104,24 @@ most are the ones that must be easiest to test. Keep them that way.
 
 ## Open work
 
-Nothing is open. Six changes were implemented and archived on 2026-08-16:
+Nothing is open. Ten changes were implemented and archived on 2026-08-16 —
 the read-only dashboard, the action contract's second version, the workload
-actions, the observability bundle, launch readiness, and the escape hatches.
+actions, the observability bundle, launch readiness, the escape hatches, the
+`blastRadius` guard, scaling and rollback, and the node actions.
 
-Next, in the order the risk says they should land:
+Fourteen actions across four groups, three guards, sixteen capabilities in
+`openspec/specs/`.
 
-1. **`blastRadius` guard** — `cooldown` and `maxPerHour` cannot express
-   "never more than 20% of a workload's pods" or "never the last healthy
-   replica". It must land **before** the node actions, not after: shipping
-   destructive verbs before the guard that bounds them is the one sequencing
-   mistake here that would be hard to walk back.
-2. **Node actions** — `node.cordon`, `node.drain`, `node.uncordon`,
-   `pvc.expand`. Highest risk in the catalogue; `node.drain` must evict
-   through the Eviction API and honour PodDisruptionBudgets, and a drain
-   that cannot finish inside its timeout is a failure, not a partial
-   success.
-3. **Slack bot with approval** — brings the identity model that makes
-   `mode: approval` auditable, which is what the *careful* tier of actions
-   is waiting for.
+### Before this can go online
+
+Neither of these is a code change, and neither can be done from here:
+
+1. **`release.yml` has never run.** Multi-arch image, cosign keyless
+   signing, SBOM attestation and the chart push to OCI all look right and
+   none of them is proven. A `v0.1.0-rc.1` tag is the test.
+2. **There is no GitHub remote.** The CI badges, the chart's `icon:` URL and
+   the security-advisory link in the issue templates all assume
+   `github.com/ratyx/remedik` exists.
 
 ### Asked for by the owner, not yet designed
 
