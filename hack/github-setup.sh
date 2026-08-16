@@ -40,8 +40,42 @@ gh auth status >/dev/null 2>&1 || {
 	exit 1
 }
 
+ORG="${REPO%%/*}"
 VISIBILITY="$(gh api "repos/${REPO}" --jq '.visibility' 2>/dev/null || echo unknown)"
 step "Configuring ${REPO} (${VISIBILITY})"
+
+# --------------------------------------------------------------------------
+# The organisation
+#
+# These are defaults for every repository created here from now on, which is
+# the only moment they are free to get right.
+# --------------------------------------------------------------------------
+step "Organisation defaults"
+if gh api -X PATCH "orgs/${ORG}" \
+	-F dependabot_alerts_enabled_for_new_repositories=true \
+	-F dependabot_security_updates_enabled_for_new_repositories=true \
+	-F dependency_graph_enabled_for_new_repositories=true \
+	-F secret_scanning_enabled_for_new_repositories=true \
+	-F secret_scanning_push_protection_enabled_for_new_repositories=true \
+	-F web_commit_signoff_required=true >/dev/null 2>&1; then
+	ok "new repositories get alerts, security updates and scanning by default"
+else
+	bad "could not set the organisation defaults"
+fi
+
+# Two-factor is refused while any member is without it, because turning it
+# on would lock them out. That is the right behaviour and a useful check.
+gh api -X PATCH "orgs/${ORG}" -F two_factor_requirement_enabled=true >/dev/null 2>&1
+if [ "$(gh api "orgs/${ORG}" --jq '.two_factor_requirement_enabled')" = "true" ]; then
+	ok "two-factor authentication required"
+else
+	without="$(gh api "orgs/${ORG}/members?filter=2fa_disabled" --jq 'map(.login)|join(", ")' 2>/dev/null)"
+	bad "two-factor authentication is NOT required"
+	if [ -n "$without" ]; then
+		note "these members have no 2FA, and enabling it would lock them out: ${without}"
+		note "each of them: https://github.com/settings/security — then run this again"
+	fi
+fi
 
 # --------------------------------------------------------------------------
 # Merge behaviour

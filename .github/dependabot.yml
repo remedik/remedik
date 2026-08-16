@@ -1,19 +1,27 @@
-# Dependabot opens a pull request when a dependency moves. It is on because
-# this operator's whole dependency tree runs with write access to somebody's
-# cluster, and an update nobody noticed is the usual way that becomes a
-# problem.
+# Dependabot is two separate things, and only one of them is in this file.
 #
-# Grouped aggressively on purpose. Five separate pull requests for five
-# action bumps is five CI runs and five reviews for one decision, and a
-# maintainer who stops reading them is worse off than one who never turned
-# this on.
+# The one that is NOT here — Dependabot alerts and security updates — is a
+# repository setting, and it is the one that matters. It is silent until an
+# advisory is published against something this operator depends on, and then
+# it opens one pull request with the fix. For a thing that runs with write
+# access to somebody's cluster, being told about a CVE in a dependency is
+# not optional.
+#
+# This file is the other one: routine version updates, on a schedule,
+# whether or not anything is wrong. That is a choice, and its cost is
+# attention. It opened five pull requests on the first push — five CI runs
+# and five reviews for what is one decision — and a maintainer who stops
+# reading them is worse off than one who never turned it on.
+#
+# So it is monthly and grouped, not weekly and per-dependency. Anything
+# genuinely urgent arrives through the security half, which does not wait
+# for the schedule.
 version: 2
 updates:
   - package-ecosystem: gomod
     directory: /
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
     open-pull-requests-limit: 5
     commit-message:
       prefix: "chore(deps)"
@@ -33,8 +41,7 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
     commit-message:
       prefix: "chore(ci)"
     groups:
@@ -48,8 +55,7 @@ updates:
   - package-ecosystem: docker
     directory: /
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
     commit-message:
       prefix: "chore(docker)"
     groups:
