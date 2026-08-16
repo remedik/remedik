@@ -206,6 +206,8 @@ func run(logger *slog.Logger, opts options) error {
 		DryRun:       opts.dryRun,
 		HistoryLimit: opts.historyLimit,
 		Metrics:      metrics.Engine{},
+		Events:       mgr.GetEventRecorderFor("remedik"),
+		Mapper:       mgr.GetRESTMapper(),
 		Logger:       logger.With("component", "reconciler"),
 	}
 	if err := reconciler.SetupWithManager(mgr); err != nil {

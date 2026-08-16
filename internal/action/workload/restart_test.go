@@ -146,8 +146,8 @@ func TestDeploymentRestart_PlanDescribesWithoutMutating(t *testing.T) {
 		t.Errorf("Plan patched the cluster %d times", c.patchCalls)
 	}
 	for _, want := range []string{"deployment/payments/api", "3 replicas", RestartAnnotation} {
-		if !strings.Contains(plan, want) {
-			t.Errorf("plan = %q, want it to mention %q", plan, want)
+		if !strings.Contains(plan.Summary, want) {
+			t.Errorf("plan = %q, want it to mention %q", plan.Summary, want)
 		}
 	}
 }
@@ -167,8 +167,8 @@ func TestDeploymentRestart_Execute(t *testing.T) {
 		t.Errorf("patched %q, want payments/api", c.lastPatched)
 	}
 	for _, want := range []string{"restarted deployment/payments/api", "2026-08-15T12:00:00Z", "resourceVersion 42"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("result = %q, want it to mention %q", got, want)
+		if !strings.Contains(got.Summary, want) {
+			t.Errorf("result = %q, want it to mention %q", got.Summary, want)
 		}
 	}
 }
@@ -179,10 +179,10 @@ func TestDeploymentRestart_MissingTarget(t *testing.T) {
 
 	for _, tc := range []struct {
 		name string
-		call func() (string, error)
+		call func() (action.Result, error)
 	}{
-		{"Plan", func() (string, error) { return a.Plan(context.Background(), target, nil) }},
-		{"Execute", func() (string, error) { return a.Execute(context.Background(), target, nil) }},
+		{"Plan", func() (action.Result, error) { return a.Plan(context.Background(), target, nil) }},
+		{"Execute", func() (action.Result, error) { return a.Execute(context.Background(), target, nil) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := tc.call()
@@ -228,8 +228,8 @@ func TestDeploymentRestart_DefaultsReplicasWhenUnset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Plan() error = %v", err)
 	}
-	if !strings.Contains(plan, "1 replicas") {
-		t.Errorf("plan = %q, want an unset replica count to read as 1", plan)
+	if !strings.Contains(plan.Summary, "1 replicas") {
+		t.Errorf("plan = %q, want an unset replica count to read as 1", plan.Summary)
 	}
 }
 

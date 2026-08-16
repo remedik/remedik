@@ -257,10 +257,24 @@ spec:
                         at 0.
                       format: int32
                       type: integer
+                    kubectl:
+                      description: |-
+                        Kubectl is the equivalent command a human would have typed. It is
+                        recorded so the change is reviewable by someone who has never read
+                        remedik's source; nothing executes or parses it.
+                      type: string
                     message:
                       description: Message carries the error detail when Phase is
                         Failed.
                       type: string
+                    outputs:
+                      additionalProperties:
+                        type: string
+                      description: |-
+                        Outputs are whatever the action specifically knows — replicas before
+                        and after, an exit code, the revision rolled back to. Structured, so
+                        a machine can read them and a person is not made to parse prose.
+                      type: object
                     phase:
                       description: Phase is the step's outcome.
                       enum:
@@ -280,6 +294,19 @@ spec:
                     startedAt:
                       description: StartedAt is when the step began.
                       format: date-time
+                      type: string
+                    target:
+                      description: |-
+                        Target is the object this step acted on, as "kind/namespace/name".
+                        It is recorded per step because a plan may touch several objects, and
+                        the target on the spec names only the one the guards are scoped by.
+                      type: string
+                    verified:
+                      description: |-
+                        Verified is what the action's post-condition check found, when it has
+                        one — "3/3 replicas updated, available and ready". Empty means the
+                        action does not check its own work, or the operator was in dry-run,
+                        where nothing was executed to verify.
                       type: string
                   required:
                   - action

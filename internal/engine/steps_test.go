@@ -35,20 +35,56 @@ func (a *scriptedAction) Resolve(_ map[string]string, _ action.Params) (action.T
 	return a.target, nil
 }
 
-func (a *scriptedAction) Plan(_ context.Context, t action.Target, _ action.Params) (string, error) {
+func (a *scriptedAction) Plan(_ context.Context, t action.Target, _ action.Params) (action.Result, error) {
 	a.planCalls++
 	if a.planErr != nil {
-		return "", a.planErr
+		return action.Result{}, a.planErr
 	}
-	return "would restart " + t.String(), nil
+	return action.Result{
+		Summary: "would restart " + t.String(),
+		Kubectl: "kubectl rollout restart " + t.String(),
+	}, nil
 }
 
-func (a *scriptedAction) Execute(_ context.Context, t action.Target, _ action.Params) (string, error) {
+func (a *scriptedAction) Execute(_ context.Context, t action.Target, _ action.Params) (action.Result, error) {
 	a.execCalls++
 	if a.execErr != nil {
-		return "", a.execErr
+		return action.Result{}, a.execErr
 	}
-	return "restarted " + t.String(), nil
+	result := action.Result{
+		Summary: "restarted " + t.String(),
+		Kubectl: "kubectl rollout restart " + t.String(),
+	}
+	result.Output("resourceVersion", "42")
+	return result, nil
+}
+
+// verifyingAction is a scriptedAction that also checks its own work, so the
+// engine's handling of a post-condition can be tested without a cluster.
+type verifyingAction struct {
+	scriptedAction
+	verifyCalls int
+	verifyErr   error
+	verifySays  string
+}
+
+func (a *verifyingAction) Verify(
+	ctx context.Context, _ action.Target, _ action.Params,
+) (action.Result, error) {
+	a.verifyCalls++
+	says := a.verifySays
+	if says == "" {
+		says = "3/3 replicas updated, available and ready"
+	}
+	if a.verifyErr != nil {
+		return action.Result{Summary: says}, a.verifyErr
+	}
+	select {
+	case <-ctx.Done():
+		return action.Result{Summary: says}, ctx.Err()
+	default:
+	}
+	return action.Result{Summary: says}, nil
 }
 
 func newRunner(t *testing.T, dryRun bool, actions ...action.Action) *StepRunner {

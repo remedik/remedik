@@ -7,7 +7,9 @@ import (
 	"sort"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -52,6 +54,13 @@ type RemediationReconciler struct {
 	HistoryLimit int
 	// Metrics receives telemetry; defaults to NopRecorder.
 	Metrics Recorder
+	// Events publishes step progress on the objects being remediated, so
+	// that `kubectl describe` explains a change where the reader is already
+	// looking. Optional: nil publishes nothing.
+	Events record.EventRecorder
+	// Mapper addresses a step's target for those events. Optional; without
+	// it no event can be addressed and none are published.
+	Mapper meta.RESTMapper
 	// Logger is required.
 	Logger *slog.Logger
 	// Now supplies timestamps; tests inject a fixed clock.
@@ -123,7 +132,12 @@ func (r *RemediationReconciler) runAttempt(
 		return ctrl.Result{}, fmt.Errorf("mark remediation running: %w", err)
 	}
 
-	runner := &StepRunner{Registry: r.Registry, DryRun: rem.Spec.DryRun || r.DryRun, Now: r.Now}
+	runner := &StepRunner{
+		Registry: r.Registry,
+		DryRun:   rem.Spec.DryRun || r.DryRun,
+		Events:   r.stepEvents(rem),
+		Now:      r.Now,
+	}
 	result := runner.Run(ctx, rem.Spec.Alert.Labels, rem.Spec.Steps)
 	rem.Status.Steps = result.Steps
 
@@ -262,6 +276,24 @@ func (r *RemediationReconciler) metrics() Recorder {
 		return NopRecorder{}
 	}
 	return r.Metrics
+}
+
+// stepEvents builds the publisher for one execution, so that every event it
+// sends names the remediation and the strategy that caused it — the two
+// things a reader needs in order to get from "why did this restart?" to the
+// record and the manifest that decided it.
+func (r *RemediationReconciler) stepEvents(rem *v1alpha1.Remediation) StepEvents {
+	if r.Events == nil || r.Mapper == nil {
+		return NopStepEvents{}
+	}
+	return &TargetEvents{
+		Recorder:    r.Events,
+		Mapper:      r.Mapper,
+		Remediation: rem.Name,
+		Strategy:    rem.Spec.StrategyName,
+		Namespace:   rem.Namespace,
+		Logger:      r.Logger,
+	}
 }
 
 func (r *RemediationReconciler) now() time.Time {
