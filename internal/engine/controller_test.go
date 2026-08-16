@@ -29,16 +29,20 @@ type countingRecorder struct {
 	rejected  map[string]int
 	started   int
 	finished  map[string]int
+	escalated map[string]int
 }
 
 func newCountingRecorder() *countingRecorder {
-	return &countingRecorder{rejected: map[string]int{}, finished: map[string]int{}}
+	return &countingRecorder{
+		rejected: map[string]int{}, finished: map[string]int{}, escalated: map[string]int{},
+	}
 }
 
 func (r *countingRecorder) Unmatched()                                 { r.unmatched++ }
 func (r *countingRecorder) GuardRejected(_, guard string)              { r.rejected[guard]++ }
 func (r *countingRecorder) RemediationStarted(string)                  { r.started++ }
 func (r *countingRecorder) RemediationFinished(_, o string, _ float64) { r.finished[o]++ }
+func (r *countingRecorder) EscalationFinished(_, o string)             { r.escalated[o]++ }
 
 // remediation builds a record in the state a freshly created one has.
 func remediation(name string, steps ...v1alpha1.Step) *v1alpha1.Remediation {
@@ -76,6 +80,17 @@ func newReconciler(t *testing.T, dryRun bool, actions []action.Action, objs ...c
 	if err != nil {
 		t.Fatalf("NewRegistry() error = %v", err)
 	}
+	// The posture now lives on the record, resolved once by the sink, so a
+	// dry-run fixture marks the records rather than the reconciler. That is
+	// the behaviour under test: the reconciler obeys what was recorded.
+	if dryRun {
+		for _, obj := range objs {
+			if rem, ok := obj.(*v1alpha1.Remediation); ok {
+				rem.Spec.DryRun = true
+			}
+		}
+	}
+
 	c := newFakeClient(objs...)
 	metrics := newCountingRecorder()
 	history := guards.NewMemoryHistory(0)
@@ -88,7 +103,6 @@ func newReconciler(t *testing.T, dryRun bool, actions []action.Action, objs ...c
 			Client:   c,
 			Registry: registry,
 			History:  history,
-			DryRun:   dryRun,
 			Metrics:  metrics,
 			Logger:   quietLogger(),
 			Now:      func() time.Time { return testClock },

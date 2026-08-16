@@ -34,6 +34,10 @@ spec:
       name: Alert
       priority: 1
       type: string
+    - jsonPath: .spec.dryRun
+      name: Dry-run
+      priority: 1
+      type: boolean
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -92,9 +96,55 @@ spec:
                 type: object
               dryRun:
                 description: |-
-                  DryRun records whether the operator was in dry-run mode. It is kept
-                  on the record so a Simulated result is self-explanatory.
+                  DryRun records the posture this execution ran under, resolved from
+                  the target's namespace when the record was created.
+
+                  It is serialized even when false, deliberately: `omitempty` is
+                  dropped, so a live record states its posture instead of leaving it to
+                  be inferred from an absent field — on exactly the record whose job is
+                  to explain itself.
+
+                  It stays +optional in the schema, which is a separate thing. Making
+                  it required would reject every record written by an earlier version
+                  on its next status update, which is an upgrade breaking on a field
+                  added for clarity.
                 type: boolean
+              escalationSteps:
+                description: "EscalationSteps is the plan to run once this remediation
+                  has failed\nfor good, copied from the strategy at creation time
+                  for the same\nreason Steps is.\n\nThey are given the alert's labels
+                  plus a handful describing the\nremediation that failed, so a webhook
+                  body or a job's environment can\nsay what happened without any templating:\n\n\tremedik_remediation
+                  \  this record's name\n\tremedik_strategy      the strategy that
+                  matched\n\tremedik_target        the object, as \"kind/namespace/name\"\n\tremedik_reason
+                  \       the machine-readable cause\n\tremedik_message       the
+                  human-readable detail\n\tremedik_attempts      how many attempts
+                  were made\n\tremedik_dry_run       \"true\" when nothing was actually
+                  changed\n\nThose keys are set by remedik and overwrite any alert
+                  label of the\nsame name, because an escalation that can be lied
+                  to by an alert\nlabel is worse than no escalation."
+                items:
+                  description: Step is one remediation action.
+                  properties:
+                    action:
+                      description: |-
+                        Action is the verb to run, in "noun.verb" form — for example
+                        "deployment.restart". Unknown actions fail validation at admission
+                        time when possible, and at execution time otherwise.
+                      minLength: 1
+                      type: string
+                    with:
+                      additionalProperties:
+                        type: string
+                      description: |-
+                        With holds the action's parameters. Values are strings so the schema
+                        stays stable across actions; each action documents and validates its
+                        own keys.
+                      type: object
+                  required:
+                  - action
+                  type: object
+                type: array
               retries:
                 description: |-
                   Retries is the retry budget copied from the strategy at creation
@@ -217,6 +267,108 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              escalation:
+                description: |-
+                  Escalation records the attempt to tell somebody that this remediation
+                  failed. It is absent when the strategy declares no escalation, and
+                  present whether the escalation worked or not — "we tried to tell you
+                  and could not" is exactly the thing somebody needs to find later.
+                properties:
+                  completedAt:
+                    description: CompletedAt is when the escalation finished.
+                    format: date-time
+                    type: string
+                  message:
+                    description: Message explains a failed escalation.
+                    type: string
+                  phase:
+                    description: |-
+                      Phase is Succeeded when every escalation step ran, Failed otherwise.
+                      It is never Simulated: escalation runs for real even when the
+                      remediation did not.
+                    enum:
+                    - Pending
+                    - Running
+                    - Succeeded
+                    - Failed
+                    - Skipped
+                    - Simulated
+                    type: string
+                  steps:
+                    description: Steps records each escalation step, in order.
+                    items:
+                      description: StepStatus records what happened to one step.
+                      properties:
+                        action:
+                          description: Action is the verb that ran.
+                          type: string
+                        completedAt:
+                          description: CompletedAt is when the step finished.
+                          format: date-time
+                          type: string
+                        index:
+                          description: Index is the step's position in the plan, starting
+                            at 0.
+                          format: int32
+                          type: integer
+                        kubectl:
+                          description: |-
+                            Kubectl is the equivalent command a human would have typed. It is
+                            recorded so the change is reviewable by someone who has never read
+                            remedik's source; nothing executes or parses it.
+                          type: string
+                        message:
+                          description: Message carries the error detail when Phase
+                            is Failed.
+                          type: string
+                        outputs:
+                          additionalProperties:
+                            type: string
+                          description: |-
+                            Outputs are whatever the action specifically knows — replicas before
+                            and after, an exit code, the revision rolled back to. Structured, so
+                            a machine can read them and a person is not made to parse prose.
+                          type: object
+                        phase:
+                          description: Phase is the step's outcome.
+                          enum:
+                          - Pending
+                          - Running
+                          - Succeeded
+                          - Failed
+                          - Skipped
+                          - Simulated
+                          type: string
+                        plan:
+                          description: |-
+                            Plan is what the step did, or in dry-run would have done, in one
+                            human-readable line — for example "patch deployment payments/api
+                            restartedAt annotation".
+                          type: string
+                        startedAt:
+                          description: StartedAt is when the step began.
+                          format: date-time
+                          type: string
+                        target:
+                          description: |-
+                            Target is the object this step acted on, as "kind/namespace/name".
+                            It is recorded per step because a plan may touch several objects, and
+                            the target on the spec names only the one the guards are scoped by.
+                          type: string
+                        verified:
+                          description: |-
+                            Verified is what the action's post-condition check found, when it has
+                            one — "3/3 replicas updated, available and ready". Empty means the
+                            action does not check its own work, or the operator was in dry-run,
+                            where nothing was executed to verify.
+                          type: string
+                      required:
+                      - action
+                      - index
+                      - phase
+                      type: object
+                    type: array
+                type: object
               message:
                 description: Message is the human-readable detail behind Reason.
                 type: string

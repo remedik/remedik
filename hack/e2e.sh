@@ -31,6 +31,7 @@ IMAGE="${IMAGE:-remedik:e2e}"
 TOKEN="${TOKEN:-e2e-token}"
 DASHBOARD_TOKEN="${DASHBOARD_TOKEN:-e2e-dashboard-token}"
 DASHBOARD_PORT="${DASHBOARD_PORT:-18082}"
+METRICS_PORT="${METRICS_PORT:-18080}"
 KEEP_CLUSTER="${KEEP_CLUSTER:-0}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -54,10 +55,11 @@ PASSED=0
 FAILED=0
 PORT_FORWARD_PID=""
 DASHBOARD_FORWARD_PID=""
+METRICS_FORWARD_PID=""
 
 cleanup() {
 	local exit_code=$?
-	for pid in "$PORT_FORWARD_PID" "$DASHBOARD_FORWARD_PID"; do
+	for pid in "$PORT_FORWARD_PID" "$DASHBOARD_FORWARD_PID" "$METRICS_FORWARD_PID"; do
 		if [ -n "$pid" ]; then
 			kill "$pid" 2>/dev/null || true
 			wait "$pid" 2>/dev/null || true
@@ -104,6 +106,70 @@ send_alert() {
 		      \"fingerprint\":\"${fingerprint}\"}]}"
 }
 
+# send_labeled_alert <alertname> <fingerprint> <labels-json> -> HTTP status
+#
+# send_alert covers the Deployment-shaped alerts, which is most of them. The
+# node, Job, claim and autoscaler actions resolve their target from different
+# labels, and testing them through the labels a real alert carries is the
+# point — a step that only works when the target is named in `with:` has not
+# been tested at all.
+send_labeled_alert() {
+	local alertname="$1" fingerprint="$2" labels="$3"
+	curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+		-X POST "http://127.0.0.1:${LOCAL_PORT}/webhooks/alertmanager" \
+		-H "Authorization: Bearer ${TOKEN}" \
+		-H 'Content-Type: application/json' \
+		-d "{\"version\":\"4\",\"alerts\":[{
+		      \"status\":\"firing\",
+		      \"labels\":{\"alertname\":\"${alertname}\",${labels}},
+		      \"startsAt\":\"2026-08-15T09:00:00Z\",
+		      \"fingerprint\":\"${fingerprint}\"}]}"
+}
+
+# wait_for_event <reason> <substring> [timeout-seconds]
+#
+# Events are written after the decision they describe, and how long after
+# depends on the cluster's mood. A fixed sleep here is what makes a suite
+# flaky, and a suite people learn to re-run is worth less than no suite.
+wait_for_event() {
+	local reason="$1" want="$2" timeout="${3:-45}" elapsed=0
+	while [ "$elapsed" -lt "$timeout" ]; do
+		if kubectl get events --all-namespaces --field-selector "reason=${reason}" \
+			-o jsonpath='{range .items[*]}{.message}{"\n"}{end}' 2>/dev/null \
+			| grep -q "$want"; then
+			return 0
+		fi
+		sleep 2
+		elapsed=$((elapsed + 2))
+	done
+	return 1
+}
+
+# wait_for_message <strategy> <substring> [timeout-seconds]
+#
+# Waits for any of a strategy's records to carry a status message matching
+# the substring. Used where the expected outcome is a refusal, which has no
+# state of its own to wait for.
+wait_for_message() {
+	local strategy="$1" want="$2" timeout="${3:-45}" elapsed=0
+	while [ "$elapsed" -lt "$timeout" ]; do
+		if kubectl -n "$NAMESPACE" get remediations -l "remedik.dev/strategy=${strategy}" \
+			-o jsonpath='{range .items[*]}{.status.message}{"\n"}{end}' 2>/dev/null \
+			| grep -qi "$want"; then
+			return 0
+		fi
+		sleep 2
+		elapsed=$((elapsed + 2))
+	done
+	return 1
+}
+
+# strategy_field <strategy> <jsonpath-after-.items[0]> -> the value
+strategy_field() {
+	kubectl -n "$NAMESPACE" get remediations -l "remedik.dev/strategy=$1" \
+		-o jsonpath="{.items[0]$2}" 2>/dev/null || true
+}
+
 # wait_for_remediations <expected-count> [timeout-seconds]
 wait_for_remediations() {
 	local want="$1" timeout="${2:-60}" elapsed=0
@@ -147,7 +213,12 @@ wait_for_strategy_state() {
 
 # restart_annotation <deployment>
 restart_annotation() {
-	kubectl -n e2e-payments get deploy "$1" \
+	restart_annotation_in e2e-payments "$1"
+}
+
+# restart_annotation_in <namespace> <deployment>
+restart_annotation_in() {
+	kubectl -n "$1" get deploy "$2" \
 		-o jsonpath='{.spec.template.metadata.annotations.kubectl\.kubernetes\.io/restartedAt}' 2>/dev/null || true
 }
 
@@ -463,11 +534,10 @@ else
 fi
 
 # The refusal has to be visible where an operator looks first.
-if kubectl get events --all-namespaces --field-selector reason=GuardRejected \
-	-o jsonpath='{range .items[*]}{.message}{"\n"}{end}' 2>/dev/null | grep -q 'guard "cooldown"'; then
+if wait_for_event GuardRejected 'guard "cooldown"' 45; then
 	pass "the refusal is published as an event on the strategy"
 else
-	fail "no GuardRejected event was published"
+	fail "no GuardRejected event was published within 45s"
 fi
 
 # --------------------------------------------------------------------------
@@ -548,6 +618,7 @@ helm upgrade remedik charts/remedik \
 	--set dashboard.enabled=true \
 	--set dashboard.port="$DASHBOARD_PORT" \
 	--set dashboard.auth.token="$DASHBOARD_TOKEN" \
+	--set clusterName=e2e-cluster \
 	--wait --timeout 3m >/dev/null
 kubectl -n "$NAMESPACE" rollout status deploy/remedik --timeout=120s >/dev/null
 start_dashboard_forward
@@ -635,6 +706,72 @@ if [ "$status" = "404" ]; then
 	pass "an unknown remediation answered 404"
 else
 	fail "an unknown remediation answered $status, want 404"
+fi
+
+# The cluster's name, which is what tells three port-forwarded dashboards
+# apart. It is in the tab title so it survives being one of twenty tabs.
+if echo "$overview" | grep -q '<title>e2e-cluster'; then
+	pass "the cluster name leads the browser title"
+else
+	fail "the cluster name is not in the title"
+fi
+
+# --- filtering --------------------------------------------------------------
+# The filter is entirely in the URL, which is what makes a narrowed view
+# something somebody can paste into an incident channel. Every record so far
+# targets e2e-payments, so the assertions are about which of them survive.
+filtered=$(dashboard_body "/?namespace=e2e-payments")
+if echo "$filtered" | grep -q 'e2e-payments'; then
+	pass "a namespace filter renders that namespace's records"
+else
+	fail "the namespace filter hid everything in its own namespace"
+fi
+
+# The controls must be outside <main>, which is what the ten-second refresh
+# replaces. Inside it, a selection made and not yet applied is destroyed
+# faster than anybody reaches Apply, and the filter appears not to work.
+form_line=$(echo "$filtered" | grep -n '<form class="filters"' | head -1 | cut -d: -f1)
+main_line=$(echo "$filtered" | grep -n '<main id="content"' | head -1 | cut -d: -f1)
+if [ -n "$form_line" ] && [ -n "$main_line" ] && [ "$form_line" -lt "$main_line" ]; then
+	pass "the filter controls render outside the region the refresh replaces"
+else
+	fail "the filter controls are inside <main> (form=${form_line}, main=${main_line})"
+fi
+
+# And the applied filter is stated, with each clause removable on its own.
+if echo "$filtered" | grep -q 'Filtered by' && echo "$filtered" | grep -q 'chip-active'; then
+	pass "the applied filter is stated on the page"
+else
+	fail "a filtered page does not say what it is filtered by"
+fi
+
+empty=$(dashboard_body "/?namespace=no-such-namespace")
+if echo "$empty" | grep -q "Nothing matches this filter"; then
+	pass "a filter that matches nothing says so, rather than looking like an empty cluster"
+else
+	fail "an empty filter result did not explain itself"
+fi
+if echo "$empty" | grep -q "No strategies, so nothing can run"; then
+	fail "an empty filter result claimed the cluster has no strategies"
+else
+	pass "and it does not claim the cluster is unconfigured"
+fi
+
+# An unknown parameter value is honoured, not rejected: a URL pasted from a
+# week-old incident channel must not become an error page.
+status=$(dashboard_status "/?namespace=no-such-namespace&state=Nonsense")
+if [ "$status" = "200" ]; then
+	pass "an unrecognised filter value still renders"
+else
+	fail "an unrecognised filter value answered $status, want 200"
+fi
+
+# Filtering must not become a way in for a write.
+status=$(dashboard_method POST "/?namespace=e2e-payments")
+if [ "$status" = "405" ]; then
+	pass "a filtered URL is still GET-only"
+else
+	fail "POST to a filtered URL answered $status, want 405"
 fi
 
 # --------------------------------------------------------------------------
@@ -815,12 +952,10 @@ if [ "$(remediation_count)" = "$count_before" ]; then
 else
 	fail "blastRadius let a remediation through"
 fi
-if kubectl get events --all-namespaces --field-selector reason=GuardRejected \
-	-o jsonpath='{range .items[*]}{.message}{"\n"}{end}' 2>/dev/null \
-	| grep -q 'blastRadius'; then
+if wait_for_event GuardRejected blastRadius 45; then
 	pass "the refusal names blastRadius on the strategy"
 else
-	fail "no blastRadius refusal was published"
+	fail "no blastRadius refusal was published within 45s"
 fi
 
 # --- cordon, then put it back ---------------------------------------------
@@ -876,6 +1011,386 @@ if wait_for_strategy_state e2e-node-uncordon Succeeded 90; then
 	fi
 else
 	fail "the uncordon remediation did not succeed (status ${status})"
+fi
+
+
+# --------------------------------------------------------------------------
+# Test 10 — the rest of the catalogue, and the escalation path
+#
+# Groups 1-9 cover six of the fourteen actions. The other eight are the ones
+# whose failure modes are invisible without a cluster: a rollback needs real
+# revision history, a scale needs a real HPA to refuse, an expansion needs a
+# real StorageClass, and a webhook needs something at the other end.
+#
+# That last one is answered with remedik itself. Its gateway accepts POST,
+# requires a bearer token from a Secret, and answers 200 to a body it
+# understood — so the whole outbound path is proven without the test needing
+# an endpoint outside the cluster, which it would not have.
+# --------------------------------------------------------------------------
+step "10. The remaining actions, and escalation"
+
+# The endpoint credentials. The right token proves the success path; a real
+# Secret holding the wrong one proves the failure path honestly, rather than
+# by pointing at a URL that does not resolve.
+kubectl -n "$NAMESPACE" create secret generic e2e-wrong-token \
+	--from-literal=token=not-the-gateway-token \
+	--dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl -n "$NAMESPACE" create serviceaccount e2e-runbook \
+	--dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
+helm upgrade remedik charts/remedik \
+	--namespace "$NAMESPACE" \
+	--set image.repository="${IMAGE%%:*}" \
+	--set image.tag="${IMAGE##*:}" \
+	--set image.pullPolicy=IfNotPresent \
+	--set gateway.auth.token="$TOKEN" \
+	--set dryRun=false \
+	--set actions.deploymentRestart.enabled=true \
+	--set actions.jobDelete.enabled=true \
+	--set actions.deploymentRollback.enabled=true \
+	--set actions.deploymentScale.enabled=true \
+	--set actions.hpaScale.enabled=true \
+	--set actions.pvcExpand.enabled=true \
+	--set actions.webhookCall.enabled=true \
+	--set actions.jobRun.enabled=true \
+	--wait --timeout 3m >/dev/null
+kubectl -n "$NAMESPACE" rollout status deploy/remedik --timeout=120s >/dev/null
+start_port_forward
+
+# --- job.delete -----------------------------------------------------------
+# Resolved from `job_name`, not `job`: in Prometheus `job` is the scrape job,
+# and an action that read it would resolve to kube-state-metrics.
+status=$(send_labeled_alert E2EJobFailed job-1 \
+	'"namespace":"e2e-payments","job_name":"nightly-billing"')
+if [ "$status" = "200" ]; then
+	pass "gateway accepted the failed-Job alert"
+else
+	fail "gateway answered $status for the failed-Job alert"
+fi
+
+if wait_for_strategy_state e2e-job-delete Succeeded 90; then
+	if kubectl -n e2e-payments get job nightly-billing >/dev/null 2>&1; then
+		fail "the Job is still there"
+	else
+		pass "the Job was deleted, so its CronJob can schedule again"
+	fi
+else
+	fail "the job.delete remediation did not succeed"
+fi
+
+# --- deployment.rollback --------------------------------------------------
+# Give it a second revision, then ask remedik to put the first one back. The
+# assertion is on the pod template, because that is what a rollback restores;
+# the revision number only moves forward.
+kubectl -n e2e-payments patch deploy shipped --type=merge \
+	-p '{"spec":{"template":{"metadata":{"labels":{"release":"bad"}}}}}' >/dev/null
+kubectl -n e2e-payments rollout status deploy/shipped --timeout=90s >/dev/null 2>&1 || true
+
+if [ "$(kubectl -n e2e-payments get deploy shipped -o jsonpath='{.spec.template.metadata.labels.release}')" = "bad" ]; then
+	pass "the bad revision is live, so there is something to roll back"
+else
+	fail "the second revision did not take"
+fi
+
+status=$(send_alert E2EBadDeploy rollback-1 shipped)
+if wait_for_strategy_state e2e-rollback Succeeded 120; then
+	live=$(kubectl -n e2e-payments get deploy shipped \
+		-o jsonpath='{.spec.template.metadata.labels.release}')
+	if [ "$live" = "good" ]; then
+		pass "the previous revision is back"
+	else
+		fail "the deployment still runs the bad revision (release=${live})"
+	fi
+	rolled=$(strategy_field e2e-rollback '.status.steps[0].outputs.rolledBackTo')
+	if [ -n "$rolled" ]; then
+		pass "the record names the revision it went back to: ${rolled}"
+	else
+		fail "the record does not name the revision"
+	fi
+else
+	fail "the rollback remediation did not succeed (gateway answered ${status})"
+fi
+
+# --- deployment.scale -----------------------------------------------------
+status=$(send_alert E2ENeedsCapacity scale-1 capacity)
+if wait_for_strategy_state e2e-scale Succeeded 120; then
+	replicas=$(kubectl -n e2e-payments get deploy capacity -o jsonpath='{.spec.replicas}')
+	if [ "$replicas" = "3" ]; then
+		pass "the deployment was scaled from 1 to 3"
+	else
+		fail "the deployment has ${replicas} replicas, want 3"
+	fi
+else
+	fail "the scale remediation did not succeed (gateway answered ${status})"
+fi
+
+# api2 has an HPA, so scaling it directly must be refused: two controllers
+# fighting over one replica count is worse than not scaling at all.
+status=$(send_alert E2ENeedsCapacity scale-2 api2)
+if wait_for_message e2e-scale horizontalpodautoscaler 60; then
+	pass "scaling a Deployment an HPA owns was refused"
+else
+	fail "scaling under an HPA was not refused (gateway answered ${status})"
+fi
+
+# --- hpa.scale ------------------------------------------------------------
+status=$(send_labeled_alert E2EHpaMaxed hpa-1 \
+	'"namespace":"e2e-payments","horizontalpodautoscaler":"api2"')
+if wait_for_strategy_state e2e-hpa-scale Succeeded 120; then
+	ceiling=$(kubectl -n e2e-payments get hpa api2 -o jsonpath='{.spec.maxReplicas}')
+	if [ "$ceiling" = "5" ]; then
+		pass "the autoscaler's ceiling was raised from 2 to 5"
+	else
+		fail "maxReplicas is ${ceiling}, want 5"
+	fi
+else
+	fail "the hpa.scale remediation did not succeed (gateway answered ${status})"
+fi
+
+# --- pvc.expand -----------------------------------------------------------
+# The refusal is the feature. kind's "standard" class does not set
+# allowVolumeExpansion, so the API server would accept the patch and nothing
+# would happen — and remedik would have recorded a success that did nothing.
+status=$(send_labeled_alert E2EVolumeFilling pvc-1 \
+	'"namespace":"e2e-payments","persistentvolumeclaim":"ledger-data"')
+if wait_for_strategy_state e2e-pvc-expand Failed 120; then
+	message=$(strategy_field e2e-pvc-expand '.status.message')
+	if echo "$message" | grep -q 'allowVolumeExpansion'; then
+		pass "the expansion was refused, naming the StorageClass"
+	else
+		fail "the refusal does not explain itself: ${message}"
+	fi
+	size=$(kubectl -n e2e-payments get pvc ledger-data \
+		-o jsonpath='{.spec.resources.requests.storage}')
+	if [ "$size" = "1Gi" ]; then
+		pass "the claim was left alone"
+	else
+		fail "the claim was patched anyway (${size})"
+	fi
+else
+	fail "the pvc.expand remediation did not fail as it should (gateway answered ${status})"
+fi
+
+# --- webhook.call ---------------------------------------------------------
+status=$(send_alert E2EWebhook webhook-1 api)
+if wait_for_strategy_state e2e-webhook Succeeded 120; then
+	pass "the webhook reached its endpoint with the credential from a Secret"
+	code=$(strategy_field e2e-webhook '.status.steps[0].outputs.status')
+	if [ "$code" = "200" ]; then
+		pass "the record keeps the response code: ${code}"
+	else
+		fail "the record's status output is '${code}', want 200"
+	fi
+	if strategy_field e2e-webhook '.status.steps[0]' | grep -qF "$TOKEN"; then
+		fail "the credential leaked into the record"
+	else
+		pass "the credential is not in the record, only where it came from"
+	fi
+else
+	fail "the webhook remediation did not succeed (gateway answered ${status})"
+fi
+
+# --- job.run --------------------------------------------------------------
+# The Job runs in remedik's namespace under a ServiceAccount the operator
+# names and never its own, and the step waits for the exit code rather than
+# reporting success once the Job is created.
+status=$(send_alert E2ERunbook runbook-1 api)
+if wait_for_strategy_state e2e-job-run Succeeded 180; then
+	pass "the runbook Job ran to completion and its exit code was checked"
+	sa=$(strategy_field e2e-job-run '.status.steps[0].outputs.serviceAccount')
+	if [ "$sa" = "e2e-runbook" ]; then
+		pass "it ran as ${sa}, not as remedik"
+	else
+		fail "it ran as '${sa}', want e2e-runbook"
+	fi
+else
+	fail "the job.run remediation did not succeed (gateway answered ${status})"
+	kubectl -n "$NAMESPACE" get jobs 2>/dev/null || true
+fi
+
+# --- escalation -----------------------------------------------------------
+# The loop the project exists to close: the remediation could not work, and
+# somebody was told.
+status=$(send_alert E2EEscalate escalate-1 does-not-exist)
+if wait_for_strategy_state e2e-escalation Failed 120; then
+	pass "the remediation failed, as it must"
+
+	phase=$(strategy_field e2e-escalation '.status.escalation.phase')
+	if [ "$phase" = "Succeeded" ]; then
+		pass "the escalation was sent"
+	else
+		fail "the escalation's phase is '${phase}', want Succeeded"
+	fi
+
+	# Escalating is not succeeding.
+	state=$(strategy_field e2e-escalation '.status.state')
+	if [ "$state" = "Failed" ]; then
+		pass "the record is still Failed: a page is not a fix"
+	else
+		fail "escalating changed the outcome to ${state}"
+	fi
+
+	# The remediation's own verdict survived the escalation.
+	if strategy_field e2e-escalation '.status.message' | grep -q 'does-not-exist'; then
+		pass "the record still explains why the remediation failed"
+	else
+		fail "the escalation overwrote the remediation's own message"
+	fi
+
+	# The escalation's steps are its own, not appended to the remediation's.
+	own=$(strategy_field e2e-escalation '.status.steps[0].action')
+	esc=$(strategy_field e2e-escalation '.status.escalation.steps[0].action')
+	if [ "$own" = "deployment.restart" ] && [ "$esc" = "webhook.call" ]; then
+		pass "the page is recorded apart from the remediation's steps"
+	else
+		fail "steps are '${own}' and '${esc}', want deployment.restart and webhook.call"
+	fi
+else
+	fail "the escalating remediation did not reach Failed (gateway answered ${status})"
+fi
+
+# --- an escalation that could not be sent ---------------------------------
+# The case that matters most: it did not work, and nobody knows.
+status=$(send_alert E2EEscalateBadly escalate-2 does-not-exist)
+if wait_for_strategy_state e2e-escalation-fails Failed 120; then
+	phase=$(strategy_field e2e-escalation-fails '.status.escalation.phase')
+	if [ "$phase" = "Failed" ]; then
+		pass "a page that could not be sent is recorded as failed"
+	else
+		fail "the failed escalation's phase is '${phase}', want Failed"
+	fi
+	message=$(strategy_field e2e-escalation-fails '.status.escalation.message')
+	if [ -n "$message" ]; then
+		pass "and it says why: ${message}"
+	else
+		fail "the failed escalation does not say why"
+	fi
+	state=$(strategy_field e2e-escalation-fails '.status.state')
+	if [ "$state" = "Failed" ]; then
+		pass "the remediation is Failed, not something worse"
+	else
+		fail "a failed page changed the state to ${state}"
+	fi
+else
+	fail "the second escalating remediation did not reach Failed (gateway answered ${status})"
+fi
+
+
+# --------------------------------------------------------------------------
+# Test 11 — per-namespace posture
+#
+# The combination is the whole feature: act where remediation has been
+# earned, report everywhere else, in one install. One strategy, two
+# namespaces, and the only thing that differs is where the alert points.
+#
+# It cannot be tested without a cluster because the interesting failure is
+# not "the flag was misread" — it is the posture and the record disagreeing,
+# which needs a real resource to disagree on.
+# --------------------------------------------------------------------------
+step "11. Live in one namespace, reporting in another"
+
+helm upgrade remedik charts/remedik \
+	--namespace "$NAMESPACE" \
+	--set image.repository="${IMAGE%%:*}" \
+	--set image.tag="${IMAGE##*:}" \
+	--set image.pullPolicy=IfNotPresent \
+	--set gateway.auth.token="$TOKEN" \
+	--set dryRun=true \
+	--set namespacePosture.e2e-payments=live \
+	--set actions.deploymentRestart.enabled=true \
+	--wait --timeout 3m >/dev/null
+kubectl -n "$NAMESPACE" rollout status deploy/remedik --timeout=120s >/dev/null
+start_port_forward
+
+if kubectl -n "$NAMESPACE" get deploy remedik \
+	-o jsonpath='{.spec.template.spec.containers[0].args}' | grep -q 'namespace-posture=e2e-payments=live'; then
+	pass "the chart passed the override to the operator"
+else
+	fail "the operator was not given the namespace override"
+fi
+
+# send_posture_alert <namespace> <fingerprint> -> HTTP status
+send_posture_alert() {
+	send_labeled_alert E2EPosture "$2" "\"namespace\":\"$1\",\"deployment\":\"api\""
+}
+
+# The default is dry-run, and this namespace is not overridden.
+before_reporting=$(restart_annotation_in e2e-reporting api)
+status=$(send_posture_alert e2e-reporting posture-1)
+if [ "$status" = "200" ]; then
+	pass "gateway accepted the alert for the reporting namespace"
+else
+	fail "gateway answered $status"
+fi
+
+if wait_for_strategy_state e2e-posture Simulated 90; then
+	pass "the un-overridden namespace was simulated, as the default says"
+	if [ "$(restart_annotation_in e2e-reporting api)" = "$before_reporting" ]; then
+		pass "and nothing in it was actually restarted"
+	else
+		fail "a simulated remediation restarted the deployment"
+	fi
+else
+	fail "the reporting namespace did not produce a Simulated record"
+fi
+
+# The same strategy, the same alert name, a namespace that was made live.
+before_payments=$(restart_annotation_in e2e-payments api)
+status=$(send_posture_alert e2e-payments posture-2)
+if wait_for_strategy_state e2e-posture Succeeded 120; then
+	pass "the live namespace acted although the default is dry-run"
+	after_payments=$(restart_annotation_in e2e-payments api)
+	if [ -n "$after_payments" ] && [ "$after_payments" != "$before_payments" ]; then
+		pass "and the deployment really was restarted: ${after_payments}"
+	else
+		fail "the record says Succeeded but nothing was restarted"
+	fi
+else
+	fail "the live namespace did not act (gateway answered ${status})"
+fi
+
+# Each record carries the posture it ran under, so neither needs the values
+# file to be explained.
+simulated_flag=$(kubectl -n "$NAMESPACE" get remediations -l remedik.dev/strategy=e2e-posture \
+	-o jsonpath='{range .items[?(@.status.state=="Simulated")]}{.spec.dryRun}{end}' 2>/dev/null || true)
+live_flag=$(kubectl -n "$NAMESPACE" get remediations -l remedik.dev/strategy=e2e-posture \
+	-o jsonpath='{range .items[?(@.status.state=="Succeeded")]}{.spec.dryRun}{end}' 2>/dev/null || true)
+if [ "$simulated_flag" = "true" ] && [ "$live_flag" = "false" ]; then
+	pass "each record states which posture it ran under, false included"
+else
+	fail "the records do not carry their posture (simulated=${simulated_flag}, live=${live_flag})"
+fi
+
+# And the operator says so where somebody would look for it.
+if kubectl -n "$NAMESPACE" logs deploy/remedik --tail=200 2>/dev/null | grep -q 'posture is mixed'; then
+	pass "the operator warns that the default does not describe the cluster"
+else
+	fail "no mixed-posture warning was logged"
+fi
+
+# Port-forwarded from the host rather than probed from a pod: pulling a curl
+# image would need registry access this cluster does not have.
+kubectl -n "$NAMESPACE" port-forward svc/remedik-metrics "${METRICS_PORT}:8080" >/dev/null 2>&1 &
+METRICS_FORWARD_PID=$!
+metrics_body=""
+for _ in $(seq 1 20); do
+	metrics_body=$(curl -s --max-time 2 "http://127.0.0.1:${METRICS_PORT}/metrics" || true)
+	[ -n "$metrics_body" ] && break
+	sleep 1
+done
+kill "$METRICS_FORWARD_PID" 2>/dev/null || true
+wait "$METRICS_FORWARD_PID" 2>/dev/null || true
+METRICS_FORWARD_PID=""
+
+if echo "$metrics_body" | grep -q 'remedik_namespace_posture{namespace="e2e-payments",posture="live"} 1'; then
+	pass "the override is a metric, so the posture is queryable"
+else
+	fail "remedik_namespace_posture does not report the override"
+fi
+if echo "$metrics_body" | grep -q '^remedik_dry_run 1'; then
+	pass "and remedik_dry_run still reports the default, which is 1"
+else
+	fail "remedik_dry_run does not report the default"
 fi
 
 # --------------------------------------------------------------------------

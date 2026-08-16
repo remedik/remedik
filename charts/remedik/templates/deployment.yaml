@@ -24,7 +24,7 @@ spec:
       annotations:
         # Roll the pod when the configuration changes, so a values change
         # takes effect without a manual restart.
-        checksum/config: {{ printf "%v-%v-%v-%v" .Values.dryRun .Values.gateway .Values.actions .Values.dashboard | sha256sum }}
+        checksum/config: {{ printf "%v-%v-%v-%v-%v" .Values.dryRun .Values.namespacePosture .Values.gateway .Values.actions .Values.dashboard | sha256sum }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -44,7 +44,13 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
+            {{- with .Values.clusterName }}
+            - --cluster-name={{ . }}
+            {{- end }}
             - --dry-run={{ .Values.dryRun }}
+            {{- range $namespace, $posture := .Values.namespacePosture }}
+            - --namespace-posture={{ $namespace }}={{ $posture }}
+            {{- end }}
             - --gateway-bind-address=:{{ .Values.gateway.port }}
             - --gateway-path={{ .Values.gateway.path }}
             - --metrics-bind-address=:{{ .Values.metrics.port }}

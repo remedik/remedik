@@ -327,6 +327,11 @@ code {
   font-size: 0.78rem;
 }
 
+.cluster {
+  color: var(--text-2);
+  font-weight: 560;
+}
+
 .icon {
   width: 13px;
   height: 13px;
@@ -354,6 +359,22 @@ code {
   color: var(--ok);
   background: var(--ok-bg);
   border-color: var(--ok-border);
+}
+
+/* Mixed posture: some namespaces act, others only report. It is deliberately
+   the loudest of the three, because it is the state somebody is most likely
+   to misread — "dryRun: true" in a values file over a cluster that acts. */
+.mode-mixed {
+  color: var(--running);
+  background: var(--running-bg);
+  border-color: var(--running-border);
+  gap: 6px;
+}
+
+.mode-detail {
+  font-weight: 500;
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
 }
 
 .mode-off {
@@ -1314,6 +1335,272 @@ main.wrap {
   background: var(--surface);
   color: var(--text-2);
   border-color: var(--border-strong);
+}
+
+/* --------------------------------------------------------------------------
+   Filters
+
+   A plain GET form. The dashboard allowlists GET and HEAD before routing, so
+   a filter that needed a write could not exist here — and the consequence is
+   a filtered view that is a URL, which is what somebody wants during an
+   incident. It works with JavaScript disabled, which the auto-refresh does
+   not need to.
+   -------------------------------------------------------------------------- */
+
+/* The band sits between the top bar and <main>, which is where the filter
+   lives in the markup too — outside the region the auto-refresh replaces. */
+.toolbar {
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.toolbar-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 18px;
+  padding-block: 12px;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.filter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.filter-label {
+  font-size: 0.72rem;
+  font-weight: 620;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.filters select {
+  appearance: none;
+  font: inherit;
+  font-size: 0.83rem;
+  padding: 6px 30px 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background-color: var(--surface);
+  color: var(--text);
+  max-width: 15rem;
+  /* An inline chevron, so no request leaves the page. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 6.5 8 10.5 12 6.5' fill='none' stroke='%23667085' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 14px;
+}
+
+.filters select:hover {
+  border-color: var(--accent);
+}
+
+.filter-apply {
+  font: inherit;
+  font-size: 0.83rem;
+  font-weight: 600;
+  padding: 6px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: var(--accent);
+  color: var(--accent-text);
+  cursor: pointer;
+}
+
+.filter-apply:hover {
+  filter: brightness(1.08);
+}
+
+.filter-clear {
+  font-size: 0.83rem;
+  padding: 6px 4px;
+  color: var(--text-2);
+  text-decoration: none;
+}
+
+.filter-clear:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+@media (width <= 560px) {
+  .toolbar-inner,
+  .filters {
+    align-items: stretch;
+  }
+
+  .active-filter {
+    margin-left: 0;
+  }
+
+  .filter,
+  .filters select,
+  .filter-apply {
+    width: 100%;
+    max-width: none;
+  }
+}
+
+/* The applied filter, stated rather than implied. "2 hidden by the filter" in
+   the section meta is true and easy to read past; a page that is showing a
+   subset should look like it is. Each chip is the link that lifts just that
+   clause. */
+
+.active-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.active-filter-label {
+  font-size: 0.76rem;
+  font-weight: 620;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.active-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chip-active {
+  text-decoration: none;
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  cursor: pointer;
+}
+
+.chip-active .chip-key {
+  color: var(--accent);
+}
+
+.chip-active:hover {
+  filter: brightness(0.97);
+}
+
+.chip-remove {
+  margin-left: 6px;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1;
+}
+
+/* --------------------------------------------------------------------------
+   Escalation markers in the list
+
+   A small tag beside the state, not a column: most rows would have nothing
+   in it. "paged" is deliberately quiet — it is reassurance, and reassurance
+   should not compete for attention with the row above it. "page failed" is
+   not quiet, because it is the only thing on the page that means nobody
+   knows.
+   -------------------------------------------------------------------------- */
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.tag-quiet {
+  color: var(--text-3);
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+
+.tag-loud {
+  color: var(--failed);
+  background: var(--failed-bg);
+  border-color: var(--failed-border);
+}
+
+/* --------------------------------------------------------------------------
+   Escalation
+
+   The verdict leads, because the question a reader arrives with is "did
+   anybody find out?" and not "which webhook ran". A failed escalation carries
+   the same weight as a failed remediation: it is the case where the system
+   knows something is wrong and nobody else does.
+   -------------------------------------------------------------------------- */
+
+.escalation-verdict {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.escalation-verdict code {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--muted-bg);
+  color: var(--text);
+}
+
+.escalation-ok {
+  border-color: var(--ok-border);
+  background: var(--ok-bg);
+  color: color-mix(in srgb, var(--ok) 78%, var(--text));
+}
+
+.escalation-failed {
+  border-color: var(--failed-border);
+  background: var(--failed-bg);
+  color: color-mix(in srgb, var(--failed) 82%, var(--text));
+}
+
+.escalation-muted {
+  border-color: var(--muted-border);
+  background: var(--muted-bg);
+}
+
+.escalation-message {
+  margin: 0 0 14px;
+  padding: 9px 12px;
+  border-radius: 6px;
+  background: var(--failed-bg);
+  border: 1px solid var(--failed-border);
+  color: color-mix(in srgb, var(--failed) 80%, var(--text));
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.escalation-note {
+  margin: 14px 0 0;
+  font-size: 0.82rem;
+  line-height: 1.55;
 }
 
 /* --------------------------------------------------------------------------

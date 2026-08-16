@@ -1,0 +1,75 @@
+# Replace a node: drain it here, and let the cloud do the rest.
+#
+# This is the answer to "does remedik delete the node from the cloud?" — it
+# does not, on purpose. Deleting an instance or resizing a node group is a
+# different trust model: different credentials, a different blast radius, and
+# a provider API whose failure modes have nothing to do with Kubernetes. An
+# operator that held those credentials would be a much more attractive thing
+# to compromise, and cluster-api's MachineHealthCheck already does the job
+# properly.
+#
+# So the division of labour is:
+#
+#   remedik              drains the node safely, honouring disruption budgets
+#   your pipeline        terminates the instance and lets the ASG replace it
+#   remedik              records both, and pages if either did not work
+#
+# Two steps, in order. The second only runs if the first succeeded, which is
+# the property that matters: nothing asks the cloud to destroy a node until
+# the workloads are off it.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: replace-a-dead-node
+spec:
+  enabled: true
+  trigger:
+    match:
+      alertname: KubeNodeUnreachable
+  guards:
+    # Replacing a node costs money and takes minutes. Once a day per node,
+    # twice an hour across the fleet: more than that and the problem is not
+    # one node.
+    cooldown: 24h
+    maxPerHour: 2
+  steps:
+    - action: node.drain
+      with:
+        verifyTimeout: 10m
+        maxPods: "30"
+
+    # Only reached when the drain finished. `job.run` rather than
+    # `webhook.call` because the outcome matters here: a cloud API answers
+    # 200 "termination requested", and this step must not report success
+    # until the instance is actually gone. The image triggers and polls; its
+    # exit code and last log lines land in the record.
+    #
+    # It runs in remedik's namespace under a ServiceAccount you name — never
+    # remedik's, which is refused — so the cloud credentials are bound to
+    # that account and not to the operator. Give it an IRSA / Workload
+    # Identity annotation and remedik never holds them at all.
+    - action: job.run
+      with:
+        image: ghcr.io/example/node-replacer:v2.1.0
+        command: '["/replace", "--wait", "--timeout", "15m"]'
+        serviceAccount: node-replacer
+        backoffLimit: "0"
+        ttlSecondsAfterFinished: "86400"
+        verifyTimeout: 16m
+
+  onFailure:
+    # No retry. A drain that timed out has already moved some pods; running
+    # it again immediately would be a second wave during the same incident.
+    retries: 0
+    # Either half can fail, and both failures need a person: a node that is
+    # cordoned but not drained, or one that is drained but whose replacement
+    # never arrived. The escalation is told which, in remedik_message.
+    steps:
+      - action: webhook.call
+        with:
+          url: https://events.pagerduty.com/v2/enqueue
+          secretRef: pagerduty-routing-key
+          secretKey: key
+          header: Authorization
+          headerPrefix: "Token token="
+          timeout: 15s

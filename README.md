@@ -34,6 +34,12 @@ spec:
     - action: deployment.restart
   onFailure:
     retries: 1
+    steps:                        # and if that still does not work, page somebody
+      - action: webhook.call
+        with:
+          url: https://events.pagerduty.com/v2/enqueue
+          secretRef: pagerduty-routing-key
+          secretKey: key
 ```
 
 ```console
@@ -43,7 +49,7 @@ pod-crashloop-x7k2q   pod-crashloop   deployment/payments/api   Succeeded   2m
 pod-crashloop-b91mm   pod-crashloop   deployment/checkout/web   Simulated   1h
 ```
 
-**Thirteen actions ship today**, each a separate permission the chart grants
+**Fourteen actions ship today**, each a separate permission the chart grants
 only when you enable it, and only `deployment.restart` on by default:
 
 | | Action | What it does |
@@ -71,9 +77,42 @@ forbids expansion accepts the patch and does nothing, so remedik checks
 first. And a remediation Job runs as a ServiceAccount you name, never
 remedik's own, which is refused.
 
+**When remediation does not work, somebody gets told.** `onFailure.steps` is
+a second plan that runs once the retries are spent, so the loop closes:
+
+```
+alert --> remedik --> remediate --> it worked, done
+                              \--> it did not --> page whoever is on call
+```
+
+Escalating is not a notification setting — it is made of the same actions,
+under the same RBAC, in the same audit trail. It never turns a failure into
+a success, it is never retried during an incident, and it runs during a dry
+run too — the one exception in remedik, so a trial proves the path before
+anybody needs it. `remedik_escalations_total{outcome="Failed"}` is its own
+alertable signal: a remediation failed and nobody was told.
+
+**Posture is per namespace, so adoption is not all-or-nothing.** `dryRun` is
+the default; `namespacePosture` overrides it for the namespaces that have
+earned it, in one install:
+
+```yaml
+dryRun: true              # report everywhere
+namespacePosture:
+  staging: live           # ...except act in staging
+```
+
+It works in the other direction too — live by default, `prod: dryRun` — and
+the namespace consulted is the *workload's*, not remedik's. The posture is
+resolved once when the record is created and written onto it, so every
+`Remediation` says which posture it ran under and an in-flight execution
+keeps the one it started with.
+
 There is also a read-only dashboard, off by default, that answers the same
-questions in a browser — how much a dry-run trial would have done, and why
-nothing happened during an incident.
+questions in a browser — how much a dry-run trial would have done, why
+nothing happened during an incident, and whether a failure reached a person.
+Filter it by namespace, strategy or state; the filter is a query string, so
+a narrowed view is a URL you can send to whoever is on call.
 
 ## Try it in five minutes
 
@@ -158,13 +197,13 @@ the record still explains the run after the strategy is edited or deleted.
 
 - **v0.1.0 (in progress)** — alert gateway, `RemediationStrategy` and
   `Remediation` CRDs, deterministic engine with guards, dry-run and retries,
-  thirteen actions across workloads, capacity, nodes and escape hatches,
-  three guards including `blastRadius`, a read-only dashboard, a Helm chart
-  whose RBAC follows the features you enable, Prometheus metrics with a
-  Grafana dashboard and alerts, signed releases.
-- **v0.2.0** — per-namespace posture (act here, report there), the Slack bot
-  with approval buttons and manual commands, namespace health, audit sinks
-  (Splunk HEC, Loki, Elasticsearch).
+  fourteen actions across workloads, capacity, nodes and escape hatches,
+  three guards including `blastRadius`, escalation through `onFailure.steps`,
+  per-namespace posture, a filterable read-only dashboard, a Helm chart whose RBAC follows the features you
+  enable, Prometheus metrics with a Grafana dashboard and alerts, signed
+  releases.
+- **v0.2.0** — the Slack bot with approval buttons and manual commands,
+  namespace health, audit sinks (Splunk HEC, Loki, Elasticsearch).
 - **Later** — hub/spoke multi-cluster, cloud packs, `ActionPlugin` CRD, MCP
   server, workload-aware cost recommendations.
 

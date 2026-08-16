@@ -21,9 +21,45 @@ helm install remedik oci://ghcr.io/ratyx/charts/remedik \
 and records what it would have done, changing nothing, until you set
 `dryRun=false`.
 
+**Posture is per namespace.** `dryRun` is the default and `namespacePosture`
+overrides it, so one install can act where remediation has been earned and
+report everywhere else:
+
+```yaml
+dryRun: true
+namespacePosture:
+  staging: live       # act here
+  # everything else only reports
+```
+
+It works in the other direction too — `dryRun: false` with `prod: dryRun`.
+The namespace is the **workload's**, not remedik's, and a target with no
+namespace — a node, a webhook — takes `dryRun`. Read the two together: with
+an override present, `dryRun: true` alone does not mean nothing acts, which
+is why the install notes print the overrides and the dashboard's badge reads
+`Mixed`.
+
+To stop everything immediately, scale the deployment to zero or disable the
+strategy. Both are instant and neither needs a chart upgrade.
+
+## Upgrading
+
 Custom resource definitions are installed from the chart's `crds/`
-directory. Helm installs them on first install but never upgrades or
-deletes them: apply CRD changes yourself when upgrading across versions.
+directory. Helm installs them on first install and **never upgrades them**,
+so a `helm upgrade` alone leaves the old CRD in place and every field added
+by the new version is rejected with `unknown field`. Apply them yourself,
+before the upgrade:
+
+```console
+helm pull oci://ghcr.io/ratyx/charts/remedik --version <new> --untar
+kubectl apply --server-side --force-conflicts -f remedik/crds/
+helm upgrade remedik oci://ghcr.io/ratyx/charts/remedik --version <new> -n remedik
+```
+
+`--server-side` avoids the annotation size limit these CRDs are large enough
+to hit, and `--force-conflicts` takes the field ownership Helm recorded on
+first install. Helm never deletes them either, which is deliberate: removing
+a CRD deletes every `Remediation` in the cluster with it.
 
 ## The dashboard
 

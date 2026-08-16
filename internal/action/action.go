@@ -49,6 +49,13 @@ type Target struct {
 // cluster-scoped. This is the form stored on Remediation resources and
 // shown in kubectl output, so it must stay stable.
 func (t Target) String() string {
+	// Not every action has a target: webhook.call, job.run and script.run
+	// act outside the cluster and resolve to nothing. An empty string is
+	// already the record's convention for that, and the alternative — a
+	// bare "/" — reads like a bug in every message it appears in.
+	if t.IsZero() {
+		return ""
+	}
 	kind := strings.ToLower(t.Kind)
 	if t.Namespace == "" {
 		return kind + "/" + t.Name

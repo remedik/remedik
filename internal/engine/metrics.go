@@ -17,6 +17,10 @@ type Recorder interface {
 	// RemediationFinished reports a terminal outcome: "Succeeded",
 	// "Failed" or "Simulated", with how long the execution took.
 	RemediationFinished(strategy, outcome string, seconds float64)
+	// EscalationFinished reports an onFailure plan having run, with
+	// "Succeeded" or "Failed". A rising failure count is its own incident:
+	// it means remediations are failing and nobody is being told.
+	EscalationFinished(strategy, outcome string)
 }
 
 // NopRecorder discards engine telemetry.
@@ -33,3 +37,6 @@ func (NopRecorder) RemediationStarted(string) {}
 
 // RemediationFinished implements Recorder.
 func (NopRecorder) RemediationFinished(string, string, float64) {}
+
+// EscalationFinished implements Recorder.
+func (NopRecorder) EscalationFinished(string, string) {}

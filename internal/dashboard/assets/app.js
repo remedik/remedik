@@ -87,6 +87,10 @@
         if (!next) {
           return;
         }
+
+        // Only #content is swapped, and the filter controls are outside it
+        // on purpose — see layout.html — so a half-made selection cannot be
+        // destroyed by a refresh.
         content.innerHTML = next.innerHTML;
 
         var fresh = doc.getElementById("updated");

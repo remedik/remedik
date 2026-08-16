@@ -20,6 +20,8 @@ suit your alerts, and start with the operator in dry-run.
 | [node-not-ready.yaml](node-not-ready.yaml) | `KubeNodeNotReady` | Cordons the node — reversible, moves nothing |
 | [drain-a-dead-node.yaml](drain-a-dead-node.yaml) | `KubeNodeUnreachable` | Drains it, honouring disruption budgets |
 | [volume-filling-up.yaml](volume-filling-up.yaml) | `KubePersistentVolumeFillingUp` | Expands the claim, where the class allows |
+| [escalate-on-failure.yaml](escalate-on-failure.yaml) | `KubePodCrashLooping`, `KubeNodeNotReady` | Remediates, and pages somebody when that does not work |
+| [replace-a-node.yaml](replace-a-node.yaml) | `KubeNodeUnreachable` | Drains it here, lets a pipeline terminate the instance |
 
 Every action a recipe uses must be enabled in the chart, because each one is
 a permission: `--set actions.podDelete.enabled=true`. The chart's

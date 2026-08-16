@@ -15,8 +15,9 @@ flowchart LR
   ENG --> ACT["Actions<br/>built-in · job · script · webhook.call"]
   ACT --> K8S[Kubernetes API]
   CRD --> UI["Dashboard<br/>read-only, off by default"]
+  ENG -->|it did not work| ESC["Escalation<br/>onFailure.steps — the same actions"]
+  ESC --> OUT[PagerDuty · Alertmanager · your pipeline]
   ENG -.-> SLACK["Slack bot<br/>(Socket Mode)"]
-  ENG -.-> PD[PagerDuty escalation]
   ENG -.-> SINKS["Audit sinks<br/>Splunk · Loki · Elastic · S3"]
 ```
 
@@ -29,10 +30,10 @@ follow-up changes.
 | --- | --- | --- |
 | Gateway | Receives Alertmanager webhooks, authenticates, normalizes grouped alerts into events | shipped |
 | Engine | Matches events to strategies, evaluates guards, runs the per-execution state machine, writes audit | shipped |
-| Actions | `deployment.restart`, `workload.restart`, `pod.delete`, `job.delete`; later scaling, rollback, node actions, `job`/`script`/`webhook.call`, `ActionPlugin` | shipped |
+| Actions | Fourteen across four groups: workloads (`deployment.restart`, `workload.restart`, `pod.delete`, `job.delete`), capacity (`deployment.rollback`, `deployment.scale`, `hpa.scale`), nodes (`node.cordon`, `node.uncordon`, `node.drain`, `pvc.expand`) and escape hatches (`webhook.call`, `job.run`, `script.run`). `ActionPlugin` is later | shipped |
 | Metrics | Prometheus counters and histograms on the manager's metrics endpoint | shipped |
+| Escalation | `onFailure.steps` — a second plan when a remediation fails for good, made of the same actions, so "escalate" is a `webhook.call` to PagerDuty or a `job.run` into a pipeline | shipped |
 | Slack bot | Socket Mode; rich notifications, Approve/Deny buttons, manual commands (`@remedik …`) | planned |
-| Escalation | PagerDuty / on-call channel when execution fails or approval times out | planned |
 | Dashboard | Read-only web UI served by the operator: overview, dry-run report, one page per execution, strategies | shipped |
 | AI diagnosis | BYO-LLM, read-only, optional (see ADR-0003) | planned |
 
@@ -54,6 +55,9 @@ one, rather than quietly remediating without the approval it asked for.
 (new) --> Pending --> Running --> Succeeded | Simulated
              ^            |
              |            +-----> Failed          (no retries left)
+             |                      |
+             |                      +--> onFailure.steps, if declared
+             |                           (recorded, never changes the state)
              +------------+-----> Pending         (retry, after backoff)
           Running on entry -----> Failed/Interrupted
 ```
@@ -73,6 +77,90 @@ at an incident review.
 Terminal records are pruned per strategy (200 by default), and the record
 that just finished is never a pruning candidate whatever the timestamps
 say.
+
+## Posture
+
+`dryRun` is the default and `namespacePosture` overrides it per namespace,
+so one install can act where remediation has been earned and report
+everywhere else. That combination is how people actually adopt a tool that
+holds write access, and without it a trial that cannot be turned on for one
+namespace is a trial that never ends.
+
+Four decisions, each against an obvious alternative:
+
+- **The setting lives in the chart**, not on a `Namespace` and not on a
+  strategy. A label on the namespace reads better and is wrong: remedik's
+  RBAC is cluster-wide, granted once on the strength of a reviewed set of
+  actions, so a namespace label would let anyone with `edit` there promote
+  themselves from "reported" to "remediated" using permissions somebody
+  else granted. On a strategy is no better — a strategy matches by alert
+  labels and spans namespaces, so it cannot express "live here, reporting
+  there" without being copied. In the chart, posture and RBAC sit in the
+  same file and disagree in a diff somebody reads.
+- **The namespace is the target's**, not remedik's. `staging` means the
+  workload in staging.
+- **The posture is resolved once**, when the record is created, and written
+  onto it. The reconciler obeys the record and never re-reads the current
+  default, because the two legitimately disagree — that is the feature —
+  and re-reading would silently simulate a namespace somebody deliberately
+  made live. An in-flight execution therefore keeps the posture it started
+  with, exactly as it keeps its steps and its retry budget.
+- **A target with no namespace takes the default.** A node, a webhook, a Job
+  run outside any workload. Guessing would be worse, and the default ships
+  as dry-run.
+
+The cost of this feature is one specific misreading: somebody sees
+`dryRun: true` and believes nothing acts. No naming fixes that, so it is
+made hard to miss instead — the chart prints the overrides after every
+install, the operator warns at startup that the default does not describe
+the cluster, `remedik_namespace_posture{namespace,posture}` makes it
+queryable, the dashboard's badge reads `Mixed`, and every record carries the
+posture it ran under.
+
+To stop everything, scale the deployment to zero or disable the strategy.
+Both are instant; changing `dryRun` never was, because it needs a rollout
+either way.
+
+## Escalation
+
+`onFailure.steps` is a second plan, run once the remediation has failed and
+the retries are spent. It is how "and if that does not work, tell somebody"
+is written down, and it is deliberately made of the same actions as
+everything else: escalating is a `webhook.call` to PagerDuty, or a `job.run`
+that hands the incident to a pipeline. There is no notification subsystem,
+so there is nothing to configure separately, nothing that bypasses RBAC, and
+nothing that escapes the audit trail.
+
+Four properties, each chosen against an obvious alternative:
+
+- **It cannot change the outcome.** A remediation that escalated is still a
+  remediation that did not work. A record turning green because somebody was
+  paged would be the most misleading thing this project could do.
+- **It runs once the retries are spent, not per attempt.** Paging on the
+  first failure of three pages for something about to fix itself, and a page
+  that is usually unnecessary is a page people learn to ignore.
+- **It runs during a dry run**, and it is the only thing in remedik that
+  does. A trial is exactly when an operator wants to see the escalation path
+  work; the steps are told `remedik_dry_run="true"` so nobody is paged for
+  an incident that did not happen. Put nothing mutating in an escalation.
+- **It is not retried.** If the page fails during an incident, looping on it
+  helps nobody. `status.escalation` records that it failed, the dashboard
+  says so plainly, and `remedik_escalations_total{outcome="Failed"}` is its
+  own alertable signal — a remediation failed and nobody was told.
+
+The steps receive the alert's labels plus remedik's own —
+`remedik_remediation`, `remedik_strategy`, `remedik_target`,
+`remedik_reason`, `remedik_message`, `remedik_attempts`, `remedik_dry_run` —
+so a webhook body or a Job's environment explains the incident with no
+templating. remedik's keys overwrite any alert label of the same name: an
+escalation that can be lied to by whoever writes the alerting rules is worse
+than no escalation.
+
+**Know what a webhook's success means.** A pipeline API answers 200 "run
+queued", not "run succeeded", so a bare `webhook.call` records success the
+moment the pipeline *starts*. Where the outcome matters, use `job.run` with
+an image that triggers and then polls: the step waits for the Job, and the
+exit code and last log lines land in the record.
 
 Executions are serialised: the controller reconciles one at a time. During
 an alert storm that means remediations queue rather than running at once,
@@ -281,6 +369,37 @@ renders the same page. About forty lines of dependency-free JavaScript
 re-fetch the page every ten seconds and swap its `<main>`, so watching an
 incident does not throw away the reader's scroll position; without
 JavaScript everything still renders.
+
+Filtering is a query string — `?namespace=payments&state=Failed` — which
+falls out of the read-only rule rather than being a shortcut: a filter that
+needed a write could not exist behind a GET-only allowlist. The consequence
+is the useful part, that a narrowed view is a URL somebody can send during
+an incident. The controls are a plain `<form method="get">`, so they work
+with JavaScript off, and the auto-refresh re-fetches
+`window.location.href`, so a filter survives it.
+
+The controls sit above `<main>`, outside the region the auto-refresh
+replaces. That is not layout preference: with them inside, a selection made
+and not yet applied was destroyed within ten seconds, faster than anybody
+reaches the Apply button, and the filter appeared not to work. The first fix
+carried the selection across the swap in JavaScript — which worked, and made
+a filter's correctness depend on an enhancement the page is meant to survive
+without. Moving the markup makes the failure impossible and deleted the
+JavaScript written for it. The cost is that the options do not gain a
+namespace first seen since the page loaded, until a reload.
+
+The counts above the table follow the filter, and the choices in the
+controls do not: numbers that disagreed with the rows beneath them would be
+worse than no filter, and a control whose options shrink as you use it is a
+control you can get stuck in. An active filter is stated as its clauses,
+each removable on its own.
+
+There is no cluster filter, and the omission is deliberate. remedik watches
+the cluster it runs in, so a control offering a choice of clusters would be
+offering a choice of one; filtering across clusters needs the hub/spoke
+work. What exists instead is `clusterName`, a label in the header and the
+browser tab, because three port-forwarded dashboards otherwise produce three
+identical-looking tabs.
 
 The chart exposes it as a ClusterIP Service and creates no Ingress:
 publishing alert labels and workload names is the cluster owner's decision.

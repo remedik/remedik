@@ -161,4 +161,77 @@
   {{end}}
 </section>
 
+{{if .Escalation}}
+<section aria-labelledby="escalation-heading">
+  <div class="section-head">
+    <h2 id="escalation-heading">Escalation</h2>
+    <p class="section-meta">
+      what happened after this remediation failed for good
+    </p>
+  </div>
+
+  <p class="escalation-verdict escalation-{{.Escalation.Tone}}">
+    {{if .Escalation.Sent}}
+    The escalation was sent{{if .Escalation.Completed}} at {{.Escalation.Completed}}{{end}}.
+    Somebody was told this remediation did not work.
+    {{else}}
+    <strong>The escalation failed.</strong> This remediation did not work, and the attempt
+    to tell somebody about it did not work either — assume nobody knows.
+    {{end}}
+  </p>
+
+  {{if .Escalation.ShowMessage}}
+  <p class="escalation-message">{{.Escalation.Message}}</p>
+  {{end}}
+
+  <ol class="steps">
+    {{range .Escalation.Steps}}
+    <li class="step step-{{.Tone}}">
+      <div class="step-marker" aria-hidden="true"><span>{{.Number}}</span></div>
+      <div class="step-body">
+        <div class="step-head">
+          <code class="step-action">{{.Action}}</code>
+          <span class="pill pill-{{.Tone}}">{{.Phase}}</span>
+          {{if .Target}}<code class="dim step-target">{{.Target}}</code>{{end}}
+          {{if .Duration}}<span class="dim step-timing">{{.Duration}}</span>{{end}}
+        </div>
+        {{if .Plan}}<p class="step-plan"><code class="plan">{{.Plan}}</code></p>{{end}}
+        {{if .Message}}<p class="step-message">{{.Message}}</p>{{end}}
+        {{if .Outputs}}
+        <ul class="chips chips-sm">
+          {{range .Outputs}}
+          <li class="chip"><span class="chip-key">{{.Key}}</span><span class="chip-value">{{.Value}}</span></li>
+          {{end}}
+        </ul>
+        {{end}}
+      </div>
+    </li>
+    {{end}}
+  </ol>
+
+  {{if .DryRun}}
+  <p class="dim escalation-note">
+    This was a dry run: nothing in the cluster was changed, and the escalation was
+    told so. Escalation steps are the one thing remedik runs for real during a
+    trial, so the path is proven before it is needed.
+  </p>
+  {{end}}
+</section>
+{{end}}
+
+{{if .NobodyWasTold}}
+<section aria-labelledby="no-escalation-heading">
+  <div class="section-head">
+    <h2 id="no-escalation-heading">Escalation</h2>
+    <p class="section-meta">nothing was sent</p>
+  </div>
+  <p class="escalation-verdict escalation-muted">
+    This remediation failed and the strategy declares no escalation, so no alert went
+    anywhere. Add <code>onFailure.steps</code> to the strategy — usually a
+    <code>webhook.call</code> to whoever is on call — if a failure here should reach
+    a person.
+  </p>
+</section>
+{{end}}
+
 {{end}}

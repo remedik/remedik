@@ -105,7 +105,7 @@ helm-lint: ## Lint the Helm chart (requires helm)
 helm-docs: $(HELMDOCS) ## Regenerate chart README.md from values.yaml annotations
 	$(HELMDOCS) --chart-search-root charts
 
-verify: fmt vet lint yaml-lint helm-lint specs test ## Everything CI runs
+verify: fmt vet lint yaml-lint helm-lint verify-docs specs test ## Everything CI runs
 
 specs: ## Check that the spec-first workflow was followed
 	./hack/openspec-check.sh
@@ -113,6 +113,25 @@ specs: ## Check that the spec-first workflow was followed
 verify-codegen: generate manifests ## Fail if generated code or CRDs are stale
 	@git diff --exit-code api/ charts/remedik/crds/ \
 		|| { echo "generated files are stale — run 'make generate manifests' and commit"; exit 1; }
+
+# The chart README is generated from README.md.gotmpl and values.yaml. Editing
+# the generated file works until somebody runs helm-docs, and then the edit is
+# gone — silently, and usually in somebody else's commit. CI has always caught
+# this; `verify` claims to be everything CI runs, so it catches it too.
+#
+# It compares regeneration against itself rather than against git, so it says
+# the same thing in a clean checkout and in a working tree with uncommitted
+# changes. A check that fails on correct-but-unstaged work is a check people
+# learn to skip.
+verify-docs: $(HELMDOCS) ## Fail if the chart README does not match its template
+	@cp charts/remedik/README.md $(TOOLS_BIN)/README.before
+	@$(HELMDOCS) --chart-search-root charts
+	@diff -u $(TOOLS_BIN)/README.before charts/remedik/README.md \
+		|| { cp $(TOOLS_BIN)/README.before charts/remedik/README.md; \
+		     echo "charts/remedik/README.md is generated: edit README.md.gotmpl or values.yaml, then run 'make helm-docs'"; \
+		     rm -f $(TOOLS_BIN)/README.before; exit 1; }
+	@rm -f $(TOOLS_BIN)/README.before
+	@echo "chart README matches its template"
 
 ##@ Tools (installed pinned, into hack/bin)
 
@@ -175,13 +194,29 @@ dev-info: ## Show how to reach the dev cluster UIs
 	@echo ""
 	@echo "Deploy remedik into this cluster with: make dev-deploy"
 
+# The action set here is "everything reversible or bounded", plus
+# webhook.call — which is an escape hatch and off by default in the chart,
+# but is what the escalation path is made of, and a dev cluster where the
+# escalation cannot be seen working is a dev cluster that hides the feature
+# most worth trying before production. node.drain, job.run and script.run
+# stay off: those want a deliberate decision, not a default.
 dev-deploy: docker-build ## Build, load and install remedik into the dev cluster
 	kind load docker-image $(IMAGE_REPO):$(IMAGE_TAG) --name $(KIND_CLUSTER)
+	@# Helm installs the files in crds/ once and never touches them again, so
+	@# `helm upgrade` leaves a stale CRD behind and every new API field is
+	@# rejected with "unknown field". That is documented for operators in
+	@# charts/remedik/README.md; here it is simply done, because a dev loop
+	@# that breaks silently on every api/ change is not a dev loop.
+	@# --force-conflicts because the initial `helm install` recorded itself as
+	@# the field manager, and taking that over is exactly the intent.
+	kubectl apply --server-side --force-conflicts -f charts/remedik/crds/
 	helm upgrade --install remedik charts/remedik \
 		--namespace remedik --create-namespace \
 		--set image.repository=$(IMAGE_REPO) --set image.tag=$(IMAGE_TAG) \
 		--set image.pullPolicy=IfNotPresent \
 		--set gateway.auth.token=dev-token \
+		--set clusterName=dev-kind \
+		--set namespacePosture.payments=live \
 		--set dashboard.enabled=true --set dashboard.auth.token=dev-token \
 		--set actions.workloadRestart.enabled=true \
 		--set actions.podDelete.enabled=true \
@@ -191,6 +226,7 @@ dev-deploy: docker-build ## Build, load and install remedik into the dev cluster
 		--set actions.hpaScale.enabled=true \
 		--set actions.nodeCordon.enabled=true \
 		--set actions.nodeUncordon.enabled=true \
+		--set actions.webhookCall.enabled=true \
 		--set guards.blastRadius.enabled=true \
 		--set serviceMonitor.enabled=true \
 		--set serviceMonitor.additionalLabels.release=monitoring \
@@ -199,6 +235,13 @@ dev-deploy: docker-build ## Build, load and install remedik into the dev cluster
 		--set grafanaDashboard.enabled=true \
 		--set grafanaDashboard.namespace=monitoring \
 		--wait --timeout 3m
+	@# The tag comes from `git describe`, so an uncommitted change rebuilds
+	@# the same tag with different contents and helm sees no diff to roll
+	@# out. Without this, `make dev-deploy` silently leaves the old binary
+	@# running and the next twenty minutes are spent debugging a fix that
+	@# was never deployed.
+	kubectl -n remedik rollout restart deploy/remedik
+	kubectl -n remedik rollout status deploy/remedik --timeout=120s
 	@echo ""
 	@echo "remedik is installed in dry-run mode. Watch it with:"
 	@echo "  kubectl -n remedik get remediations -w"

@@ -35,16 +35,51 @@ const (
 	toneMuted   = "muted"
 )
 
+// Posture is what remedik is allowed to do, as the pages need to say it.
+//
+// It is declared here rather than imported from internal/engine for the same
+// reason engine.Snapshot is declared there: the dashboard renders, it does
+// not depend on the engine, and the conversion happens once in main.
+type Posture struct {
+	// DryRun is the default: true when a namespace with no override only
+	// reports.
+	DryRun bool
+	// Live and DryRunOnly are the namespaces that differ from the default,
+	// sorted.
+	Live       []string
+	DryRunOnly []string
+}
+
+// Mixed reports whether any namespace differs from the default.
+//
+// A badge reading "Dry-run" over a cluster where two namespaces are live is
+// the most misleading thing per-namespace posture could produce, so the
+// pages ask this before they say anything about posture at all.
+func (p Posture) Mixed() bool { return len(p.Live) > 0 || len(p.DryRunOnly) > 0 }
+
+// Exceptions is the namespaces that differ, whichever way they differ.
+func (p Posture) Exceptions() []string {
+	if p.DryRun {
+		return p.Live
+	}
+	return p.DryRunOnly
+}
+
 // Page carries what every page's chrome needs.
 type Page struct {
 	// Title is the browser title and the page heading.
 	Title string
 	// Nav marks the active navigation entry.
 	Nav string
-	// DryRun reports the operator's current posture.
+	// DryRun reports the operator's default posture.
 	DryRun bool
+	// Posture is the whole picture, including the namespaces that differ.
+	Posture Posture
 	// Namespace is where the records being shown live.
 	Namespace string
+	// Cluster names the cluster, when the operator was given a name. Empty
+	// hides the chip entirely rather than showing a placeholder.
+	Cluster string
 	// Version is the operator build.
 	Version string
 	// Asset fingerprints the stylesheet and script, so an upgraded operator
@@ -84,7 +119,19 @@ type RemediationRow struct {
 	Attempt  int32
 	DryRun   bool
 	Reason   string
+	// Escalated is "sent" or "failed" when this remediation ran an
+	// escalation, and empty otherwise. It rides beside the state rather
+	// than in a column of its own: most rows would have nothing in it, and
+	// the one that matters — a failure whose page did not go out — needs to
+	// be loud in the list, not discoverable one click away.
+	Escalated string
 }
+
+// Escalation markers, as the list renders them.
+const (
+	escalationSent   = "sent"
+	escalationFailed = "failed"
+)
 
 // OverviewView is the front page.
 type OverviewView struct {
@@ -102,7 +149,23 @@ type OverviewView struct {
 	// different problems with different fixes.
 	StrategyCount int
 	EnabledCount  int
+
+	// Filter is what is currently being narrowed, and Options are the
+	// choices offered. Everything above — the stats included — describes
+	// the filtered set, because numbers that disagreed with the table
+	// below them would be worse than no filter at all.
+	Filter  Filter
+	Options FilterOptions
+	// TotalUnfiltered is how many records exist regardless of the filter,
+	// so the page can say what is being hidden rather than looking empty.
+	TotalUnfiltered int
 }
+
+// Filtered reports whether the page is showing a subset.
+func (v OverviewView) Filtered() bool { return v.Filter.Active() }
+
+// Excluded is how many records the filter is hiding.
+func (v OverviewView) Excluded() int { return v.TotalUnfiltered - v.Total }
 
 // HasRecords reports whether anything has run.
 func (v OverviewView) HasRecords() bool { return v.Total > 0 }
@@ -158,7 +221,53 @@ type RemediationView struct {
 	Duration    string
 	Alert       AlertView
 	Steps       []StepView
+	// Escalation is who was told, and whether telling them worked. Nil when
+	// the strategy declares no escalation — which is itself worth seeing on
+	// a failed remediation, so the page says so rather than staying silent.
+	Escalation *EscalationView
+	// Failed is the terminal state, kept as a bool because the page asks the
+	// question more than once and State is a display string.
+	Failed bool
 }
+
+// EscalationView is the onFailure plan and what became of it.
+//
+// It is deliberately a separate block on the page. A page that folded these
+// into the steps would make "we told PagerDuty" read as a fourth attempt at
+// the restart, and would hide the case that matters most: the remediation
+// failed and the page failed too, so nobody knows.
+type EscalationView struct {
+	Phase     string
+	Tone      string
+	Message   string
+	Completed string
+	Steps     []StepView
+	// Sent reports whether anybody was actually told.
+	Sent bool
+}
+
+// ShowMessage reports whether the escalation's own message adds anything to
+// the steps below it. With one step it is the same sentence twice, and a page
+// that repeats itself looks like it is padding.
+func (v EscalationView) ShowMessage() bool {
+	if v.Message == "" {
+		return false
+	}
+	for _, step := range v.Steps {
+		if step.Message == v.Message {
+			return false
+		}
+	}
+	return true
+}
+
+// NobodyWasTold reports a failed remediation with no escalation declared.
+//
+// It is not a criticism — most strategies do not need one. It is on the page
+// because this is the moment somebody discovers the feature exists, and
+// because "it failed and no alert went anywhere" is a fact worth stating out
+// loud rather than leaving to be inferred from an absence.
+func (v RemediationView) NobodyWasTold() bool { return v.Failed && v.Escalation == nil }
 
 // ShowRawMessage reports whether the status message adds anything to the
 // summary. For a failed step the summary already quotes it, and saying the
@@ -268,9 +377,17 @@ func buildOverview(
 	remediations []v1alpha1.Remediation,
 	strategies []v1alpha1.RemediationStrategy,
 	dryRun bool,
+	filter Filter,
 	now time.Time,
 ) OverviewView {
 	sortNewestFirst(remediations)
+
+	// The options come from everything, the rest of the page from what
+	// survives: a control whose choices shrank as you used it would be a
+	// control you can get stuck in.
+	options := BuildFilterOptions(remediations)
+	total := len(remediations)
+	remediations = applyFilter(remediations, filter)
 
 	var succeeded, failed, simulated, inFlight int
 	for i := range remediations {
@@ -292,8 +409,11 @@ func buildOverview(
 	}
 
 	view := OverviewView{
-		Total:         len(remediations),
-		StrategyCount: len(strategies),
+		Total:           len(remediations),
+		TotalUnfiltered: total,
+		StrategyCount:   len(strategies),
+		Filter:          filter,
+		Options:         options,
 	}
 	for i := range strategies {
 		if strategies[i].IsEnabled() {
@@ -440,19 +560,31 @@ func buildDryRunReport(remediations []v1alpha1.Remediation, dryRun bool, now tim
 func buildRow(rem *v1alpha1.Remediation, now time.Time) RemediationRow {
 	state := displayState(rem.Status.State)
 	return RemediationRow{
-		Name:     rem.Name,
-		URL:      "/remediations/" + rem.Name,
-		Strategy: rem.Spec.StrategyName,
-		Target:   rem.Spec.Target,
-		Alert:    rem.Spec.Alert.Name,
-		State:    state,
-		Tone:     stateTone(rem.Status.State),
-		Age:      FormatAge(rem.CreationTimestamp.Time, now),
-		AgeExact: FormatTimestamp(rem.CreationTimestamp.Time),
-		Duration: FormatSpan(rem.Status.StartedAt, rem.Status.CompletedAt),
-		Attempt:  rem.Status.Attempt,
-		DryRun:   rem.Spec.DryRun,
-		Reason:   rem.Status.Reason,
+		Name:      rem.Name,
+		URL:       "/remediations/" + rem.Name,
+		Strategy:  rem.Spec.StrategyName,
+		Target:    rem.Spec.Target,
+		Alert:     rem.Spec.Alert.Name,
+		State:     state,
+		Tone:      stateTone(rem.Status.State),
+		Age:       FormatAge(rem.CreationTimestamp.Time, now),
+		AgeExact:  FormatTimestamp(rem.CreationTimestamp.Time),
+		Duration:  FormatSpan(rem.Status.StartedAt, rem.Status.CompletedAt),
+		Attempt:   rem.Status.Attempt,
+		DryRun:    rem.Spec.DryRun,
+		Reason:    rem.Status.Reason,
+		Escalated: escalationMarker(rem.Status.Escalation),
+	}
+}
+
+func escalationMarker(esc *v1alpha1.EscalationStatus) string {
+	switch {
+	case esc == nil:
+		return ""
+	case esc.Phase == v1alpha1.StepPhaseSucceeded:
+		return escalationSent
+	default:
+		return escalationFailed
 	}
 }
 
@@ -482,8 +614,25 @@ func buildRemediation(rem *v1alpha1.Remediation, now time.Time) RemediationView 
 		},
 		Steps: buildSteps(rem),
 	}
+	view.Failed = rem.Status.State == v1alpha1.RemediationStateFailed
+	view.Escalation = buildEscalation(rem)
 	view.Summary = summarise(rem, view.Steps)
 	return view
+}
+
+// applyFilter keeps the records the filter admits, without copying when
+// nothing is being narrowed.
+func applyFilter(remediations []v1alpha1.Remediation, filter Filter) []v1alpha1.Remediation {
+	if !filter.Active() {
+		return remediations
+	}
+	kept := make([]v1alpha1.Remediation, 0, len(remediations))
+	for i := range remediations {
+		if filter.Matches(&remediations[i]) {
+			kept = append(kept, remediations[i])
+		}
+	}
+	return kept
 }
 
 // buildSteps joins the plan with what happened to it.
@@ -494,25 +643,31 @@ func buildRemediation(rem *v1alpha1.Remediation, now time.Time) RemediationView 
 // step that never started still appears, which is exactly what someone
 // reading a failure needs to see.
 func buildSteps(rem *v1alpha1.Remediation) []StepView {
-	status := make(map[int32]*v1alpha1.StepStatus, len(rem.Status.Steps))
+	return joinSteps(rem.Spec.Steps, rem.Status.Steps)
+}
+
+// joinSteps pairs a plan with its outcome. It serves the remediation's own
+// steps and the escalation's alike, because they are the same join.
+func joinSteps(plan []v1alpha1.Step, recorded []v1alpha1.StepStatus) []StepView {
+	status := make(map[int32]*v1alpha1.StepStatus, len(recorded))
 	highest := -1
-	for i := range rem.Status.Steps {
-		st := &rem.Status.Steps[i]
+	for i := range recorded {
+		st := &recorded[i]
 		status[st.Index] = st
 		if int(st.Index) > highest {
 			highest = int(st.Index)
 		}
 	}
 
-	count := max(len(rem.Spec.Steps), highest+1)
+	count := max(len(plan), highest+1)
 	steps := make([]StepView, 0, count)
 
 	for i := range count {
 		view := StepView{Number: i + 1, Phase: string(v1alpha1.StepPhasePending)}
 
-		if i < len(rem.Spec.Steps) {
-			view.Action = rem.Spec.Steps[i].Action
-			view.Params = sortedLabels(rem.Spec.Steps[i].With)
+		if i < len(plan) {
+			view.Action = plan[i].Action
+			view.Params = sortedLabels(plan[i].With)
 		}
 
 		if st, ok := status[int32(i)]; ok {
@@ -536,6 +691,24 @@ func buildSteps(rem *v1alpha1.Remediation) []StepView {
 	}
 
 	return steps
+}
+
+// buildEscalation renders the onFailure plan's outcome, when there was one.
+func buildEscalation(rem *v1alpha1.Remediation) *EscalationView {
+	esc := rem.Status.Escalation
+	if esc == nil {
+		return nil
+	}
+
+	sent := esc.Phase == v1alpha1.StepPhaseSucceeded
+	return &EscalationView{
+		Phase:     string(esc.Phase),
+		Tone:      phaseTone(esc.Phase),
+		Message:   esc.Message,
+		Completed: FormatTimestampOf(esc.CompletedAt),
+		Steps:     joinSteps(rem.Spec.EscalationSteps, esc.Steps),
+		Sent:      sent,
+	}
 }
 
 // summarise writes the one line that answers "so what happened?" without

@@ -21,9 +21,45 @@ helm install remedik oci://ghcr.io/ratyx/charts/remedik \
 and records what it would have done, changing nothing, until you set
 `dryRun=false`.
 
+**Posture is per namespace.** `dryRun` is the default and `namespacePosture`
+overrides it, so one install can act where remediation has been earned and
+report everywhere else:
+
+```yaml
+dryRun: true
+namespacePosture:
+  staging: live       # act here
+  # everything else only reports
+```
+
+It works in the other direction too — `dryRun: false` with `prod: dryRun`.
+The namespace is the **workload's**, not remedik's, and a target with no
+namespace — a node, a webhook — takes `dryRun`. Read the two together: with
+an override present, `dryRun: true` alone does not mean nothing acts, which
+is why the install notes print the overrides and the dashboard's badge reads
+`Mixed`.
+
+To stop everything immediately, scale the deployment to zero or disable the
+strategy. Both are instant and neither needs a chart upgrade.
+
+## Upgrading
+
 Custom resource definitions are installed from the chart's `crds/`
-directory. Helm installs them on first install but never upgrades or
-deletes them: apply CRD changes yourself when upgrading across versions.
+directory. Helm installs them on first install and **never upgrades them**,
+so a `helm upgrade` alone leaves the old CRD in place and every field added
+by the new version is rejected with `unknown field`. Apply them yourself,
+before the upgrade:
+
+```console
+helm pull oci://ghcr.io/ratyx/charts/remedik --version <new> --untar
+kubectl apply --server-side --force-conflicts -f remedik/crds/
+helm upgrade remedik oci://ghcr.io/ratyx/charts/remedik --version <new> -n remedik
+```
+
+`--server-side` avoids the annotation size limit these CRDs are large enough
+to hit, and `--force-conflicts` takes the field ownership Helm recorded on
+first install. Helm never deletes them either, which is deliberate: removing
+a CRD deletes every `Remediation` in the cluster with it.
 
 ## The dashboard
 
@@ -62,13 +98,14 @@ what the operator already reads.
 | actions.webhookCall.enabled | bool | `false` | Enable `webhook.call`: POSTs the alert, the strategy and the plan to a URL you configure, optionally with a token from a Secret in remedik's namespace. The cheapest way to reach a pipeline remedik will never implement, and it moves the blast radius outside the cluster. |
 | actions.workloadRestart.enabled | bool | `false` | Enable `workload.restart`: the same rolling restart for Deployments, StatefulSets and DaemonSets. Off by default because it grants patch on all three; if you only ever restart Deployments, leave this off and use `deployment.restart`. |
 | affinity | object | `{}` | Affinity for the operator pod |
+| clusterName | string | `""` | A name for this cluster, shown in the dashboard's header and browser tab. Purely a label: remedik watches the cluster it runs in, so this is what tells three port-forwarded dashboards apart, not a filter. |
 | dashboard.auth.disabled | bool | `false` | Serve the dashboard without authentication. Anything that can reach the port could then read every alert label, namespace and workload name remedik has recorded. |
 | dashboard.auth.existingSecret | string | `""` | Name of a Secret you manage that holds the dashboard token |
 | dashboard.auth.secretKey | string | `"token"` | Key inside the token Secret |
 | dashboard.auth.token | string | `""` | Token required to read the dashboard. The chart creates a Secret holding it. Present it as a bearer token, or as the password in the browser's own prompt (the username is ignored). Prefer `existingSecret` in production so the value is not in your values file. |
 | dashboard.enabled | bool | `false` | Serve the read-only web dashboard. Off by default: its pages disclose alert labels, namespaces and workload names, and deciding who may see those is the cluster owner's call, not the chart's. Enabling it grants remedik no additional permission — the dashboard reads what the operator already reads. |
 | dashboard.port | int | `8082` | Port the dashboard listens on |
-| dryRun | bool | `true` | Global execution posture. The install default is dry-run: remedik matches alerts, evaluates guards and records Simulated remediations, changing nothing. Turn it off once the reports look right. |
+| dryRun | bool | `true` | Default execution posture. The install default is dry-run: remedik matches alerts, evaluates guards and records Simulated remediations, changing nothing. Turn it off once the reports look right.  Read this together with `namespacePosture` below: a namespace named there overrides this, so `dryRun: true` alone does not mean nothing acts. |
 | fullnameOverride | string | `""` | Override the fully qualified release name |
 | gateway.auth.disabled | bool | `false` | Disable authentication entirely. Local development only: anything that can reach the service could then ask remedik to act. |
 | gateway.auth.existingSecret | string | `""` | Name of a Secret you manage that holds the bearer token |
@@ -89,6 +126,7 @@ what the operator already reads.
 | logLevel | string | `"info"` | Log level: debug, info, warn or error |
 | metrics.port | int | `8080` | Port the Prometheus metrics endpoint listens on |
 | nameOverride | string | `""` | Override the chart name |
+| namespacePosture | object | `{}` | Per-namespace overrides of `dryRun`, keyed by the namespace of the workload being remediated — not by remedik's own namespace. Each value is `live` (remedik acts) or `dryRun` (remedik only reports).  This is how a cluster adopts remediation: live where it has been earned, reporting everywhere else, in one install.    dryRun: true                 # report by default   namespacePosture:     staging: live              # ...but act in staging    dryRun: false                # act by default   namespacePosture:     prod: dryRun               # ...but only report in prod  A remediation whose target has no namespace — a node, a webhook — uses `dryRun` above. The posture is resolved once, when the record is created, and written onto it, so every Remediation says which posture it ran under and an in-flight execution keeps the one it started with.  To stop everything immediately, scale the deployment to zero or disable the strategy; both are instant and neither needs a chart upgrade. |
 | networkPolicy.dashboardFrom | list | `[]` | Who may reach the read-only dashboard. Empty allows nothing, which is the right default: reach it with `kubectl port-forward`, which the kubelet proxies and a NetworkPolicy does not govern. |
 | networkPolicy.enabled | bool | `false` | Restrict who may reach remedik's ports. Off by default because a policy naming the wrong peers stops Alertmanager silently, and silence is this project's worst failure mode. Ingress only: remedik's one outbound call is to the API server, whose address is specific to your cluster. |
 | networkPolicy.gatewayFrom | list | `[]` | Who may reach the gateway — the port that makes the cluster change itself. Required when the policy is enabled. A list of NetworkPolicy peers, for example:   - namespaceSelector:       matchLabels:         kubernetes.io/metadata.name: monitoring |

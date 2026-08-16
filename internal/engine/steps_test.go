@@ -21,11 +21,18 @@ type scriptedAction struct {
 	planErr    error
 	execErr    error
 	target     action.Target
+	// seenLabels is what Resolve was last given, so a test can assert on
+	// the context an action was handed rather than only on what it did.
+	seenLabels map[string]string
+	// seenDryRun is whether the last call was a Plan rather than an
+	// Execute.
+	seenDryRun bool
 }
 
 func (a *scriptedAction) Name() string { return a.name }
 
-func (a *scriptedAction) Resolve(_ map[string]string, _ action.Params) (action.Target, error) {
+func (a *scriptedAction) Resolve(labels map[string]string, _ action.Params) (action.Target, error) {
+	a.seenLabels = labels
 	if a.resolveErr != nil {
 		return action.Target{}, a.resolveErr
 	}
@@ -38,6 +45,7 @@ func (a *scriptedAction) Resolve(_ map[string]string, _ action.Params) (action.T
 func (a *scriptedAction) Plan(_ context.Context, req action.Request) (action.Result, error) {
 	t := req.Target
 	a.planCalls++
+	a.seenDryRun = true
 	if a.planErr != nil {
 		return action.Result{}, a.planErr
 	}
@@ -50,6 +58,7 @@ func (a *scriptedAction) Plan(_ context.Context, req action.Request) (action.Res
 func (a *scriptedAction) Execute(_ context.Context, req action.Request) (action.Result, error) {
 	t := req.Target
 	a.execCalls++
+	a.seenDryRun = false
 	if a.execErr != nil {
 		return action.Result{}, a.execErr
 	}
@@ -262,3 +271,34 @@ func TestStepRunner_EmptyPlan(t *testing.T) {
 
 // errUnresolvable is shared by the sink tests.
 var errUnresolvable = errors.New("alert carries no deployment label")
+
+func TestDescribe_OmitsAnAbsentTarget(t *testing.T) {
+	tests := []struct {
+		name   string
+		target action.Target
+		want   string
+	}{
+		{
+			name:   "an action with a target names it",
+			target: action.Target{Kind: "Deployment", Namespace: "payments", Name: "api"},
+			want:   "execute deployment.restart on deployment/payments/api",
+		},
+		{
+			name:   "an action without one does not say \"on /\"",
+			target: action.Target{},
+			want:   "execute webhook.call",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			name := "deployment.restart"
+			if tt.target.IsZero() {
+				name = "webhook.call"
+			}
+			if got := describe("execute", name, tt.target); got != tt.want {
+				t.Errorf("describe() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

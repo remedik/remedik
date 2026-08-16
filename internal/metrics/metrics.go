@@ -73,6 +73,13 @@ var (
 		// patch through a run that retried its way to the backoff cap.
 		Buckets: []float64{0.5, 1, 2, 5, 10, 30, 60, 300, 900},
 	}, []string{"strategy"})
+
+	escalations = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace,
+		Name:      "escalations_total",
+		Help: "onFailure plans that ran, by strategy and outcome. " +
+			"outcome=\"Failed\" means a remediation failed and nobody was told.",
+	}, []string{"strategy", "outcome"})
 )
 
 // MustRegister adds every remedik metric to the controller-runtime
@@ -91,6 +98,7 @@ func MustRegister() {
 		remediationsStarted,
 		remediationsFinished,
 		remediationDuration,
+		escalations,
 	)
 }
 
@@ -129,4 +137,9 @@ func (Engine) RemediationStarted(strategy string) {
 func (Engine) RemediationFinished(strategy, outcome string, seconds float64) {
 	remediationsFinished.WithLabelValues(strategy, outcome).Inc()
 	remediationDuration.WithLabelValues(strategy).Observe(seconds)
+}
+
+// EscalationFinished implements engine.Recorder.
+func (Engine) EscalationFinished(strategy, outcome string) {
+	escalations.WithLabelValues(strategy, outcome).Inc()
 }

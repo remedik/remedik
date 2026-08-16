@@ -14,10 +14,42 @@ image:
   # -- Image pull policy
   pullPolicy: IfNotPresent
 
-# -- Global execution posture. The install default is dry-run: remedik
+# -- Default execution posture. The install default is dry-run: remedik
 # matches alerts, evaluates guards and records Simulated remediations,
 # changing nothing. Turn it off once the reports look right.
+#
+# Read this together with `namespacePosture` below: a namespace named there
+# overrides this, so `dryRun: true` alone does not mean nothing acts.
 dryRun: true
+
+# -- Per-namespace overrides of `dryRun`, keyed by the namespace of the
+# workload being remediated — not by remedik's own namespace. Each value is
+# `live` (remedik acts) or `dryRun` (remedik only reports).
+#
+# This is how a cluster adopts remediation: live where it has been earned,
+# reporting everywhere else, in one install.
+#
+#   dryRun: true                 # report by default
+#   namespacePosture:
+#     staging: live              # ...but act in staging
+#
+#   dryRun: false                # act by default
+#   namespacePosture:
+#     prod: dryRun               # ...but only report in prod
+#
+# A remediation whose target has no namespace — a node, a webhook — uses
+# `dryRun` above. The posture is resolved once, when the record is created,
+# and written onto it, so every Remediation says which posture it ran under
+# and an in-flight execution keeps the one it started with.
+#
+# To stop everything immediately, scale the deployment to zero or disable
+# the strategy; both are instant and neither needs a chart upgrade.
+namespacePosture: {}
+
+# -- A name for this cluster, shown in the dashboard's header and browser
+# tab. Purely a label: remedik watches the cluster it runs in, so this is
+# what tells three port-forwarded dashboards apart, not a filter.
+clusterName: ""
 
 # -- Log level: debug, info, warn or error
 logLevel: info

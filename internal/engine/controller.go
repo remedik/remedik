@@ -48,8 +48,6 @@ type RemediationReconciler struct {
 	Registry *action.Registry
 	// History is updated as executions complete, so guards see them.
 	History *guards.MemoryHistory
-	// DryRun selects the Plan-only path.
-	DryRun bool
 	// HistoryLimit caps terminal records kept per strategy.
 	HistoryLimit int
 	// Metrics receives telemetry; defaults to NopRecorder.
@@ -137,9 +135,13 @@ func (r *RemediationReconciler) runAttempt(
 		Remediation: rem.Name,
 		Strategy:    rem.Spec.StrategyName,
 		Namespace:   rem.Namespace,
-		DryRun:      rem.Spec.DryRun || r.DryRun,
-		Events:      r.stepEvents(rem),
-		Now:         r.Now,
+		// The record's posture, not the operator's current one. They can
+		// legitimately disagree — that is what per-namespace posture is —
+		// and re-reading the flag here would silently simulate a namespace
+		// somebody deliberately made live.
+		DryRun: rem.Spec.DryRun,
+		Events: r.stepEvents(rem),
+		Now:    r.Now,
 	}
 	result := runner.Run(ctx, rem.Spec.Alert.Labels, rem.Spec.Steps)
 	rem.Status.Steps = result.Steps
@@ -166,6 +168,13 @@ func (r *RemediationReconciler) runAttempt(
 	}
 
 	log.Error("remediation failed", "err", result.Err, "reason", result.Reason)
+
+	// The retry budget is spent, so this is where somebody gets told. The
+	// escalation runs before the terminal write, so the record reaches its
+	// final state with the outcome of the page already in it: a reader who
+	// sees Failed never has to wonder whether an escalation is still coming.
+	rem.Status.Escalation = r.escalate(ctx, rem, attempt, result.Reason, result.Err.Error(), log)
+
 	return ctrl.Result{}, r.finish(ctx, rem,
 		v1alpha1.RemediationStateFailed, result.Reason, result.Err.Error(), log)
 }
