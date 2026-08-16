@@ -202,6 +202,19 @@ func run(logger *slog.Logger, opts options) error {
 	}
 	logger.Info("actions registered", "actions", registry.Names())
 
+	// The posture metrics read through the manager's cache, so a scrape
+	// costs no API call. They are registered here, after the manager exists,
+	// because that is where the cache is.
+	metrics.MustRegisterPosture(metrics.PostureConfig{
+		Version: version.String(),
+		DryRun:  opts.dryRun,
+		Snapshot: postureFrom(&engine.Snapshotter{
+			Reader:    mgr.GetCache(),
+			Namespace: opts.namespace,
+		}),
+		Logger: logger.With("component", "metrics"),
+	})
+
 	history := guards.NewMemoryHistory(0)
 
 	reconciler := &engine.RemediationReconciler{
@@ -211,7 +224,7 @@ func run(logger *slog.Logger, opts options) error {
 		DryRun:       opts.dryRun,
 		HistoryLimit: opts.historyLimit,
 		Metrics:      metrics.Engine{},
-		Events:       mgr.GetEventRecorderFor("remedik"),
+		Events:       mgr.GetEventRecorder("remedik"),
 		Mapper:       mgr.GetRESTMapper(),
 		Logger:       logger.With("component", "reconciler"),
 	}
@@ -244,7 +257,7 @@ func run(logger *slog.Logger, opts options) error {
 		Namespace: opts.namespace,
 		DryRun:    opts.dryRun,
 		Metrics:   metrics.Engine{},
-		Events:    mgr.GetEventRecorderFor("remedik"),
+		Events:    mgr.GetEventRecorder("remedik"),
 		Logger:    logger.With("component", "sink"),
 	}
 
@@ -303,6 +316,18 @@ func run(logger *slog.Logger, opts options) error {
 		return fmt.Errorf("run manager: %w", err)
 	}
 	return nil
+}
+
+// postureFrom adapts the engine's snapshot to the metrics package's.
+//
+// The two structs are deliberately identical, so this is a conversion rather
+// than a translation: the engine owns what it can report, and the metrics
+// package owns how it is published, and neither has to import the other.
+func postureFrom(s *engine.Snapshotter) metrics.SnapshotFunc {
+	return func(ctx context.Context) (metrics.Snapshot, error) {
+		posture, err := s.Snapshot(ctx)
+		return metrics.Snapshot(posture), err
+	}
 }
 
 // buildRegistry registers the actions this operator is configured to run.

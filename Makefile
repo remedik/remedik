@@ -83,6 +83,10 @@ helm-lint: ## Lint the Helm chart (requires helm)
 		--set dashboard.enabled=true --set dashboard.auth.token=lint >/dev/null
 	helm template remedik charts/remedik --set gateway.auth.token=lint \
 		--set dashboard.enabled=true --set dashboard.auth.disabled=true >/dev/null
+	@# The observability bundle renders on and off.
+	helm template remedik charts/remedik --set gateway.auth.token=lint \
+		--set serviceMonitor.enabled=true --set prometheusRule.enabled=true \
+		--set grafanaDashboard.enabled=true >/dev/null
 	@# Enabling it without a way to authenticate must fail, not render.
 	@helm template remedik charts/remedik --set gateway.auth.token=lint \
 		--set dashboard.enabled=true >/dev/null 2>&1 \
@@ -168,6 +172,15 @@ dev-deploy: docker-build ## Build, load and install remedik into the dev cluster
 		--set image.pullPolicy=IfNotPresent \
 		--set gateway.auth.token=dev-token \
 		--set dashboard.enabled=true --set dashboard.auth.token=dev-token \
+		--set actions.workloadRestart.enabled=true \
+		--set actions.podDelete.enabled=true \
+		--set actions.jobDelete.enabled=true \
+		--set serviceMonitor.enabled=true \
+		--set serviceMonitor.additionalLabels.release=monitoring \
+		--set prometheusRule.enabled=true \
+		--set prometheusRule.additionalLabels.release=monitoring \
+		--set grafanaDashboard.enabled=true \
+		--set grafanaDashboard.namespace=monitoring \
 		--wait --timeout 3m
 	@echo ""
 	@echo "remedik is installed in dry-run mode. Watch it with:"
@@ -176,6 +189,9 @@ dev-deploy: docker-build ## Build, load and install remedik into the dev cluster
 	@echo ""
 	@echo "Dashboard (read-only): kubectl -n remedik port-forward svc/remedik-dashboard 8082:8082"
 	@echo "  -> http://127.0.0.1:8082/  (username blank, password: dev-token)"
+	@echo ""
+	@echo "Prometheus now scrapes remedik, and Grafana has the 'remedik' dashboard."
+	@echo "  Grafana: kubectl port-forward -n monitoring svc/monitoring-grafana 3000:80  (admin / remedik-dev)"
 
 dev-down: ## Delete the kind dev cluster
 	kind delete cluster --name $(KIND_CLUSTER)

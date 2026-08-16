@@ -8,7 +8,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/ratyx/remedik/api/v1alpha1"
@@ -44,7 +44,7 @@ type Sink struct {
 	// `kubectl describe remediationstrategy` answers "why did nothing
 	// happen?" without anyone having to find the operator's logs.
 	// Optional: nil disables event publishing.
-	Events record.EventRecorder
+	Events events.EventRecorder
 	// Logger is required.
 	Logger *slog.Logger
 	// Now supplies timestamps; tests inject a fixed clock.
@@ -227,8 +227,8 @@ func (s *Sink) recordRejection(
 	if s.Events == nil {
 		return
 	}
-	s.Events.Eventf(strategy, corev1.EventTypeNormal, EventReasonGuardRejected,
-		"refused %s: guard %q: %s", a.String(), decision.Guard, decision.Reason)
+	s.Events.Eventf(strategy, nil, corev1.EventTypeNormal, EventReasonGuardRejected,
+		decision.Guard, "refused %s: guard %q: %s", a.String(), decision.Guard, decision.Reason)
 }
 
 func (s *Sink) metrics() Recorder {

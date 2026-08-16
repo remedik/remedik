@@ -65,6 +65,60 @@ metrics:
   # -- Port the Prometheus metrics endpoint listens on
   port: 8080
 
+serviceMonitor:
+  # -- Create a ServiceMonitor so the Prometheus Operator scrapes remedik.
+  # Off by default because not every cluster uses the operator — but without
+  # it, or an equivalent scrape config, remedik is instrumented and
+  # unmonitored: a Service alone is not discovered.
+  enabled: false
+  # -- Namespace for the ServiceMonitor; defaults to the release namespace
+  namespace: ""
+  # -- Labels the ServiceMonitor needs to be selected. kube-prometheus-stack
+  # selects on `release: <its release name>` by default, so this is usually
+  # `{release: monitoring}`. A ServiceMonitor without it is created, ignored,
+  # and hard to notice.
+  additionalLabels: {}
+  # -- How often Prometheus scrapes remedik
+  interval: 30s
+  # -- How long a scrape may take. The posture metrics read the operator's
+  # cache, so a slow scrape means the cache is gone.
+  scrapeTimeout: 10s
+  # -- Relabelings applied before the scrape
+  relabelings: []
+  # -- Relabelings applied to the scraped metrics
+  metricRelabelings: []
+
+prometheusRule:
+  # -- Create a PrometheusRule alerting on remedik itself: down, ingest
+  # failing, nothing matching, remediations failing, deliveries truncated,
+  # unauthenticated attempts. Something that holds write access to a cluster
+  # should be watched by the same monitoring it consumes.
+  enabled: false
+  # -- Namespace for the PrometheusRule; defaults to the release namespace
+  namespace: ""
+  # -- Labels the PrometheusRule needs to be selected, as for the ServiceMonitor
+  additionalLabels: {}
+  severity:
+    # -- Severity label for the rule that fires when remedik is not scraped
+    critical: critical
+    # -- Severity label for the rest
+    warning: warning
+
+grafanaDashboard:
+  # -- Ship the remedik Grafana dashboard as a ConfigMap for the Grafana
+  # sidecar to load. The JSON is versioned in the chart, so the dashboard is
+  # the same in every cluster rather than living in one person's browser.
+  enabled: false
+  # -- Namespace for the ConfigMap; defaults to the release namespace.
+  # The Grafana sidecar usually only watches its own namespace.
+  namespace: ""
+  # -- Label the Grafana sidecar watches for
+  label: grafana_dashboard
+  # -- Value of that label
+  labelValue: "1"
+  # -- Extra annotations, such as the sidecar's folder annotation
+  annotations: {}
+
 probes:
   # -- Port the health and readiness probes listen on
   port: 8081

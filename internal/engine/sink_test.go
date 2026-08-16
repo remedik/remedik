@@ -8,7 +8,6 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/ratyx/remedik/api/v1alpha1"
@@ -291,12 +290,11 @@ func TestSink_ContinuesAfterAFailedCreate(t *testing.T) {
 
 // recordingEvents captures published Kubernetes events.
 type recordingEvents struct {
-	record.EventRecorder
 	events []string
 }
 
 func (r *recordingEvents) Eventf(
-	object runtime.Object, eventtype, reason, messageFmt string, args ...any,
+	object runtime.Object, _ runtime.Object, eventtype, reason, _, messageFmt string, args ...any,
 ) {
 	name := "<unknown>"
 	if obj, ok := object.(*v1alpha1.RemediationStrategy); ok {

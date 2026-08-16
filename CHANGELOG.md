@@ -14,6 +14,36 @@ rather than a proposal.
 
 ### Added
 
+- **remedik can now be monitored** (`add-observability-bundle`). The metrics
+  had existed since the MVP and nothing had ever scraped them:
+  kube-prometheus-stack discovers `ServiceMonitor` resources, and the chart
+  only ever created a Service, so a stock install collected exactly zero
+  `remedik_*` series.
+
+  - Four metrics describing the operator's **posture** rather than its
+    throughput: `remedik_build_info`, `remedik_dry_run`,
+    `remedik_strategies` by enabled state and `remedik_remediation_records`
+    by state. Without them a flat remediation rate is unreadable — dry-run,
+    no enabled strategies and a quiet week look identical. The two that
+    depend on cluster state come from a collector reading the manager's
+    cache when Prometheus scrapes, so they cost no API call and cannot go
+    stale; a read that fails reports no series rather than zero, because
+    zero enabled strategies is a real and alarming value.
+  - An optional **`ServiceMonitor`** with configurable labels. The labels
+    are load-bearing: the Prometheus Operator selects on them, and one
+    created without the selector's label is created, ignored, and hard to
+    notice.
+  - An optional **`PrometheusRule`** with six alerts about remedik itself —
+    down, ingest failing, nothing ever matching, most remediations failing,
+    deliveries truncated, repeated unauthenticated attempts. Something
+    holding write access to a cluster should be watched by the same
+    monitoring it consumes.
+  - A **Grafana dashboard**, versioned in the chart and optionally shipped
+    as a ConfigMap. Every series colour is pinned by name, because Grafana
+    assigns palette colours by series order: without pinning, filtering out
+    a series repaints the survivors and "Failed" inherits the colour
+    "Succeeded" had.
+
 - **Three more actions** (`add-workload-actions`), all reversible and scoped
   to one object:
 
@@ -183,6 +213,9 @@ rather than a proposal.
 
 ### Changed
 
+- Events are published through `k8s.io/client-go/tools/events` rather than
+  the deprecated `record` API, which also gives each event an `action`
+  field naming the verb that ran.
 - Minimum Go version is now 1.26 (matches the Kubernetes ecosystem, which
   controller-runtime requires).
 - Pinned previously floating versions: kube-prometheus-stack 88.3.0, kind

@@ -1,0 +1,27 @@
+{{- if .Values.grafanaDashboard.enabled }}
+{{/*
+The Grafana sidecar watches ConfigMaps carrying a label and loads whatever
+JSON they hold, so shipping a dashboard is shipping a ConfigMap. The label
+is configurable because the sidecar's is: kube-prometheus-stack defaults to
+`grafana_dashboard: "1"`, and other installs do not.
+
+The JSON itself lives in dashboards/remedik.json, versioned like code,
+because a dashboard edited only in Grafana's UI is a dashboard that exists
+in exactly one cluster.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "remedik.fullname" . }}-grafana-dashboard
+  namespace: {{ default .Release.Namespace .Values.grafanaDashboard.namespace }}
+  labels:
+    {{- include "remedik.labels" . | nindent 4 }}
+    {{ .Values.grafanaDashboard.label }}: {{ .Values.grafanaDashboard.labelValue | quote }}
+  {{- with .Values.grafanaDashboard.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+  remedik.json: |
+{{ .Files.Get "dashboards/remedik.json" | indent 4 }}
+{{- end }}

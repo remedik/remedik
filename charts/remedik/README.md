@@ -69,6 +69,11 @@ what the operator already reads.
 | gateway.auth.token | string | `""` | Bearer token Alertmanager must present. The chart creates a Secret holding it. Prefer `existingSecret` in production so the value is not in your values file. |
 | gateway.path | string | `"/webhooks/alertmanager"` | Path the Alertmanager webhook is served on |
 | gateway.port | int | `8090` | Port the Alertmanager webhook receiver listens on |
+| grafanaDashboard.annotations | object | `{}` | Extra annotations, such as the sidecar's folder annotation |
+| grafanaDashboard.enabled | bool | `false` | Ship the remedik Grafana dashboard as a ConfigMap for the Grafana sidecar to load. The JSON is versioned in the chart, so the dashboard is the same in every cluster rather than living in one person's browser. |
+| grafanaDashboard.label | string | `"grafana_dashboard"` | Label the Grafana sidecar watches for |
+| grafanaDashboard.labelValue | string | `"1"` | Value of that label |
+| grafanaDashboard.namespace | string | `""` | Namespace for the ConfigMap; defaults to the release namespace. The Grafana sidecar usually only watches its own namespace. |
 | history.keepPerStrategy | int | `200` | Terminal Remediation records retained per strategy |
 | image.pullPolicy | string | `"IfNotPresent"` | Image pull policy |
 | image.repository | string | `"ghcr.io/ratyx/remedik"` | Container image repository |
@@ -80,12 +85,24 @@ what the operator already reads.
 | packs | object | `{}` | Cloud packs such as `awsNodes` for node replacement — planned for v0.2.0 |
 | podAnnotations | object | `{}` | Extra annotations for the operator pod |
 | probes.port | int | `8081` | Port the health and readiness probes listen on |
+| prometheusRule.additionalLabels | object | `{}` | Labels the PrometheusRule needs to be selected, as for the ServiceMonitor |
+| prometheusRule.enabled | bool | `false` | Create a PrometheusRule alerting on remedik itself: down, ingest failing, nothing matching, remediations failing, deliveries truncated, unauthenticated attempts. Something that holds write access to a cluster should be watched by the same monitoring it consumes. |
+| prometheusRule.namespace | string | `""` | Namespace for the PrometheusRule; defaults to the release namespace |
+| prometheusRule.severity.critical | string | `"critical"` | Severity label for the rule that fires when remedik is not scraped |
+| prometheusRule.severity.warning | string | `"warning"` | Severity label for the rest |
 | resources.limits.memory | string | `"128Mi"` |  |
 | resources.requests.cpu | string | `"50m"` |  |
 | resources.requests.memory | string | `"64Mi"` |  |
 | serviceAccount.annotations | object | `{}` | Annotations for the ServiceAccount (for example, cloud identity) |
 | serviceAccount.create | bool | `true` | Create a ServiceAccount for the operator |
 | serviceAccount.name | string | `""` | Name of the ServiceAccount; generated when empty |
+| serviceMonitor.additionalLabels | object | `{}` | Labels the ServiceMonitor needs to be selected. kube-prometheus-stack selects on `release: <its release name>` by default, so this is usually `{release: monitoring}`. A ServiceMonitor without it is created, ignored, and hard to notice. |
+| serviceMonitor.enabled | bool | `false` | Create a ServiceMonitor so the Prometheus Operator scrapes remedik. Off by default because not every cluster uses the operator — but without it, or an equivalent scrape config, remedik is instrumented and unmonitored: a Service alone is not discovered. |
+| serviceMonitor.interval | string | `"30s"` | How often Prometheus scrapes remedik |
+| serviceMonitor.metricRelabelings | list | `[]` | Relabelings applied to the scraped metrics |
+| serviceMonitor.namespace | string | `""` | Namespace for the ServiceMonitor; defaults to the release namespace |
+| serviceMonitor.relabelings | list | `[]` | Relabelings applied before the scrape |
+| serviceMonitor.scrapeTimeout | string | `"10s"` | How long a scrape may take. The posture metrics read the operator's cache, so a slow scrape means the cache is gone. |
 | slack.enabled | bool | `false` | Socket Mode Slack bot with approval buttons — planned for v0.2.0 |
 | tolerations | list | `[]` | Tolerations for the operator pod |
 

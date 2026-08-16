@@ -229,6 +229,50 @@ browser's own prompt — a browser cannot be told to send a bearer header, and
 an authenticated dashboard nobody can open is how you end up with an
 unauthenticated one.
 
+## Observability
+
+remedik is monitored by the same Prometheus that feeds it. The metrics
+endpoint carries two kinds of series, and the difference matters when
+reading a graph:
+
+- **Counters** say what remedik has *done*: alerts received, unmatched and
+  truncated, ingest errors, unauthenticated attempts, guard rejections by
+  guard, remediations started and finished by outcome, and a duration
+  histogram.
+- **Gauges** say what remedik currently *is*: `remedik_build_info`,
+  `remedik_dry_run`, `remedik_strategies` by enabled state and
+  `remedik_remediation_records` by state. Without them, a flat remediation
+  rate is unreadable — dry-run, no enabled strategies and a genuinely quiet
+  week all look identical.
+
+The gauges that depend on cluster state are produced by a Prometheus
+collector reading the manager's cache when a scrape arrives, rather than a
+copy kept up to date on a timer. It cannot go stale, and it costs no API
+call: a scrape that reached the API server would turn Prometheus's polling
+interval into load on the control plane. A read that fails reports *no*
+series rather than zero — zero enabled strategies means remediation cannot
+happen, and emitting that because a read failed would turn a monitoring
+failure into a false incident.
+
+Three optional chart resources, all off by default:
+
+| Value | Creates | Why it is off by default |
+| --- | --- | --- |
+| `serviceMonitor.enabled` | `ServiceMonitor` | Not every cluster runs the Prometheus Operator |
+| `prometheusRule.enabled` | `PrometheusRule`, six alerts about remedik itself | Rules are opinions about somebody else's cluster |
+| `grafanaDashboard.enabled` | ConfigMap the Grafana sidecar loads | The sidecar's label differs per install |
+
+`serviceMonitor.additionalLabels` is load-bearing rather than cosmetic: the
+Prometheus Operator selects ServiceMonitors by label, and one created
+without the selector's label is created, ignored, and hard to notice.
+kube-prometheus-stack defaults to `release: <its release name>`.
+
+The alerts are about the operator and never about the workloads it
+remediates — those already have alerts, and those alerts are remedik's
+input. They cover: not being scraped, ingest failing, alerts arriving that
+never match a strategy, most remediations failing, deliveries truncated
+before arrival, and repeated unauthenticated attempts.
+
 ## Topologies
 
 - **Standalone (default)** — one agent per cluster; no shared credentials.

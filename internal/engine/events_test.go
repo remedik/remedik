@@ -23,10 +23,11 @@ type capturedEvent struct {
 	object    *corev1.ObjectReference
 	eventType string
 	reason    string
+	action    string
 	message   string
 }
 
-// capturingRecorder implements record.EventRecorder, keeping the object
+// capturingRecorder implements events.EventRecorder, keeping the object
 // reference as well as the text — the reference is the part that decides
 // whether `kubectl describe deployment` will show anything at all.
 type capturingRecorder struct {
@@ -34,25 +35,16 @@ type capturingRecorder struct {
 	events []capturedEvent
 }
 
-func (r *capturingRecorder) Event(object runtime.Object, eventType, reason, message string) {
+func (r *capturingRecorder) Eventf(
+	object runtime.Object, _ runtime.Object, eventType, reason, actionName, format string, args ...any,
+) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	ref, _ := object.(*corev1.ObjectReference)
 	r.events = append(r.events, capturedEvent{
-		object: ref, eventType: eventType, reason: reason, message: message,
+		object: ref, eventType: eventType, reason: reason,
+		action: actionName, message: sprintf(format, args...),
 	})
-}
-
-func (r *capturingRecorder) Eventf(
-	object runtime.Object, eventType, reason, format string, args ...any,
-) {
-	r.Event(object, eventType, reason, sprintf(format, args...))
-}
-
-func (r *capturingRecorder) AnnotatedEventf(
-	object runtime.Object, _ map[string]string, eventType, reason, format string, args ...any,
-) {
-	r.Eventf(object, eventType, reason, format, args...)
 }
 
 func (r *capturingRecorder) snapshot() []capturedEvent {

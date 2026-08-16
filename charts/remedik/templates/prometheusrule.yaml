@@ -1,0 +1,108 @@
+{{- if .Values.prometheusRule.enabled }}
+{{/*
+Who watches the watcher.
+
+remedik holds write access to a cluster and acts on its own. The failure
+that matters most is not a noisy one — it is remedik quietly doing nothing,
+which looks exactly like a quiet week. Every rule here is about remedik
+itself; none of them are about the workloads it remediates, because those
+already have their own alerts, and those alerts are remedik's input.
+*/}}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "remedik.fullname" . }}
+  namespace: {{ default .Release.Namespace .Values.prometheusRule.namespace }}
+  labels:
+    {{- include "remedik.labels" . | nindent 4 }}
+    {{- with .Values.prometheusRule.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: remedik
+      rules:
+        - alert: RemedikDown
+          expr: |
+            absent(remedik_build_info) == 1
+          for: 10m
+          labels:
+            severity: {{ .Values.prometheusRule.severity.critical }}
+          annotations:
+            summary: remedik is not being scraped
+            description: >-
+              No remedik_build_info series for 10 minutes. The operator is
+              down, or its ServiceMonitor no longer matches. Either way
+              nothing is being remediated and nothing is being recorded.
+
+        - alert: RemedikIngestFailing
+          expr: |
+            sum(rate(remedik_ingest_errors_total[10m])) > 0
+          for: 15m
+          labels:
+            severity: {{ .Values.prometheusRule.severity.warning }}
+          annotations:
+            summary: remedik is rejecting Alertmanager deliveries
+            description: >-
+              Deliveries have been failing to parse or exceeding the body
+              limit for 15 minutes. Alertmanager is retrying them, and the
+              alerts inside are not reaching any strategy.
+
+        - alert: RemedikAlertsNeverMatch
+          expr: |
+            sum(rate(remedik_alerts_unmatched_total[1h]))
+              / clamp_min(sum(rate(remedik_alerts_received_total[1h])), 0.0001) > 0.95
+          for: 6h
+          labels:
+            severity: {{ .Values.prometheusRule.severity.warning }}
+          annotations:
+            summary: almost nothing remedik receives matches a strategy
+            description: >-
+              Over 95% of alerts have matched no strategy for six hours.
+              remedik is being fed alerts it has no opinion about: either
+              Alertmanager is routing too much to it, or the strategies do
+              not cover what this cluster actually fires.
+
+        - alert: RemedikRemediationsFailing
+          expr: |
+            sum(rate(remedik_remediations_total{outcome="Failed"}[30m]))
+              / clamp_min(sum(rate(remedik_remediations_total[30m])), 0.0001) > 0.5
+          for: 30m
+          labels:
+            severity: {{ .Values.prometheusRule.severity.warning }}
+          annotations:
+            summary: more than half of remedik's remediations are failing
+            description: >-
+              Remediations have been failing more often than succeeding for
+              half an hour. Something they all depend on has changed —
+              permissions, a workload that no longer exists, or a cluster too
+              busy for rollouts to complete.
+
+        - alert: RemedikAlertsTruncated
+          expr: |
+            sum(increase(remedik_alerts_truncated_total[1h])) > 0
+          for: 5m
+          labels:
+            severity: {{ .Values.prometheusRule.severity.warning }}
+          annotations:
+            summary: Alertmanager truncated a delivery to remedik
+            description: >-
+              The sender dropped alerts before delivery, so remediation
+              decisions were made on partial information. Raise
+              Alertmanager's max_alerts for this receiver, or send smaller
+              groups.
+
+        - alert: RemedikUnauthenticatedAttempts
+          expr: |
+            sum(increase(remedik_unauthorized_total[15m])) > 10
+          for: 5m
+          labels:
+            severity: {{ .Values.prometheusRule.severity.warning }}
+          annotations:
+            summary: repeated unauthenticated attempts to make remedik act
+            description: >-
+              More than ten deliveries were rejected for a missing or wrong
+              token in fifteen minutes. Either Alertmanager's credentials are
+              stale, or something else in the cluster is trying to make
+              remedik remediate.
+{{- end }}

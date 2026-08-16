@@ -1,0 +1,42 @@
+{{- if .Values.serviceMonitor.enabled }}
+{{/*
+kube-prometheus-stack discovers ServiceMonitor resources, not Services. A
+chart that creates a metrics Service and stops there produces an operator
+that is instrumented and unmonitored, which is where remedik was.
+
+The labels matter as much as the resource: the stack's default selector is
+`release: <its own release name>`, so a ServiceMonitor without it is created,
+ignored, and very hard to notice. Hence additionalLabels, and hence the note
+in values.yaml.
+*/}}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "remedik.fullname" . }}
+  namespace: {{ default .Release.Namespace .Values.serviceMonitor.namespace }}
+  labels:
+    {{- include "remedik.labels" . | nindent 4 }}
+    {{- with .Values.serviceMonitor.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "remedik.selectorLabels" . | nindent 6 }}
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.serviceMonitor.scrapeTimeout }}
+      {{- with .Values.serviceMonitor.relabelings }}
+      relabelings:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.serviceMonitor.metricRelabelings }}
+      metricRelabelings:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
