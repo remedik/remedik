@@ -18,7 +18,7 @@ does not scrape anything itself.
 record what it would have done, changing nothing.
 
 ```bash
-helm install remedik oci://ghcr.io/ratyx/charts/remedik \
+helm install remedik oci://ghcr.io/remedik/charts/remedik \
   --namespace remedik --create-namespace \
   --set gateway.auth.token="$(openssl rand -hex 24)"
 ```
