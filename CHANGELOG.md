@@ -14,6 +14,69 @@ a proposal.
 
 ### Added
 
+- **Per-namespace posture** (`add-namespace-posture`). `dryRun` was one flag
+  on the operator, so a cluster was either all simulation or all action —
+  which is not how anybody adopts a tool that holds write access. The real
+  shape is live in `staging` and reporting in `prod` until the reports have
+  earned the change, and that needed two installs.
+
+  ```yaml
+  dryRun: true              # report everywhere
+  namespacePosture:
+    staging: live           # ...except act in staging
+  ```
+
+  It works in both directions. The namespace consulted is the **workload's**,
+  not remedik's, and a target with no namespace — a node, a webhook — takes
+  the default, which ships as dry-run.
+
+  Where the setting lives was the decision worth making. A label on the
+  `Namespace` reads better and is wrong: remedik's RBAC is cluster-wide,
+  granted once on the strength of a reviewed set of actions, so a namespace
+  label would let anyone with `edit` there promote themselves from
+  "reported" to "remediated" using permissions somebody else granted. On a
+  strategy is no better, since a strategy spans namespaces. In the chart,
+  posture and RBAC sit in the same file and disagree in a diff somebody
+  reads.
+
+  The posture is resolved once, when the record is created, and written onto
+  it — like the steps and the retry budget, and for the same reason. The
+  reconciler now obeys the record and no longer ORs in the operator's
+  current flag, because the two legitimately disagree; that OR would have
+  silently simulated a namespace somebody deliberately made live.
+
+  The one real cost is somebody reading `dryRun: true` and believing nothing
+  acts. No naming fixes that, so it is made hard to miss: the chart prints
+  the overrides after every install, the operator warns at startup, the
+  dashboard's badge reads `Mixed` and names the namespaces,
+  `remedik_namespace_posture{namespace,posture}` makes it queryable, and
+  every record carries the posture it ran under.
+
+  To stop everything, scale the deployment to zero or disable the strategy.
+  Both are instant; changing `dryRun` never was, because it needs a rollout
+  either way.
+
+- **Filtering on the dashboard** (`add-dashboard-filters`) by namespace,
+  strategy and state. The filter is a query string, which is not a shortcut
+  — the dashboard allowlists GET and HEAD before routing, so a filter
+  needing server-side state could not exist here — and the consequence is
+  the useful part: a narrowed view is a URL somebody can paste into an
+  incident channel. The controls are a plain form, so they work with
+  JavaScript off, and the auto-refresh preserves them.
+
+  The counts follow the filter, because figures that disagreed with the rows
+  beneath them would be worse than no filter. The controls' choices do not,
+  because a control whose options shrink as you use it is one you can get
+  stuck in. An unknown value renders "nothing happened there" rather than a
+  400, and a namespace filter excludes cluster-scoped records, because a
+  node is in no namespace.
+
+  There is no cluster filter, deliberately: remedik watches the cluster it
+  runs in, so the control would offer a choice of one. `clusterName` instead
+  puts a name in the header and leads the browser title, which solves the
+  real problem — three port-forwarded dashboards producing three
+  identical-looking tabs.
+
 - **Escalation when a remediation fails** (`add-failure-escalation`). The
   loop this project exists to serve had no end: a remediation that failed
   was recorded as `Failed` and nothing else happened, and nobody goes
@@ -424,6 +487,22 @@ a proposal.
   now applies them server-side, and `charts/remedik/README.md` gives
   operators the three commands to do the same across a version upgrade —
   it previously said only that they had to.
+
+- **`spec.dryRun` is written even when false.** It carried `omitempty`, so a
+  live record simply had no such field and "was this one simulated?" was an
+  inference from an absence — on the one record whose job is to explain
+  itself, and now that posture varies by namespace. It stays optional in the
+  schema: making it required would reject every record an earlier version
+  wrote, on its next status update. `kubectl get remediations -o wide` shows
+  it.
+
+- **`make verify` now checks the chart README against its template.** The
+  README is generated from `README.md.gotmpl`, and editing the generated
+  file works until the next `make helm-docs` silently reverts it — which had
+  already happened once here. CI has always caught this; `verify` calls
+  itself "everything CI runs", so it catches it too. It compares
+  regeneration against itself rather than against git, so it says the same
+  thing in a clean checkout and in a dirty working tree.
 
 - **The escalation's message no longer appears twice** on a remediation's
   page, once for the escalation and once for the single step that already

@@ -92,9 +92,27 @@ run too — the one exception in remedik, so a trial proves the path before
 anybody needs it. `remedik_escalations_total{outcome="Failed"}` is its own
 alertable signal: a remediation failed and nobody was told.
 
+**Posture is per namespace, so adoption is not all-or-nothing.** `dryRun` is
+the default; `namespacePosture` overrides it for the namespaces that have
+earned it, in one install:
+
+```yaml
+dryRun: true              # report everywhere
+namespacePosture:
+  staging: live           # ...except act in staging
+```
+
+It works in the other direction too — live by default, `prod: dryRun` — and
+the namespace consulted is the *workload's*, not remedik's. The posture is
+resolved once when the record is created and written onto it, so every
+`Remediation` says which posture it ran under and an in-flight execution
+keeps the one it started with.
+
 There is also a read-only dashboard, off by default, that answers the same
 questions in a browser — how much a dry-run trial would have done, why
 nothing happened during an incident, and whether a failure reached a person.
+Filter it by namespace, strategy or state; the filter is a query string, so
+a narrowed view is a URL you can send to whoever is on call.
 
 ## Try it in five minutes
 
@@ -181,12 +199,11 @@ the record still explains the run after the strategy is edited or deleted.
   `Remediation` CRDs, deterministic engine with guards, dry-run and retries,
   fourteen actions across workloads, capacity, nodes and escape hatches,
   three guards including `blastRadius`, escalation through `onFailure.steps`,
-  a read-only dashboard, a Helm chart whose RBAC follows the features you
+  per-namespace posture, a filterable read-only dashboard, a Helm chart whose RBAC follows the features you
   enable, Prometheus metrics with a Grafana dashboard and alerts, signed
   releases.
-- **v0.2.0** — per-namespace posture (act here, report there), the Slack bot
-  with approval buttons and manual commands, namespace health, audit sinks
-  (Splunk HEC, Loki, Elasticsearch).
+- **v0.2.0** — the Slack bot with approval buttons and manual commands,
+  namespace health, audit sinks (Splunk HEC, Loki, Elasticsearch).
 - **Later** — hub/spoke multi-cluster, cloud packs, `ActionPlugin` CRD, MCP
   server, workload-aware cost recommendations.
 

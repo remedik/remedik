@@ -105,7 +105,7 @@ helm-lint: ## Lint the Helm chart (requires helm)
 helm-docs: $(HELMDOCS) ## Regenerate chart README.md from values.yaml annotations
 	$(HELMDOCS) --chart-search-root charts
 
-verify: fmt vet lint yaml-lint helm-lint specs test ## Everything CI runs
+verify: fmt vet lint yaml-lint helm-lint verify-docs specs test ## Everything CI runs
 
 specs: ## Check that the spec-first workflow was followed
 	./hack/openspec-check.sh
@@ -113,6 +113,25 @@ specs: ## Check that the spec-first workflow was followed
 verify-codegen: generate manifests ## Fail if generated code or CRDs are stale
 	@git diff --exit-code api/ charts/remedik/crds/ \
 		|| { echo "generated files are stale — run 'make generate manifests' and commit"; exit 1; }
+
+# The chart README is generated from README.md.gotmpl and values.yaml. Editing
+# the generated file works until somebody runs helm-docs, and then the edit is
+# gone — silently, and usually in somebody else's commit. CI has always caught
+# this; `verify` claims to be everything CI runs, so it catches it too.
+#
+# It compares regeneration against itself rather than against git, so it says
+# the same thing in a clean checkout and in a working tree with uncommitted
+# changes. A check that fails on correct-but-unstaged work is a check people
+# learn to skip.
+verify-docs: $(HELMDOCS) ## Fail if the chart README does not match its template
+	@cp charts/remedik/README.md $(TOOLS_BIN)/README.before
+	@$(HELMDOCS) --chart-search-root charts
+	@diff -u $(TOOLS_BIN)/README.before charts/remedik/README.md \
+		|| { cp $(TOOLS_BIN)/README.before charts/remedik/README.md; \
+		     echo "charts/remedik/README.md is generated: edit README.md.gotmpl or values.yaml, then run 'make helm-docs'"; \
+		     rm -f $(TOOLS_BIN)/README.before; exit 1; }
+	@rm -f $(TOOLS_BIN)/README.before
+	@echo "chart README matches its template"
 
 ##@ Tools (installed pinned, into hack/bin)
 
@@ -196,6 +215,8 @@ dev-deploy: docker-build ## Build, load and install remedik into the dev cluster
 		--set image.repository=$(IMAGE_REPO) --set image.tag=$(IMAGE_TAG) \
 		--set image.pullPolicy=IfNotPresent \
 		--set gateway.auth.token=dev-token \
+		--set clusterName=dev-kind \
+		--set namespacePosture.payments=live \
 		--set dashboard.enabled=true --set dashboard.auth.token=dev-token \
 		--set actions.workloadRestart.enabled=true \
 		--set actions.podDelete.enabled=true \

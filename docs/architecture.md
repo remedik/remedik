@@ -78,6 +78,49 @@ Terminal records are pruned per strategy (200 by default), and the record
 that just finished is never a pruning candidate whatever the timestamps
 say.
 
+## Posture
+
+`dryRun` is the default and `namespacePosture` overrides it per namespace,
+so one install can act where remediation has been earned and report
+everywhere else. That combination is how people actually adopt a tool that
+holds write access, and without it a trial that cannot be turned on for one
+namespace is a trial that never ends.
+
+Four decisions, each against an obvious alternative:
+
+- **The setting lives in the chart**, not on a `Namespace` and not on a
+  strategy. A label on the namespace reads better and is wrong: remedik's
+  RBAC is cluster-wide, granted once on the strength of a reviewed set of
+  actions, so a namespace label would let anyone with `edit` there promote
+  themselves from "reported" to "remediated" using permissions somebody
+  else granted. On a strategy is no better — a strategy matches by alert
+  labels and spans namespaces, so it cannot express "live here, reporting
+  there" without being copied. In the chart, posture and RBAC sit in the
+  same file and disagree in a diff somebody reads.
+- **The namespace is the target's**, not remedik's. `staging` means the
+  workload in staging.
+- **The posture is resolved once**, when the record is created, and written
+  onto it. The reconciler obeys the record and never re-reads the current
+  default, because the two legitimately disagree — that is the feature —
+  and re-reading would silently simulate a namespace somebody deliberately
+  made live. An in-flight execution therefore keeps the posture it started
+  with, exactly as it keeps its steps and its retry budget.
+- **A target with no namespace takes the default.** A node, a webhook, a Job
+  run outside any workload. Guessing would be worse, and the default ships
+  as dry-run.
+
+The cost of this feature is one specific misreading: somebody sees
+`dryRun: true` and believes nothing acts. No naming fixes that, so it is
+made hard to miss instead — the chart prints the overrides after every
+install, the operator warns at startup that the default does not describe
+the cluster, `remedik_namespace_posture{namespace,posture}` makes it
+queryable, the dashboard's badge reads `Mixed`, and every record carries the
+posture it ran under.
+
+To stop everything, scale the deployment to zero or disable the strategy.
+Both are instant; changing `dryRun` never was, because it needs a rollout
+either way.
+
 ## Escalation
 
 `onFailure.steps` is a second plan, run once the remediation has failed and
@@ -326,6 +369,26 @@ renders the same page. About forty lines of dependency-free JavaScript
 re-fetch the page every ten seconds and swap its `<main>`, so watching an
 incident does not throw away the reader's scroll position; without
 JavaScript everything still renders.
+
+Filtering is a query string — `?namespace=payments&state=Failed` — which
+falls out of the read-only rule rather than being a shortcut: a filter that
+needed a write could not exist behind a GET-only allowlist. The consequence
+is the useful part, that a narrowed view is a URL somebody can send during
+an incident. The controls are a plain `<form method="get">`, so they work
+with JavaScript off, and the auto-refresh re-fetches
+`window.location.href`, so a filter survives it.
+
+The counts above the table follow the filter, and the choices in the
+controls do not: numbers that disagreed with the rows beneath them would be
+worse than no filter, and a control whose options shrink as you use it is a
+control you can get stuck in.
+
+There is no cluster filter, and the omission is deliberate. remedik watches
+the cluster it runs in, so a control offering a choice of clusters would be
+offering a choice of one; filtering across clusters needs the hub/spoke
+work. What exists instead is `clusterName`, a label in the header and the
+browser tab, because three port-forwarded dashboards otherwise produce three
+identical-looking tabs.
 
 The chart exposes it as a ClusterIP Service and creates no Ingress:
 publishing alert labels and workload names is the cluster owner's decision.
