@@ -10,10 +10,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/ratyx/remedik/api/v1alpha1"
-	"github.com/ratyx/remedik/internal/action"
-	"github.com/ratyx/remedik/internal/alert"
-	"github.com/ratyx/remedik/internal/guards"
+	"github.com/remedik/remedik/api/v1alpha1"
+	"github.com/remedik/remedik/internal/action"
+	"github.com/remedik/remedik/internal/alert"
+	"github.com/remedik/remedik/internal/guards"
 )
 
 func strategy(name string, match map[string]string, mutate ...func(*v1alpha1.RemediationStrategy)) *v1alpha1.RemediationStrategy {

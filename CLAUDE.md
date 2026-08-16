@@ -128,7 +128,7 @@ Neither of these is a code change, and neither can be done from here:
    none of them is proven. A `v0.1.0-rc.1` tag is the test.
 2. **There is no GitHub remote.** The CI badges, the chart's `icon:` URL and
    the security-advisory link in the issue templates all assume
-   `github.com/ratyx/remedik` exists.
+   `github.com/remedik/remedik` exists.
 
 ### Asked for by the owner, not yet designed
 

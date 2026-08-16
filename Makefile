@@ -1,5 +1,5 @@
 BIN     := remedik
-MODULE  := github.com/ratyx/remedik
+MODULE  := github.com/remedik/remedik
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X $(MODULE)/internal/version.version=$(VERSION)
 
@@ -156,7 +156,7 @@ $(HELMDOCS):
 
 ##@ Container image
 
-IMAGE_REPO ?= ghcr.io/ratyx/remedik
+IMAGE_REPO ?= ghcr.io/remedik/remedik
 IMAGE_TAG  ?= $(VERSION)
 
 docker-build: ## Build the container image

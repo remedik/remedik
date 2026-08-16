@@ -2,8 +2,8 @@
 
 > Predictably boring auto-remediation for Kubernetes alerts.
 
-[![CI](https://github.com/ratyx/remedik/actions/workflows/ci.yml/badge.svg)](https://github.com/ratyx/remedik/actions/workflows/ci.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/ratyx/remedik)](https://goreportcard.com/report/github.com/ratyx/remedik)
+[![CI](https://github.com/remedik/remedik/actions/workflows/ci.yml/badge.svg)](https://github.com/remedik/remedik/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/remedik/remedik)](https://goreportcard.com/report/github.com/remedik/remedik)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 remedik turns Alertmanager alerts into safe, auditable remediation.

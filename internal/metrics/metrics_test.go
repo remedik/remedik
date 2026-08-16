@@ -6,8 +6,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/ratyx/remedik/internal/engine"
-	"github.com/ratyx/remedik/internal/gateway"
+	"github.com/remedik/remedik/internal/engine"
+	"github.com/remedik/remedik/internal/gateway"
 )
 
 // The adapters must satisfy the interfaces they are written for; a

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ratyx/remedik/api/v1alpha1"
+	"github.com/remedik/remedik/api/v1alpha1"
 )
 
 // The overview answers one question: is anything wrong right now?

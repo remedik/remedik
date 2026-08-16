@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ratyx/remedik/api/v1alpha1"
+	"github.com/remedik/remedik/api/v1alpha1"
 )
 
 // Query parameters the overview understands. They are GET parameters rather

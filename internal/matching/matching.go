@@ -18,7 +18,7 @@ package matching
 import (
 	"sort"
 
-	"github.com/ratyx/remedik/internal/alert"
+	"github.com/remedik/remedik/internal/alert"
 )
 
 // Rule is the subset of a RemediationStrategy needed to choose a handler

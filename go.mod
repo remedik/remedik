@@ -1,4 +1,4 @@
-module github.com/ratyx/remedik
+module github.com/remedik/remedik
 
 go 1.26.0
 

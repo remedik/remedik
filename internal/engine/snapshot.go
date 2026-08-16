@@ -6,7 +6,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/ratyx/remedik/api/v1alpha1"
+	"github.com/remedik/remedik/api/v1alpha1"
 )
 
 // Snapshot is what the cluster looks like right now.

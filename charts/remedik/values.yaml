@@ -8,7 +8,7 @@
 
 image:
   # -- Container image repository
-  repository: ghcr.io/ratyx/remedik
+  repository: ghcr.io/remedik/remedik
   # -- Image tag; defaults to the chart appVersion
   tag: ""
   # -- Image pull policy

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ratyx/remedik/api/v1alpha1"
-	"github.com/ratyx/remedik/internal/action"
+	"github.com/remedik/remedik/api/v1alpha1"
+	"github.com/remedik/remedik/internal/action"
 )
 
 var testClock = time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC)

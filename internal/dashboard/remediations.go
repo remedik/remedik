@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/ratyx/remedik/api/v1alpha1"
+	"github.com/remedik/remedik/api/v1alpha1"
 )
 
 // paramPage is the page number, 1-based.

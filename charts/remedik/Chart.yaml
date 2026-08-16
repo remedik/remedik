@@ -6,10 +6,10 @@ type: application
 # pre-1.0; they are decoupled at the first stable release.
 version: 0.1.0-alpha.1
 appVersion: "0.1.0-alpha.1"
-home: https://github.com/ratyx/remedik
-icon: https://raw.githubusercontent.com/ratyx/remedik/main/docs/logo.svg
+home: https://github.com/remedik/remedik
+icon: https://raw.githubusercontent.com/remedik/remedik/main/docs/logo.svg
 sources:
-  - https://github.com/ratyx/remedik
+  - https://github.com/remedik/remedik
 keywords:
   - remediation
   - alertmanager

@@ -140,7 +140,7 @@ release. `make help` lists every target.
 ### Build and test
 
 ```bash
-git clone https://github.com/ratyx/remedik.git
+git clone https://github.com/remedik/remedik.git
 cd remedik
 make verify   # gofmt, vet, golangci-lint, yamllint, helm lint, race tests
 make build    # ./bin/remedik

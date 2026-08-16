@@ -6,7 +6,7 @@ context: |
   every execution is a Remediation resource, destructive actions require human
   approval (Slack), and AI/LLM features are read-only and optional by construction.
 
-  Tech: Go >= 1.24, module github.com/ratyx/remedik, controller-runtime for the
+  Tech: Go >= 1.24, module github.com/remedik/remedik, controller-runtime for the
   operator, Helm for install, API group remedik.dev (v1alpha1).
 
   Conventions: English everywhere (code, comments, docs, commits). Conventional

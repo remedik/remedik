@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ratyx/remedik/api/v1alpha1"
+	"github.com/remedik/remedik/api/v1alpha1"
 )
 
 func TestStaticAssetsAreServedFromTheBinary(t *testing.T) {

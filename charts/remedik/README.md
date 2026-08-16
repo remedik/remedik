@@ -121,7 +121,7 @@ what the operator already reads.
 | guards.blastRadius.enabled | bool | `false` | Allow strategies to use the `blastRadius` guard, which refuses to remediate a workload that is already too degraded. Enabling it grants read-only access to workloads, pods and replicasets so the guard can see how much is available.  A strategy that sets `blastRadius` in a cluster where this is off will be **refused, not allowed**: a guard that cannot evaluate its own condition must not permit the execution. The refusal names the missing permission on the strategy's events. |
 | history.keepPerStrategy | int | `200` | Terminal Remediation records retained per strategy |
 | image.pullPolicy | string | `"IfNotPresent"` | Image pull policy |
-| image.repository | string | `"ghcr.io/ratyx/remedik"` | Container image repository |
+| image.repository | string | `"ghcr.io/remedik/remedik"` | Container image repository |
 | image.tag | string | `""` | Image tag; defaults to the chart appVersion |
 | logLevel | string | `"info"` | Log level: debug, info, warn or error |
 | metrics.port | int | `8080` | Port the Prometheus metrics endpoint listens on |

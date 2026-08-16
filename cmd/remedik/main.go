@@ -27,17 +27,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	"github.com/ratyx/remedik/api/v1alpha1"
-	"github.com/ratyx/remedik/internal/action"
-	"github.com/ratyx/remedik/internal/action/external"
-	"github.com/ratyx/remedik/internal/action/node"
-	"github.com/ratyx/remedik/internal/action/workload"
-	"github.com/ratyx/remedik/internal/dashboard"
-	"github.com/ratyx/remedik/internal/engine"
-	"github.com/ratyx/remedik/internal/gateway"
-	"github.com/ratyx/remedik/internal/guards"
-	"github.com/ratyx/remedik/internal/metrics"
-	"github.com/ratyx/remedik/internal/version"
+	"github.com/remedik/remedik/api/v1alpha1"
+	"github.com/remedik/remedik/internal/action"
+	"github.com/remedik/remedik/internal/action/external"
+	"github.com/remedik/remedik/internal/action/node"
+	"github.com/remedik/remedik/internal/action/workload"
+	"github.com/remedik/remedik/internal/dashboard"
+	"github.com/remedik/remedik/internal/engine"
+	"github.com/remedik/remedik/internal/gateway"
+	"github.com/remedik/remedik/internal/guards"
+	"github.com/remedik/remedik/internal/metrics"
+	"github.com/remedik/remedik/internal/version"
 )
 
 const (
