@@ -109,3 +109,157 @@ spec:
     - action: node.uncordon
   onFailure:
     retries: 0
+---
+# Test 10 — the actions and the escalation path nothing else covers.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: e2e-job-delete
+spec:
+  trigger:
+    match:
+      alertname: E2EJobFailed
+  steps:
+    - action: job.delete
+---
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: e2e-rollback
+spec:
+  trigger:
+    match:
+      alertname: E2EBadDeploy
+  steps:
+    - action: deployment.rollback
+---
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: e2e-scale
+spec:
+  trigger:
+    match:
+      alertname: E2ENeedsCapacity
+  steps:
+    - action: deployment.scale
+      with:
+        increaseBy: "2"
+        max: "6"
+---
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: e2e-hpa-scale
+spec:
+  trigger:
+    match:
+      alertname: E2EHpaMaxed
+  steps:
+    - action: hpa.scale
+      with:
+        increaseBy: "3"
+        max: "10"
+---
+# The claim cannot grow: kind's "standard" class does not set
+# allowVolumeExpansion. The refusal is the behaviour under test — an action
+# that reported success here would have changed nothing.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: e2e-pvc-expand
+spec:
+  trigger:
+    match:
+      alertname: E2EVolumeFilling
+  steps:
+    - action: pvc.expand
+      with:
+        size: 2Gi
+---
+# remedik's own gateway is the endpoint: it accepts POST, requires the bearer
+# token from a Secret in the operator's namespace, and answers 200 to a body
+# it understood. Nothing outside the cluster is needed to prove the path.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: e2e-webhook
+spec:
+  trigger:
+    match:
+      alertname: E2EWebhook
+  steps:
+    - action: webhook.call
+      with:
+        url: http://remedik-gateway.remedik.svc.cluster.local:8090/webhooks/alertmanager
+        secretRef: remedik-gateway-token
+        secretKey: token
+        header: Authorization
+        headerPrefix: "Bearer "
+        timeout: 20s
+---
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: e2e-job-run
+spec:
+  trigger:
+    match:
+      alertname: E2ERunbook
+  steps:
+    - action: job.run
+      with:
+        image: remedik:e2e
+        command: '["/remedik", "--version"]'
+        serviceAccount: e2e-runbook
+        backoffLimit: "0"
+        ttlSecondsAfterFinished: "600"
+---
+# The whole loop: a step that cannot succeed, then a page that can.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: e2e-escalation
+spec:
+  trigger:
+    match:
+      alertname: E2EEscalate
+  steps:
+    # There is no Deployment called "does-not-exist", so this always fails.
+    - action: deployment.restart
+  onFailure:
+    retries: 0
+    steps:
+      - action: webhook.call
+        with:
+          url: http://remedik-gateway.remedik.svc.cluster.local:8090/webhooks/alertmanager
+          secretRef: remedik-gateway-token
+          secretKey: token
+          header: Authorization
+          headerPrefix: "Bearer "
+          timeout: 20s
+---
+# The case that matters most: the remediation failed and so did the page.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: e2e-escalation-fails
+spec:
+  trigger:
+    match:
+      alertname: E2EEscalateBadly
+  steps:
+    - action: deployment.restart
+  onFailure:
+    retries: 0
+    steps:
+      - action: webhook.call
+        with:
+          url: http://remedik-gateway.remedik.svc.cluster.local:8090/webhooks/alertmanager
+          # A real Secret, holding the wrong credential for this endpoint:
+          # the gateway answers 401 and the escalation fails honestly.
+          secretRef: e2e-wrong-token
+          secretKey: token
+          header: Authorization
+          headerPrefix: "Bearer "
+          timeout: 20s

@@ -98,3 +98,110 @@ spec:
         requests:
           cpu: 10m
           memory: 16Mi
+---
+# A Deployment for deployment.scale. It is its own workload rather than a
+# shared one because scaling refuses anything an HPA owns, and api2 has one.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: capacity
+  namespace: e2e-payments
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: capacity
+  template:
+    metadata:
+      labels:
+        app: capacity
+    spec:
+      containers:
+        - name: pause
+          image: registry.k8s.io/pause:3.10
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+---
+# A Deployment for deployment.rollback. The test gives it a second revision
+# and then asks remedik to put the first one back.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shipped
+  namespace: e2e-payments
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: shipped
+  template:
+    metadata:
+      labels:
+        app: shipped
+        release: good
+    spec:
+      containers:
+        - name: pause
+          image: registry.k8s.io/pause:3.10
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+---
+# A Job for job.delete. Deleting it is what lets a CronJob schedule the next
+# run, which is the reason the action exists.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nightly-billing
+  namespace: e2e-payments
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: work
+          image: registry.k8s.io/pause:3.10
+---
+# A claim on kind's "standard" class, which does not allow expansion. It is
+# here so pvc.expand has something real to refuse.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ledger-data
+  namespace: e2e-payments
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 1Gi
+---
+# An autoscaler for hpa.scale. No metrics-server is installed, so it never
+# actually scales anything — the action patches spec.maxReplicas, which is
+# what is under test.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api2
+  namespace: e2e-payments
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api2
+  minReplicas: 1
+  maxReplicas: 2
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 80

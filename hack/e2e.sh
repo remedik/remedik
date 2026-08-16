@@ -104,6 +104,32 @@ send_alert() {
 		      \"fingerprint\":\"${fingerprint}\"}]}"
 }
 
+# send_labeled_alert <alertname> <fingerprint> <labels-json> -> HTTP status
+#
+# send_alert covers the Deployment-shaped alerts, which is most of them. The
+# node, Job, claim and autoscaler actions resolve their target from different
+# labels, and testing them through the labels a real alert carries is the
+# point — a step that only works when the target is named in `with:` has not
+# been tested at all.
+send_labeled_alert() {
+	local alertname="$1" fingerprint="$2" labels="$3"
+	curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+		-X POST "http://127.0.0.1:${LOCAL_PORT}/webhooks/alertmanager" \
+		-H "Authorization: Bearer ${TOKEN}" \
+		-H 'Content-Type: application/json' \
+		-d "{\"version\":\"4\",\"alerts\":[{
+		      \"status\":\"firing\",
+		      \"labels\":{\"alertname\":\"${alertname}\",${labels}},
+		      \"startsAt\":\"2026-08-15T09:00:00Z\",
+		      \"fingerprint\":\"${fingerprint}\"}]}"
+}
+
+# strategy_field <strategy> <jsonpath-after-.items[0]> -> the value
+strategy_field() {
+	kubectl -n "$NAMESPACE" get remediations -l "remedik.dev/strategy=$1" \
+		-o jsonpath="{.items[0]$2}" 2>/dev/null || true
+}
+
 # wait_for_remediations <expected-count> [timeout-seconds]
 wait_for_remediations() {
 	local want="$1" timeout="${2:-60}" elapsed=0
@@ -876,6 +902,271 @@ if wait_for_strategy_state e2e-node-uncordon Succeeded 90; then
 	fi
 else
 	fail "the uncordon remediation did not succeed (status ${status})"
+fi
+
+
+# --------------------------------------------------------------------------
+# Test 10 — the rest of the catalogue, and the escalation path
+#
+# Groups 1-9 cover six of the fourteen actions. The other eight are the ones
+# whose failure modes are invisible without a cluster: a rollback needs real
+# revision history, a scale needs a real HPA to refuse, an expansion needs a
+# real StorageClass, and a webhook needs something at the other end.
+#
+# That last one is answered with remedik itself. Its gateway accepts POST,
+# requires a bearer token from a Secret, and answers 200 to a body it
+# understood — so the whole outbound path is proven without the test needing
+# an endpoint outside the cluster, which it would not have.
+# --------------------------------------------------------------------------
+step "10. The remaining actions, and escalation"
+
+# The endpoint credentials. The right token proves the success path; a real
+# Secret holding the wrong one proves the failure path honestly, rather than
+# by pointing at a URL that does not resolve.
+kubectl -n "$NAMESPACE" create secret generic e2e-wrong-token \
+	--from-literal=token=not-the-gateway-token \
+	--dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl -n "$NAMESPACE" create serviceaccount e2e-runbook \
+	--dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
+helm upgrade remedik charts/remedik \
+	--namespace "$NAMESPACE" \
+	--set image.repository="${IMAGE%%:*}" \
+	--set image.tag="${IMAGE##*:}" \
+	--set image.pullPolicy=IfNotPresent \
+	--set gateway.auth.token="$TOKEN" \
+	--set dryRun=false \
+	--set actions.deploymentRestart.enabled=true \
+	--set actions.jobDelete.enabled=true \
+	--set actions.deploymentRollback.enabled=true \
+	--set actions.deploymentScale.enabled=true \
+	--set actions.hpaScale.enabled=true \
+	--set actions.pvcExpand.enabled=true \
+	--set actions.webhookCall.enabled=true \
+	--set actions.jobRun.enabled=true \
+	--wait --timeout 3m >/dev/null
+kubectl -n "$NAMESPACE" rollout status deploy/remedik --timeout=120s >/dev/null
+start_port_forward
+
+# --- job.delete -----------------------------------------------------------
+# Resolved from `job_name`, not `job`: in Prometheus `job` is the scrape job,
+# and an action that read it would resolve to kube-state-metrics.
+status=$(send_labeled_alert E2EJobFailed job-1 \
+	'"namespace":"e2e-payments","job_name":"nightly-billing"')
+if [ "$status" = "200" ]; then
+	pass "gateway accepted the failed-Job alert"
+else
+	fail "gateway answered $status for the failed-Job alert"
+fi
+
+if wait_for_strategy_state e2e-job-delete Succeeded 90; then
+	if kubectl -n e2e-payments get job nightly-billing >/dev/null 2>&1; then
+		fail "the Job is still there"
+	else
+		pass "the Job was deleted, so its CronJob can schedule again"
+	fi
+else
+	fail "the job.delete remediation did not succeed"
+fi
+
+# --- deployment.rollback --------------------------------------------------
+# Give it a second revision, then ask remedik to put the first one back. The
+# assertion is on the pod template, because that is what a rollback restores;
+# the revision number only moves forward.
+kubectl -n e2e-payments patch deploy shipped --type=merge \
+	-p '{"spec":{"template":{"metadata":{"labels":{"release":"bad"}}}}}' >/dev/null
+kubectl -n e2e-payments rollout status deploy/shipped --timeout=90s >/dev/null 2>&1 || true
+
+if [ "$(kubectl -n e2e-payments get deploy shipped -o jsonpath='{.spec.template.metadata.labels.release}')" = "bad" ]; then
+	pass "the bad revision is live, so there is something to roll back"
+else
+	fail "the second revision did not take"
+fi
+
+status=$(send_alert E2EBadDeploy rollback-1 shipped)
+if wait_for_strategy_state e2e-rollback Succeeded 120; then
+	live=$(kubectl -n e2e-payments get deploy shipped \
+		-o jsonpath='{.spec.template.metadata.labels.release}')
+	if [ "$live" = "good" ]; then
+		pass "the previous revision is back"
+	else
+		fail "the deployment still runs the bad revision (release=${live})"
+	fi
+	rolled=$(strategy_field e2e-rollback '.status.steps[0].outputs.rolledBackTo')
+	if [ -n "$rolled" ]; then
+		pass "the record names the revision it went back to: ${rolled}"
+	else
+		fail "the record does not name the revision"
+	fi
+else
+	fail "the rollback remediation did not succeed (gateway answered ${status})"
+fi
+
+# --- deployment.scale -----------------------------------------------------
+status=$(send_alert E2ENeedsCapacity scale-1 capacity)
+if wait_for_strategy_state e2e-scale Succeeded 120; then
+	replicas=$(kubectl -n e2e-payments get deploy capacity -o jsonpath='{.spec.replicas}')
+	if [ "$replicas" = "3" ]; then
+		pass "the deployment was scaled from 1 to 3"
+	else
+		fail "the deployment has ${replicas} replicas, want 3"
+	fi
+else
+	fail "the scale remediation did not succeed (gateway answered ${status})"
+fi
+
+# api2 has an HPA, so scaling it directly must be refused: two controllers
+# fighting over one replica count is worse than not scaling at all.
+status=$(send_alert E2ENeedsCapacity scale-2 api2)
+sleep 10
+refusal=$(kubectl -n "$NAMESPACE" get remediations -l remedik.dev/strategy=e2e-scale \
+	-o jsonpath='{range .items[*]}{.status.message}{"\n"}{end}' 2>/dev/null | grep -i 'horizontalpodautoscaler' || true)
+if [ -n "$refusal" ]; then
+	pass "scaling a Deployment an HPA owns was refused"
+else
+	fail "scaling under an HPA was not refused"
+fi
+
+# --- hpa.scale ------------------------------------------------------------
+status=$(send_labeled_alert E2EHpaMaxed hpa-1 \
+	'"namespace":"e2e-payments","horizontalpodautoscaler":"api2"')
+if wait_for_strategy_state e2e-hpa-scale Succeeded 120; then
+	ceiling=$(kubectl -n e2e-payments get hpa api2 -o jsonpath='{.spec.maxReplicas}')
+	if [ "$ceiling" = "5" ]; then
+		pass "the autoscaler's ceiling was raised from 2 to 5"
+	else
+		fail "maxReplicas is ${ceiling}, want 5"
+	fi
+else
+	fail "the hpa.scale remediation did not succeed (gateway answered ${status})"
+fi
+
+# --- pvc.expand -----------------------------------------------------------
+# The refusal is the feature. kind's "standard" class does not set
+# allowVolumeExpansion, so the API server would accept the patch and nothing
+# would happen — and remedik would have recorded a success that did nothing.
+status=$(send_labeled_alert E2EVolumeFilling pvc-1 \
+	'"namespace":"e2e-payments","persistentvolumeclaim":"ledger-data"')
+if wait_for_strategy_state e2e-pvc-expand Failed 120; then
+	message=$(strategy_field e2e-pvc-expand '.status.message')
+	if echo "$message" | grep -q 'allowVolumeExpansion'; then
+		pass "the expansion was refused, naming the StorageClass"
+	else
+		fail "the refusal does not explain itself: ${message}"
+	fi
+	size=$(kubectl -n e2e-payments get pvc ledger-data \
+		-o jsonpath='{.spec.resources.requests.storage}')
+	if [ "$size" = "1Gi" ]; then
+		pass "the claim was left alone"
+	else
+		fail "the claim was patched anyway (${size})"
+	fi
+else
+	fail "the pvc.expand remediation did not fail as it should (gateway answered ${status})"
+fi
+
+# --- webhook.call ---------------------------------------------------------
+status=$(send_alert E2EWebhook webhook-1 api)
+if wait_for_strategy_state e2e-webhook Succeeded 120; then
+	pass "the webhook reached its endpoint with the credential from a Secret"
+	code=$(strategy_field e2e-webhook '.status.steps[0].outputs.status')
+	if [ "$code" = "200" ]; then
+		pass "the record keeps the response code: ${code}"
+	else
+		fail "the record's status output is '${code}', want 200"
+	fi
+	if strategy_field e2e-webhook '.status.steps[0]' | grep -qF "$TOKEN"; then
+		fail "the credential leaked into the record"
+	else
+		pass "the credential is not in the record, only where it came from"
+	fi
+else
+	fail "the webhook remediation did not succeed (gateway answered ${status})"
+fi
+
+# --- job.run --------------------------------------------------------------
+# The Job runs in remedik's namespace under a ServiceAccount the operator
+# names and never its own, and the step waits for the exit code rather than
+# reporting success once the Job is created.
+status=$(send_alert E2ERunbook runbook-1 api)
+if wait_for_strategy_state e2e-job-run Succeeded 180; then
+	pass "the runbook Job ran to completion and its exit code was checked"
+	sa=$(strategy_field e2e-job-run '.status.steps[0].outputs.serviceAccount')
+	if [ "$sa" = "e2e-runbook" ]; then
+		pass "it ran as ${sa}, not as remedik"
+	else
+		fail "it ran as '${sa}', want e2e-runbook"
+	fi
+else
+	fail "the job.run remediation did not succeed (gateway answered ${status})"
+	kubectl -n "$NAMESPACE" get jobs 2>/dev/null || true
+fi
+
+# --- escalation -----------------------------------------------------------
+# The loop the project exists to close: the remediation could not work, and
+# somebody was told.
+status=$(send_alert E2EEscalate escalate-1 does-not-exist)
+if wait_for_strategy_state e2e-escalation Failed 120; then
+	pass "the remediation failed, as it must"
+
+	phase=$(strategy_field e2e-escalation '.status.escalation.phase')
+	if [ "$phase" = "Succeeded" ]; then
+		pass "the escalation was sent"
+	else
+		fail "the escalation's phase is '${phase}', want Succeeded"
+	fi
+
+	# Escalating is not succeeding.
+	state=$(strategy_field e2e-escalation '.status.state')
+	if [ "$state" = "Failed" ]; then
+		pass "the record is still Failed: a page is not a fix"
+	else
+		fail "escalating changed the outcome to ${state}"
+	fi
+
+	# The remediation's own verdict survived the escalation.
+	if strategy_field e2e-escalation '.status.message' | grep -q 'does-not-exist'; then
+		pass "the record still explains why the remediation failed"
+	else
+		fail "the escalation overwrote the remediation's own message"
+	fi
+
+	# The escalation's steps are its own, not appended to the remediation's.
+	own=$(strategy_field e2e-escalation '.status.steps[0].action')
+	esc=$(strategy_field e2e-escalation '.status.escalation.steps[0].action')
+	if [ "$own" = "deployment.restart" ] && [ "$esc" = "webhook.call" ]; then
+		pass "the page is recorded apart from the remediation's steps"
+	else
+		fail "steps are '${own}' and '${esc}', want deployment.restart and webhook.call"
+	fi
+else
+	fail "the escalating remediation did not reach Failed (gateway answered ${status})"
+fi
+
+# --- an escalation that could not be sent ---------------------------------
+# The case that matters most: it did not work, and nobody knows.
+status=$(send_alert E2EEscalateBadly escalate-2 does-not-exist)
+if wait_for_strategy_state e2e-escalation-fails Failed 120; then
+	phase=$(strategy_field e2e-escalation-fails '.status.escalation.phase')
+	if [ "$phase" = "Failed" ]; then
+		pass "a page that could not be sent is recorded as failed"
+	else
+		fail "the failed escalation's phase is '${phase}', want Failed"
+	fi
+	message=$(strategy_field e2e-escalation-fails '.status.escalation.message')
+	if [ -n "$message" ]; then
+		pass "and it says why: ${message}"
+	else
+		fail "the failed escalation does not say why"
+	fi
+	state=$(strategy_field e2e-escalation-fails '.status.state')
+	if [ "$state" = "Failed" ]; then
+		pass "the remediation is Failed, not something worse"
+	else
+		fail "a failed page changed the state to ${state}"
+	fi
+else
+	fail "the second escalating remediation did not reach Failed (gateway answered ${status})"
 fi
 
 # --------------------------------------------------------------------------
