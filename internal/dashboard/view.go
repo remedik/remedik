@@ -84,7 +84,19 @@ type RemediationRow struct {
 	Attempt  int32
 	DryRun   bool
 	Reason   string
+	// Escalated is "sent" or "failed" when this remediation ran an
+	// escalation, and empty otherwise. It rides beside the state rather
+	// than in a column of its own: most rows would have nothing in it, and
+	// the one that matters — a failure whose page did not go out — needs to
+	// be loud in the list, not discoverable one click away.
+	Escalated string
 }
+
+// Escalation markers, as the list renders them.
+const (
+	escalationSent   = "sent"
+	escalationFailed = "failed"
+)
 
 // OverviewView is the front page.
 type OverviewView struct {
@@ -486,19 +498,31 @@ func buildDryRunReport(remediations []v1alpha1.Remediation, dryRun bool, now tim
 func buildRow(rem *v1alpha1.Remediation, now time.Time) RemediationRow {
 	state := displayState(rem.Status.State)
 	return RemediationRow{
-		Name:     rem.Name,
-		URL:      "/remediations/" + rem.Name,
-		Strategy: rem.Spec.StrategyName,
-		Target:   rem.Spec.Target,
-		Alert:    rem.Spec.Alert.Name,
-		State:    state,
-		Tone:     stateTone(rem.Status.State),
-		Age:      FormatAge(rem.CreationTimestamp.Time, now),
-		AgeExact: FormatTimestamp(rem.CreationTimestamp.Time),
-		Duration: FormatSpan(rem.Status.StartedAt, rem.Status.CompletedAt),
-		Attempt:  rem.Status.Attempt,
-		DryRun:   rem.Spec.DryRun,
-		Reason:   rem.Status.Reason,
+		Name:      rem.Name,
+		URL:       "/remediations/" + rem.Name,
+		Strategy:  rem.Spec.StrategyName,
+		Target:    rem.Spec.Target,
+		Alert:     rem.Spec.Alert.Name,
+		State:     state,
+		Tone:      stateTone(rem.Status.State),
+		Age:       FormatAge(rem.CreationTimestamp.Time, now),
+		AgeExact:  FormatTimestamp(rem.CreationTimestamp.Time),
+		Duration:  FormatSpan(rem.Status.StartedAt, rem.Status.CompletedAt),
+		Attempt:   rem.Status.Attempt,
+		DryRun:    rem.Spec.DryRun,
+		Reason:    rem.Status.Reason,
+		Escalated: escalationMarker(rem.Status.Escalation),
+	}
+}
+
+func escalationMarker(esc *v1alpha1.EscalationStatus) string {
+	switch {
+	case esc == nil:
+		return ""
+	case esc.Phase == v1alpha1.StepPhaseSucceeded:
+		return escalationSent
+	default:
+		return escalationFailed
 	}
 }
 

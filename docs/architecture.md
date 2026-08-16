@@ -15,8 +15,9 @@ flowchart LR
   ENG --> ACT["Actions<br/>built-in · job · script · webhook.call"]
   ACT --> K8S[Kubernetes API]
   CRD --> UI["Dashboard<br/>read-only, off by default"]
+  ENG -->|it did not work| ESC["Escalation<br/>onFailure.steps — the same actions"]
+  ESC --> OUT[PagerDuty · Alertmanager · your pipeline]
   ENG -.-> SLACK["Slack bot<br/>(Socket Mode)"]
-  ENG -.-> PD[PagerDuty escalation]
   ENG -.-> SINKS["Audit sinks<br/>Splunk · Loki · Elastic · S3"]
 ```
 
@@ -29,10 +30,10 @@ follow-up changes.
 | --- | --- | --- |
 | Gateway | Receives Alertmanager webhooks, authenticates, normalizes grouped alerts into events | shipped |
 | Engine | Matches events to strategies, evaluates guards, runs the per-execution state machine, writes audit | shipped |
-| Actions | `deployment.restart`, `workload.restart`, `pod.delete`, `job.delete`; later scaling, rollback, node actions, `job`/`script`/`webhook.call`, `ActionPlugin` | shipped |
+| Actions | Fourteen across four groups: workloads (`deployment.restart`, `workload.restart`, `pod.delete`, `job.delete`), capacity (`deployment.rollback`, `deployment.scale`, `hpa.scale`), nodes (`node.cordon`, `node.uncordon`, `node.drain`, `pvc.expand`) and escape hatches (`webhook.call`, `job.run`, `script.run`). `ActionPlugin` is later | shipped |
 | Metrics | Prometheus counters and histograms on the manager's metrics endpoint | shipped |
+| Escalation | `onFailure.steps` — a second plan when a remediation fails for good, made of the same actions, so "escalate" is a `webhook.call` to PagerDuty or a `job.run` into a pipeline | shipped |
 | Slack bot | Socket Mode; rich notifications, Approve/Deny buttons, manual commands (`@remedik …`) | planned |
-| Escalation | PagerDuty / on-call channel when execution fails or approval times out | planned |
 | Dashboard | Read-only web UI served by the operator: overview, dry-run report, one page per execution, strategies | shipped |
 | AI diagnosis | BYO-LLM, read-only, optional (see ADR-0003) | planned |
 

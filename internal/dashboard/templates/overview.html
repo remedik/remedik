@@ -117,7 +117,14 @@
           <td><code class="dim">{{.Strategy}}</code></td>
           <td>{{if .Target}}<code class="dim">{{.Target}}</code>{{else}}<span class="dim">&mdash;</span>{{end}}</td>
           <td>{{if .Alert}}{{.Alert}}{{else}}<span class="dim">&mdash;</span>{{end}}</td>
-          <td><span class="pill pill-{{.Tone}}">{{.State}}</span></td>
+          <td>
+            <span class="pill pill-{{.Tone}}">{{.State}}</span>
+            {{if eq .Escalated "sent"}}
+            <span class="tag tag-quiet" title="This failure was escalated, and the escalation went out.">paged</span>
+            {{else if eq .Escalated "failed"}}
+            <span class="tag tag-loud" title="This failure was escalated and the escalation itself failed. Assume nobody was told.">page failed</span>
+            {{end}}
+          </td>
           <td class="num dim">{{if .Duration}}{{.Duration}}{{else}}&mdash;{{end}}</td>
           <td class="num dim"><time title="{{.AgeExact}}">{{.Age}}</time></td>
         </tr>

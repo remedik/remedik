@@ -179,10 +179,11 @@ the record still explains the run after the strategy is edited or deleted.
 
 - **v0.1.0 (in progress)** — alert gateway, `RemediationStrategy` and
   `Remediation` CRDs, deterministic engine with guards, dry-run and retries,
-  thirteen actions across workloads, capacity, nodes and escape hatches,
-  three guards including `blastRadius`, a read-only dashboard, a Helm chart
-  whose RBAC follows the features you enable, Prometheus metrics with a
-  Grafana dashboard and alerts, signed releases.
+  fourteen actions across workloads, capacity, nodes and escape hatches,
+  three guards including `blastRadius`, escalation through `onFailure.steps`,
+  a read-only dashboard, a Helm chart whose RBAC follows the features you
+  enable, Prometheus metrics with a Grafana dashboard and alerts, signed
+  releases.
 - **v0.2.0** — per-namespace posture (act here, report there), the Slack bot
   with approval buttons and manual commands, namespace health, audit sinks
   (Splunk HEC, Loki, Elasticsearch).

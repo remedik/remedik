@@ -543,3 +543,40 @@ func TestEscalationView_DoesNotRepeatTheStepsMessage(t *testing.T) {
 		t.Error("an escalation failure that no step reports was hidden")
 	}
 }
+
+func TestBuildRow_MarksEscalationInTheList(t *testing.T) {
+	tests := []struct {
+		name       string
+		escalation *v1alpha1.EscalationStatus
+		want       string
+	}{
+		{name: "no escalation, no marker"},
+		{
+			name:       "a page that went out",
+			escalation: &v1alpha1.EscalationStatus{Phase: v1alpha1.StepPhaseSucceeded},
+			want:       escalationSent,
+		},
+		{
+			name:       "a page that did not",
+			escalation: &v1alpha1.EscalationStatus{Phase: v1alpha1.StepPhaseFailed},
+			want:       escalationFailed,
+		},
+		{
+			// An escalation with no phase recorded cannot be called sent.
+			// Silence must never read as success here.
+			name:       "an escalation with no phase is not called sent",
+			escalation: &v1alpha1.EscalationStatus{},
+			want:       escalationFailed,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rem := failedRemediation("bad-1", 10)
+			rem.Status.Escalation = tt.escalation
+			if got := buildRow(&rem, testNow()).Escalated; got != tt.want {
+				t.Errorf("Escalated = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

@@ -1317,6 +1317,42 @@ main.wrap {
 }
 
 /* --------------------------------------------------------------------------
+   Escalation markers in the list
+
+   A small tag beside the state, not a column: most rows would have nothing
+   in it. "paged" is deliberately quiet — it is reassurance, and reassurance
+   should not compete for attention with the row above it. "page failed" is
+   not quiet, because it is the only thing on the page that means nobody
+   knows.
+   -------------------------------------------------------------------------- */
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.tag-quiet {
+  color: var(--text-3);
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+
+.tag-loud {
+  color: var(--failed);
+  background: var(--failed-bg);
+  border-color: var(--failed-border);
+}
+
+/* --------------------------------------------------------------------------
    Escalation
 
    The verdict leads, because the question a reader arrives with is "did

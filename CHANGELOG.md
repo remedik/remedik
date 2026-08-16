@@ -53,7 +53,16 @@ a proposal.
   The dashboard shows it as its own section, and says so explicitly when a
   remediation failed with no escalation declared: "it failed and no alert
   went anywhere" is a fact worth stating rather than leaving to be inferred
-  from an absence.
+  from an absence. The overview marks each row `paged` or `page failed`
+  beside its state, because that is where somebody looks first and the
+  second of those is the only thing on the page meaning nobody knows.
+
+  `RemedikEscalationFailing` alerts on it, at **critical**: every other rule
+  in the bundle can wait for somebody to look, and this is the rule about
+  nobody looking. Grafana gains a "Did anybody find out?" row — escalations
+  by outcome, and failures that declared no escalation at all, which is the
+  number to check before concluding remedik is quiet because nothing is
+  wrong.
 
 - **`make e2e` now covers thirteen of the fourteen actions**, up from six.
   A rollback needs real revision history, a scale needs a real HPA to

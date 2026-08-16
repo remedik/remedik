@@ -78,6 +78,26 @@ spec:
               permissions, a workload that no longer exists, or a cluster too
               busy for rollouts to complete.
 
+        # The quietest failure remedik has. A remediation failed, the
+        # escalation was meant to tell somebody, and that failed too — so
+        # nothing reached a person and the incident is running unattended.
+        # It is critical rather than warning for exactly that reason: every
+        # other alert here can wait for somebody to look, and this one is
+        # the alert about nobody looking.
+        - alert: RemedikEscalationFailing
+          expr: |
+            sum(increase(remedik_escalations_total{outcome="Failed"}[15m])) > 0
+          for: 5m
+          labels:
+            severity: {{ .Values.prometheusRule.severity.critical }}
+          annotations:
+            summary: remedik could not escalate a failed remediation
+            description: >-
+              A remediation failed and the escalation meant to report it
+              failed as well, so assume nobody was told. Check the
+              Remediation's status.escalation for the endpoint's answer —
+              a bad credential, an unreachable host, or a rejected payload.
+
         - alert: RemedikAlertsTruncated
           expr: |
             sum(increase(remedik_alerts_truncated_total[1h])) > 0
