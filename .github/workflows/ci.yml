@@ -48,11 +48,15 @@ jobs:
       - uses: azure/setup-helm@v5
         with:
           version: ${{ env.HELM_VERSION }}
+      # sudo because /usr/local/bin on the hosted runner is root-owned: the
+      # download lands but the chmod is refused, which is a confusing way to
+      # fail a job that has nothing to do with permissions.
       - name: Install kind
         run: |
-          curl -fsSLo /usr/local/bin/kind \
+          sudo curl -fsSLo /usr/local/bin/kind \
             "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
-          chmod +x /usr/local/bin/kind
+          sudo chmod +x /usr/local/bin/kind
+          kind version
       - name: End-to-end test on kind
         run: make e2e
 
@@ -63,7 +67,8 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      # `make vuln` rather than an inline install: @latest is a moving
+      # target, and this repository pins every other tool so a green run
+      # yesterday means the same thing today.
       - name: govulncheck
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
+        run: make vuln

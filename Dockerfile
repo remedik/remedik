@@ -7,7 +7,7 @@
 # Both are declared here, before any FROM: an ARG used in a FROM
 # instruction must live in the global scope, because arguments declared
 # inside a stage are not visible to the next stage's FROM.
-ARG GO_IMAGE=golang:1.26-alpine
+ARG GO_IMAGE=golang:1.26.6-alpine
 ARG RUNTIME_IMAGE=gcr.io/distroless/static:nonroot
 
 # Build stage. Dependencies always come from the module proxy, never from a
