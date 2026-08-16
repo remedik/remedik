@@ -32,24 +32,42 @@ whose options shrink as you use it is one you can get stuck in — pick
 seen in payments, switching to a different strategy would silently mean
 "and clear the namespace".
 
-### 3. An unknown value is kept, not rejected
+### 3. The controls live outside the refreshed region
+
+Found by using it rather than by curling it: the auto-refresh replaces the
+contents of `#content` every ten seconds, and the controls were inside. A
+selection made and not yet applied was destroyed on average within five
+seconds — faster than anybody reaches the Apply button — so the filter
+appeared not to work at all.
+
+The first fix carried the pending selection across the swap in JavaScript.
+It worked and it was untestable from here, and it made a filter's
+correctness depend on an enhancement the page is supposed to survive
+without. Rendering the controls above `<main>` makes the failure impossible
+instead, and deleted the JavaScript that had just been written for it.
+
+The cost is that the options do not gain a namespace first seen since the
+page loaded, until it is reloaded. That is the cheaper of the two failure
+modes by a wide margin.
+
+### 4. An unknown value is kept, not rejected
 
 `?namespace=does-not-exist` renders "nothing happened there", which is an
 answer. Rejecting it with a 400 would turn a URL somebody pasted from a
 week-old incident channel into an error page.
 
-### 4. A namespace filter excludes cluster-scoped records
+### 5. A namespace filter excludes cluster-scoped records
 
 A node is in no namespace. Including drains in "everything in payments"
 would make the list contain something that is not in payments, which is a
 worse failure than omitting it — the reader has no way to notice.
 
-### 5. The controls appear only when there is a choice
+### 6. The controls appear only when there is a choice
 
 With one namespace, one strategy and one state, a filter row is furniture on
 a page whose whole job is to be scanned quickly.
 
-### 6. `clusterName` is a label, not a filter
+### 7. `clusterName` is a label, not a filter
 
 remedik sees one cluster. A cluster control would be a select with one
 option, which is a promise the tool cannot keep. A name in the header and

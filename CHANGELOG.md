@@ -71,6 +71,15 @@ a proposal.
   400, and a namespace filter excludes cluster-scoped records, because a
   node is in no namespace.
 
+  The controls render **above** `<main>`, outside the region the ten-second
+  auto-refresh replaces. With them inside, a selection made and not yet
+  applied was destroyed faster than anybody reaches Apply, and the filter
+  appeared to do nothing — a failure invisible to every test that fetches
+  the page and visible immediately to anybody using it. Moving the markup
+  makes it impossible rather than something the JavaScript remembers not to
+  do, and deleted the JavaScript first written to work around it. An active
+  filter is now stated on the page as removable chips, one per clause.
+
   There is no cluster filter, deliberately: remedik watches the cluster it
   runs in, so the control would offer a choice of one. `clusterName` instead
   puts a name in the header and leads the browser title, which solves the

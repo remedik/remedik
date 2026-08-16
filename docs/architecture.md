@@ -378,10 +378,21 @@ an incident. The controls are a plain `<form method="get">`, so they work
 with JavaScript off, and the auto-refresh re-fetches
 `window.location.href`, so a filter survives it.
 
+The controls sit above `<main>`, outside the region the auto-refresh
+replaces. That is not layout preference: with them inside, a selection made
+and not yet applied was destroyed within ten seconds, faster than anybody
+reaches the Apply button, and the filter appeared not to work. The first fix
+carried the selection across the swap in JavaScript — which worked, and made
+a filter's correctness depend on an enhancement the page is meant to survive
+without. Moving the markup makes the failure impossible and deleted the
+JavaScript written for it. The cost is that the options do not gain a
+namespace first seen since the page loaded, until a reload.
+
 The counts above the table follow the filter, and the choices in the
 controls do not: numbers that disagreed with the rows beneath them would be
 worse than no filter, and a control whose options shrink as you use it is a
-control you can get stuck in.
+control you can get stuck in. An active filter is stated as its clauses,
+each removable on its own.
 
 There is no cluster filter, and the omission is deliberate. remedik watches
 the cluster it runs in, so a control offering a choice of clusters would be

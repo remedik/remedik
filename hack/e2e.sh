@@ -727,6 +727,24 @@ else
 	fail "the namespace filter hid everything in its own namespace"
 fi
 
+# The controls must be outside <main>, which is what the ten-second refresh
+# replaces. Inside it, a selection made and not yet applied is destroyed
+# faster than anybody reaches Apply, and the filter appears not to work.
+form_line=$(echo "$filtered" | grep -n '<form class="filters"' | head -1 | cut -d: -f1)
+main_line=$(echo "$filtered" | grep -n '<main id="content"' | head -1 | cut -d: -f1)
+if [ -n "$form_line" ] && [ -n "$main_line" ] && [ "$form_line" -lt "$main_line" ]; then
+	pass "the filter controls render outside the region the refresh replaces"
+else
+	fail "the filter controls are inside <main> (form=${form_line}, main=${main_line})"
+fi
+
+# And the applied filter is stated, with each clause removable on its own.
+if echo "$filtered" | grep -q 'Filtered by' && echo "$filtered" | grep -q 'chip-active'; then
+	pass "the applied filter is stated on the page"
+else
+	fail "a filtered page does not say what it is filtered by"
+fi
+
 empty=$(dashboard_body "/?namespace=no-such-namespace")
 if echo "$empty" | grep -q "Nothing matches this filter"; then
 	pass "a filter that matches nothing says so, rather than looking like an empty cluster"

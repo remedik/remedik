@@ -246,3 +246,39 @@ func TestBuildOverview_StatsFollowTheFilter(t *testing.T) {
 			only.Options.Namespaces)
 	}
 }
+
+// Each clause must be liftable on its own, keeping the others: a reader who
+// narrowed twice and wants to widen once should not have to start over.
+func TestFilter_ChipsRemoveOneClauseAtATime(t *testing.T) {
+	chips := Filter{Namespace: "payments", State: "Failed"}.Chips()
+
+	if len(chips) != 2 {
+		t.Fatalf("got %d chips, want 2", len(chips))
+	}
+	if chips[0].Label != "namespace" || chips[0].Value != "payments" {
+		t.Errorf("first chip = %+v", chips[0])
+	}
+	if chips[0].RemoveURL != "/?state=Failed" {
+		t.Errorf("removing the namespace gave %q, want the state kept", chips[0].RemoveURL)
+	}
+	if chips[1].RemoveURL != "/?namespace=payments" {
+		t.Errorf("removing the state gave %q, want the namespace kept", chips[1].RemoveURL)
+	}
+}
+
+func TestFilter_ChipsAreEmptyWhenNothingIsFiltered(t *testing.T) {
+	if chips := (Filter{}).Chips(); len(chips) != 0 {
+		t.Errorf("an inactive filter produced %d chips", len(chips))
+	}
+}
+
+// The last chip removed must land on an unfiltered page, not on "/?".
+func TestFilter_TheLastChipClearsEverything(t *testing.T) {
+	chips := Filter{Strategy: "restart-api"}.Chips()
+	if len(chips) != 1 {
+		t.Fatalf("got %d chips, want 1", len(chips))
+	}
+	if chips[0].RemoveURL != "/" {
+		t.Errorf("RemoveURL = %q, want %q", chips[0].RemoveURL, "/")
+	}
+}

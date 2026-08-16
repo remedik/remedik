@@ -227,3 +227,44 @@ func TestEveryPageIsCompleteHTML(t *testing.T) {
 		}
 	}
 }
+
+// The filter controls must render outside #content, which is what the
+// auto-refresh replaces. Inside it, a selection made and not yet applied is
+// destroyed within ten seconds and the filter appears not to work — the bug
+// this guards, which no handler test can see because it needs a browser and
+// a clock.
+func TestOverview_FilterControlsRenderOutsideTheRefreshedRegion(t *testing.T) {
+	// Two namespaces and two states, so the controls have something to
+	// offer and are rendered at all.
+	payments := simulatedRemediation("sim-payments", "deployment/payments/api", 20)
+	checkout := succeededRemediation("ok-checkout", 10)
+	checkout.Spec.Target = "deployment/checkout/web"
+
+	h, _ := newHandler(t, Config{
+		Reader: &fakeReader{
+			remediations: []v1alpha1.Remediation{payments, checkout},
+			strategies:   []v1alpha1.RemediationStrategy{enabledStrategy()},
+		},
+		Posture: Posture{DryRun: true},
+	})
+	page := get(t, h, "/", nil).Body.String()
+
+	toolbar := strings.Index(page, `<div class="toolbar">`)
+	main := strings.Index(page, `<main id="content"`)
+	form := strings.Index(page, `<form class="filters"`)
+
+	switch {
+	case toolbar < 0:
+		t.Fatal("the page has no filter toolbar")
+	case main < 0:
+		t.Fatal("the page has no <main id=\"content\">")
+	case form < 0:
+		t.Fatal("the page has no filter form")
+	}
+	if form > main {
+		t.Error("the filter form is inside #content, so the auto-refresh will destroy a pending selection")
+	}
+	if toolbar > main {
+		t.Error("the toolbar is inside #content")
+	}
+}

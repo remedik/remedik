@@ -1347,17 +1347,26 @@ main.wrap {
    not need to.
    -------------------------------------------------------------------------- */
 
+/* The band sits between the top bar and <main>, which is where the filter
+   lives in the markup too — outside the region the auto-refresh replaces. */
+.toolbar {
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.toolbar-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 18px;
+  padding-block: 12px;
+}
+
 .filters {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
   gap: 10px;
-  margin-bottom: 14px;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow);
 }
 
 .filter {
@@ -1425,8 +1434,13 @@ main.wrap {
 }
 
 @media (width <= 560px) {
+  .toolbar-inner,
   .filters {
     align-items: stretch;
+  }
+
+  .active-filter {
+    margin-left: 0;
   }
 
   .filter,
@@ -1435,6 +1449,58 @@ main.wrap {
     width: 100%;
     max-width: none;
   }
+}
+
+/* The applied filter, stated rather than implied. "2 hidden by the filter" in
+   the section meta is true and easy to read past; a page that is showing a
+   subset should look like it is. Each chip is the link that lifts just that
+   clause. */
+
+.active-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.active-filter-label {
+  font-size: 0.76rem;
+  font-weight: 620;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.active-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chip-active {
+  text-decoration: none;
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  cursor: pointer;
+}
+
+.chip-active .chip-key {
+  color: var(--accent);
+}
+
+.chip-active:hover {
+  filter: brightness(0.97);
+}
+
+.chip-remove {
+  margin-left: 6px;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1;
 }
 
 /* --------------------------------------------------------------------------

@@ -87,6 +87,47 @@ func (f Filter) Query() string {
 	return "?" + values.Encode()
 }
 
+// FilterChip is one clause of an active filter, with the link that removes
+// just that clause.
+type FilterChip struct {
+	// Label names the dimension, as the control above it does.
+	Label string
+	// Value is what was selected.
+	Value string
+	// RemoveURL is this page without this clause, keeping the others.
+	RemoveURL string
+}
+
+// Chips describes the active filter as removable clauses.
+//
+// The summary line said "2 hidden by the filter", which is true and easy to
+// read past. Saying which clauses are in force, where each can be lifted on
+// its own, is what makes a filtered page look filtered rather than empty.
+func (f Filter) Chips() []FilterChip {
+	clauses := []struct {
+		label string
+		value string
+		clear Filter
+	}{
+		{"namespace", f.Namespace, Filter{Strategy: f.Strategy, State: f.State}},
+		{"strategy", f.Strategy, Filter{Namespace: f.Namespace, State: f.State}},
+		{"state", f.State, Filter{Namespace: f.Namespace, Strategy: f.Strategy}},
+	}
+
+	chips := make([]FilterChip, 0, len(clauses))
+	for _, clause := range clauses {
+		if clause.value == "" {
+			continue
+		}
+		chips = append(chips, FilterChip{
+			Label:     clause.label,
+			Value:     clause.value,
+			RemoveURL: "/" + clause.clear.Query(),
+		})
+	}
+	return chips
+}
+
 // TargetNamespace pulls the namespace out of a "kind/namespace/name" target.
 //
 // A two-part target is cluster-scoped — a node — and belongs to no namespace;

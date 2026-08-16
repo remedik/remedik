@@ -135,6 +135,14 @@ The filter controls SHALL offer every value present in the unfiltered
 records, so a selection can always be changed or undone, and SHALL be shown
 only when more than one value exists to choose between.
 
+The controls SHALL be rendered outside the region the auto-refresh replaces,
+so a selection made and not yet applied cannot be destroyed by it. This is
+structural rather than something the refresh remembers not to do, for the
+same reason read-only is a constructor argument.
+
+An active filter SHALL be stated on the page as its individual clauses, each
+liftable on its own without disturbing the others.
+
 An unrecognised value SHALL be honoured rather than rejected: the answer
 "nothing happened there" is information, and a filtered URL must not become
 an error page.
@@ -156,6 +164,11 @@ because a node is in no namespace.
 
 - **WHEN** a filter matches no records but records exist
 - **THEN** the page says how many exist, names what was filtered for, and offers a link back to everything — rather than showing the "nothing has run yet" state
+
+#### Scenario: The auto-refresh cannot eat a selection
+
+- **WHEN** a reader chooses a value and the page's ten-second refresh fires before they apply it
+- **THEN** the selection is still there, because the controls are rendered outside the region the refresh replaces
 
 #### Scenario: The choices do not narrow themselves
 

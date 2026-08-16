@@ -1,3 +1,79 @@
+{{define "toolbar"}}
+{{if or .Options.Any .Filtered}}
+<div class="toolbar">
+  <div class="wrap toolbar-inner">
+  {{if .Options.Any}}
+  <form class="filters" method="get" action="/">
+    <p class="visually-hidden" id="filter-help">
+      Narrows the executions on this page. Every count below follows it.
+    </p>
+
+    {{if gt (len .Options.Namespaces) 1}}
+    <label class="filter">
+      <span class="filter-label">Namespace</span>
+      <select name="namespace" aria-describedby="filter-help">
+        <option value="">All namespaces</option>
+        {{$current := .Filter.Namespace}}
+        {{range .Options.Namespaces}}
+        <option value="{{.}}"{{if eq . $current}} selected{{end}}>{{.}}</option>
+        {{end}}
+      </select>
+    </label>
+    {{end}}
+
+    {{if gt (len .Options.Strategies) 1}}
+    <label class="filter">
+      <span class="filter-label">Strategy</span>
+      <select name="strategy" aria-describedby="filter-help">
+        <option value="">All strategies</option>
+        {{$current := .Filter.Strategy}}
+        {{range .Options.Strategies}}
+        <option value="{{.}}"{{if eq . $current}} selected{{end}}>{{.}}</option>
+        {{end}}
+      </select>
+    </label>
+    {{end}}
+
+    {{if gt (len .Options.States) 1}}
+    <label class="filter">
+      <span class="filter-label">State</span>
+      <select name="state" aria-describedby="filter-help">
+        <option value="">Any state</option>
+        {{$current := .Filter.State}}
+        {{range .Options.States}}
+        <option value="{{.}}"{{if eq . $current}} selected{{end}}>{{.}}</option>
+        {{end}}
+      </select>
+    </label>
+    {{end}}
+
+    <button class="filter-apply" type="submit">Apply</button>
+  </form>
+  {{end}}
+
+  {{if .Filtered}}
+  <div class="active-filter" role="status">
+    <span class="active-filter-label">Filtered by</span>
+    <ul class="active-filter-chips">
+      {{range .Filter.Chips}}
+      <li>
+        <a class="chip chip-active" href="{{.RemoveURL}}"
+           title="Stop filtering by {{.Label}}">
+          <span class="chip-key">{{.Label}}</span><span class="chip-value">{{.Value}}</span>
+          <span class="chip-remove" aria-hidden="true">&times;</span>
+          <span class="visually-hidden">— remove this filter</span>
+        </a>
+      </li>
+      {{end}}
+    </ul>
+    <a class="filter-clear" href="/">Clear all</a>
+  </div>
+  {{end}}
+  </div>
+</div>
+{{end}}
+{{end}}
+
 {{define "content"}}
 
 <div class="page-head">
@@ -94,56 +170,6 @@
     </p>
     {{end}}
   </div>
-
-  {{if .Options.Any}}
-  <form class="filters" method="get" action="/">
-    <p class="visually-hidden" id="filter-help">
-      Narrows the executions below. The counts above follow the filter.
-    </p>
-
-    {{if gt (len .Options.Namespaces) 1}}
-    <label class="filter">
-      <span class="filter-label">Namespace</span>
-      <select name="namespace" aria-describedby="filter-help">
-        <option value="">All namespaces</option>
-        {{$current := .Filter.Namespace}}
-        {{range .Options.Namespaces}}
-        <option value="{{.}}"{{if eq . $current}} selected{{end}}>{{.}}</option>
-        {{end}}
-      </select>
-    </label>
-    {{end}}
-
-    {{if gt (len .Options.Strategies) 1}}
-    <label class="filter">
-      <span class="filter-label">Strategy</span>
-      <select name="strategy" aria-describedby="filter-help">
-        <option value="">All strategies</option>
-        {{$current := .Filter.Strategy}}
-        {{range .Options.Strategies}}
-        <option value="{{.}}"{{if eq . $current}} selected{{end}}>{{.}}</option>
-        {{end}}
-      </select>
-    </label>
-    {{end}}
-
-    {{if gt (len .Options.States) 1}}
-    <label class="filter">
-      <span class="filter-label">State</span>
-      <select name="state" aria-describedby="filter-help">
-        <option value="">Any state</option>
-        {{$current := .Filter.State}}
-        {{range .Options.States}}
-        <option value="{{.}}"{{if eq . $current}} selected{{end}}>{{.}}</option>
-        {{end}}
-      </select>
-    </label>
-    {{end}}
-
-    <button class="filter-apply" type="submit">Apply</button>
-    {{if .Filtered}}<a class="filter-clear" href="/">Clear</a>{{end}}
-  </form>
-  {{end}}
 
   {{if and .Filtered (not .HasRecords)}}
   <div class="empty">
