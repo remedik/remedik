@@ -22,8 +22,21 @@ and records what it would have done, changing nothing, until you set
 `dryRun=false`.
 
 Custom resource definitions are installed from the chart's `crds/`
-directory. Helm installs them on first install but never upgrades or
-deletes them: apply CRD changes yourself when upgrading across versions.
+directory. Helm installs them on first install and **never upgrades them**,
+so a `helm upgrade` alone leaves the old CRD in place and every field added
+by the new version is rejected with `unknown field`. Apply them yourself,
+before the upgrade:
+
+```console
+helm pull oci://ghcr.io/ratyx/charts/remedik --version <new> --untar
+kubectl apply --server-side --force-conflicts -f remedik/crds/
+helm upgrade remedik oci://ghcr.io/ratyx/charts/remedik --version <new> -n remedik
+```
+
+`--server-side` avoids the annotation size limit these CRDs are large enough
+to hit, and `--force-conflicts` takes the field ownership Helm recorded on
+first install. Helm never deletes them either, which is deliberate: removing
+a CRD deletes every `Remediation` in the cluster with it.
 
 ## The dashboard
 

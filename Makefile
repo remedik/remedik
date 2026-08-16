@@ -175,8 +175,22 @@ dev-info: ## Show how to reach the dev cluster UIs
 	@echo ""
 	@echo "Deploy remedik into this cluster with: make dev-deploy"
 
+# The action set here is "everything reversible or bounded", plus
+# webhook.call — which is an escape hatch and off by default in the chart,
+# but is what the escalation path is made of, and a dev cluster where the
+# escalation cannot be seen working is a dev cluster that hides the feature
+# most worth trying before production. node.drain, job.run and script.run
+# stay off: those want a deliberate decision, not a default.
 dev-deploy: docker-build ## Build, load and install remedik into the dev cluster
 	kind load docker-image $(IMAGE_REPO):$(IMAGE_TAG) --name $(KIND_CLUSTER)
+	@# Helm installs the files in crds/ once and never touches them again, so
+	@# `helm upgrade` leaves a stale CRD behind and every new API field is
+	@# rejected with "unknown field". That is documented for operators in
+	@# charts/remedik/README.md; here it is simply done, because a dev loop
+	@# that breaks silently on every api/ change is not a dev loop.
+	@# --force-conflicts because the initial `helm install` recorded itself as
+	@# the field manager, and taking that over is exactly the intent.
+	kubectl apply --server-side --force-conflicts -f charts/remedik/crds/
 	helm upgrade --install remedik charts/remedik \
 		--namespace remedik --create-namespace \
 		--set image.repository=$(IMAGE_REPO) --set image.tag=$(IMAGE_TAG) \
@@ -191,6 +205,7 @@ dev-deploy: docker-build ## Build, load and install remedik into the dev cluster
 		--set actions.hpaScale.enabled=true \
 		--set actions.nodeCordon.enabled=true \
 		--set actions.nodeUncordon.enabled=true \
+		--set actions.webhookCall.enabled=true \
 		--set guards.blastRadius.enabled=true \
 		--set serviceMonitor.enabled=true \
 		--set serviceMonitor.additionalLabels.release=monitoring \
@@ -199,6 +214,13 @@ dev-deploy: docker-build ## Build, load and install remedik into the dev cluster
 		--set grafanaDashboard.enabled=true \
 		--set grafanaDashboard.namespace=monitoring \
 		--wait --timeout 3m
+	@# The tag comes from `git describe`, so an uncommitted change rebuilds
+	@# the same tag with different contents and helm sees no diff to roll
+	@# out. Without this, `make dev-deploy` silently leaves the old binary
+	@# running and the next twenty minutes are spent debugging a fix that
+	@# was never deployed.
+	kubectl -n remedik rollout restart deploy/remedik
+	kubectl -n remedik rollout status deploy/remedik --timeout=120s
 	@echo ""
 	@echo "remedik is installed in dry-run mode. Watch it with:"
 	@echo "  kubectl -n remedik get remediations -w"
