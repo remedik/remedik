@@ -69,7 +69,7 @@ type verifyingAction struct {
 }
 
 func (a *verifyingAction) Verify(
-	ctx context.Context, _ action.Target, _ action.Params,
+	ctx context.Context, _ action.Target, _ action.Params, _ action.Result,
 ) (action.Result, error) {
 	a.verifyCalls++
 	says := a.verifySays

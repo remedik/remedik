@@ -200,7 +200,7 @@ func (r *StepRunner) runStep(
 
 	// The action changed something; whether that fixed anything is a
 	// separate question, and one only the action can answer.
-	if err := r.verify(ctx, act, target, params, &status); err != nil {
+	if err := r.verify(ctx, act, target, params, done, &status); err != nil {
 		events.Finished(ctx, target, step.Action, index, err)
 		return fail(err)
 	}
@@ -220,6 +220,7 @@ func (r *StepRunner) verify(
 	act action.Action,
 	target action.Target,
 	params action.Params,
+	executed action.Result,
 	status *v1alpha1.StepStatus,
 ) error {
 	verifier, ok := act.(action.Verifier)
@@ -235,7 +236,7 @@ func (r *StepRunner) verify(
 	verifyCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	result, err := verifier.Verify(verifyCtx, target, params)
+	result, err := verifier.Verify(verifyCtx, target, params, executed)
 	// The summary is recorded either way: what the check saw is the most
 	// useful thing on the page when it failed, not only when it passed.
 	if result.Summary != "" {

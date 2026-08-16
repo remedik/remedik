@@ -61,6 +61,7 @@ type options struct {
 	gatewayAddr   string
 	gatewayPath   string
 	dashboardAddr string
+	actions       []string
 	namespace     string
 	dryRun        bool
 	historyLimit  int
@@ -112,6 +113,11 @@ func parseFlags() options {
 	flag.StringVar(&opts.dashboardAddr, "dashboard-bind-address", "",
 		"address the read-only web dashboard binds to; empty disables it (for example "+
 			dashboard.DefaultBindAddress+")")
+	var actions string
+	flag.StringVar(&actions, "actions", "",
+		"comma-separated actions to enable; empty enables every action this build implements. "+
+			"The chart passes exactly the actions it granted RBAC for, so a strategy naming a "+
+			"disabled action is reported as not ready rather than failing mid-incident")
 	flag.StringVar(&opts.namespace, "namespace", os.Getenv(namespaceEnvVar),
 		"namespace Remediation resources are created in")
 	flag.BoolVar(&opts.dryRun, "dry-run", true,
@@ -123,6 +129,7 @@ func parseFlags() options {
 	flag.BoolVar(&opts.showVersion, "version", false, "print version and exit")
 	flag.Parse()
 
+	opts.actions = splitActions(actions)
 	return opts
 }
 
@@ -189,9 +196,7 @@ func run(logger *slog.Logger, opts options) error {
 		return fmt.Errorf("create direct client: %w", err)
 	}
 
-	registry, err := action.NewRegistry(
-		workload.NewDeploymentRestart(directClient, time.Now),
-	)
+	registry, err := buildRegistry(directClient, opts.actions)
 	if err != nil {
 		return fmt.Errorf("build action registry: %w", err)
 	}
@@ -298,6 +303,56 @@ func run(logger *slog.Logger, opts options) error {
 		return fmt.Errorf("run manager: %w", err)
 	}
 	return nil
+}
+
+// buildRegistry registers the actions this operator is configured to run.
+//
+// An action absent from the registry is not merely unusable: a strategy
+// naming it is reported as not ready when it is applied, rather than
+// failing during the incident it was written for. That is why the chart
+// passes exactly the actions it granted permissions for — the two lists
+// disagreeing is a misconfiguration worth finding on a Tuesday.
+func buildRegistry(c client.Client, enabled []string) (*action.Registry, error) {
+	available := []action.Action{
+		workload.NewDeploymentRestart(c, time.Now),
+		workload.NewWorkloadRestart(c, time.Now),
+		workload.NewPodDelete(c),
+		workload.NewJobDelete(c),
+	}
+
+	if len(enabled) == 0 {
+		return action.NewRegistry(available...)
+	}
+
+	byName := make(map[string]action.Action, len(available))
+	names := make([]string, 0, len(available))
+	for _, a := range available {
+		byName[a.Name()] = a
+		names = append(names, a.Name())
+	}
+
+	selected := make([]action.Action, 0, len(enabled))
+	for _, name := range enabled {
+		a, ok := byName[name]
+		if !ok {
+			return nil, fmt.Errorf("--actions names %q, which this build does not implement (available: %s)",
+				name, strings.Join(names, ", "))
+		}
+		selected = append(selected, a)
+	}
+	return action.NewRegistry(selected...)
+}
+
+// splitActions parses the --actions list, ignoring the empty entries a
+// templated flag tends to produce.
+func splitActions(raw string) []string {
+	var out []string
+	for _, name := range strings.Split(raw, ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 func buildScheme() (*runtime.Scheme, error) {
