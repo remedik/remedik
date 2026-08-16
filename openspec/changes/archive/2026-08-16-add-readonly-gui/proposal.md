@@ -24,7 +24,8 @@ YAML dump that only they can read.
     and last run.
 - The dashboard is **disabled by default** and, when enabled, serves a
   ClusterIP Service only; the chart ships no Ingress.
-- Optional bearer-token authentication, reusing the gateway's pattern.
+- Optional token authentication, presented either as a bearer header or as
+  the password in the browser's own prompt (see design decision 8).
 - No new RBAC: the dashboard reads the same resources the operator already
   reads.
 

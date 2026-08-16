@@ -60,6 +60,19 @@ make dev-deploy    # build, load and install remedik (dry-run on)
 kubectl -n remedik get remediations -w
 ```
 
+There is also a read-only dashboard, off by default, that answers the same
+questions in a browser — how much a dry-run trial would have done, and why
+nothing happened during an incident:
+
+```bash
+helm upgrade remedik ... --set dashboard.enabled=true \
+  --set dashboard.auth.token="$(openssl rand -hex 24)"
+kubectl -n remedik port-forward svc/remedik-dashboard 8082:8082
+```
+
+It serves GET and HEAD and nothing else, and enabling it grants remedik no
+permission it did not already have.
+
 ## Design pillars
 
 **The execution path is deterministic.** YAML decides, guards bound, and —
@@ -100,10 +113,11 @@ the record still explains the run after the strategy is edited or deleted.
 
 - **v0.1.0 (in progress)** — alert gateway, `RemediationStrategy` and
   `Remediation` CRDs, deterministic engine with guards, dry-run and retries,
-  `deployment.restart`, Helm chart, Prometheus metrics, signed releases.
+  `deployment.restart`, read-only dashboard, Helm chart, Prometheus metrics,
+  signed releases.
 - **v0.2.0** — Slack bot with approval buttons and manual commands, more
-  built-in actions, custom actions (`job`, `script`), read-only GUI, audit
-  sinks (Splunk HEC, Loki, Elasticsearch), namespace health.
+  built-in actions, custom actions (`job`, `script`), audit sinks (Splunk
+  HEC, Loki, Elasticsearch), namespace health.
 - **Later** — hub/spoke multi-cluster, cloud packs, `ActionPlugin` CRD, MCP
   server, workload-aware cost recommendations.
 

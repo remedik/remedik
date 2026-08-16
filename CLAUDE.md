@@ -14,7 +14,7 @@ decide, the engine executes, and the outcome is a `Remediation` resource.
 
 This repository explains itself. Read these before proposing changes:
 
-- **`openspec/specs/`** — the current behaviour contract, four capabilities.
+- **`openspec/specs/`** — the current behaviour contract, five capabilities.
   This is authoritative; code that disagrees with it is a bug in one of them.
 - **`openspec/changes/archive/`** — what was proposed and why, including the
   reasoning that did not make it into the code.
@@ -45,7 +45,12 @@ This repository explains itself. Read these before proposing changes:
 6. **The gateway answers 200 to anything it understood**, including "no
    strategy matched". Alertmanager retries non-2xx, so a normal outcome must
    not look like a failure.
-7. **English everywhere** in the repository: code, comments, docs, commits.
+7. **The dashboard never writes.** It is built from a `client.Reader` and
+   allowlists GET and HEAD before routing. Both layers are deliberate: one
+   makes a write impossible to call, the other makes it impossible to
+   reach. An approve button needs the identity model the Slack change
+   introduces, so that the audit trail records *who* asked.
+8. **English everywhere** in the repository: code, comments, docs, commits.
 
 ## Workflow
 
@@ -81,6 +86,7 @@ internal/guards/     Cooldown and rate limiting                 (stdlib only)
 internal/action/     The Resolve/Plan/Execute contract + registry
 internal/engine/     Sink (alert → record) and the reconciler
 internal/metrics/    Prometheus adapters behind the Recorder interfaces
+internal/dashboard/  Read-only web UI; templates and CSS embedded in the binary
 charts/remedik/      Helm chart; RBAC assembled from enabled actions
 hack/e2e.sh          The end-to-end test
 ```
@@ -90,5 +96,7 @@ most are the ones that must be easiest to test. Keep them that way.
 
 ## Open work
 
-`openspec/changes/add-readonly-gui/` — proposed, awaiting approval. Nothing
-else is open.
+Nothing is open. `add-readonly-gui` was implemented and archived on
+2026-08-16; the next things on the roadmap are the Slack bot with approval
+buttons (which brings the identity model), the `job` and `script` actions,
+and audit sinks.

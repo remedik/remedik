@@ -1,10 +1,12 @@
+# readonly-dashboard Specification
+
 ## Purpose
 
 A dashboard served by the operator that answers, without kubectl, the two
 questions remedik exists to answer: what would this have done during a
 dry-run trial, and why did nothing happen during an incident.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Read-only by construction
 

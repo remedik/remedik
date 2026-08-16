@@ -55,6 +55,28 @@ and keep it from depending on anything outside the binary.
    and a dashboard that could render thousands of rows would be a way to
    make the operator slow.
 
+8. **One token, two ways to present it: `Bearer` and Basic.** Decided
+   during implementation. The gateway's pattern is a bearer header, and
+   reusing it verbatim would have produced a dashboard that no browser can
+   open: a browser cannot be told to send `Authorization: Bearer`, and the
+   documented way in is a port-forward and a browser. So the same token is
+   also accepted as the password of an HTTP Basic request — any username,
+   because there is one credential and naming a user would imply an identity
+   model this change does not introduce — and the 401 offers a `Basic`
+   challenge, which browsers prompt for natively.
+
+   This weakens nothing: same token, same transport, same constant-time
+   comparison, no session and no cookie. It removes the failure mode where
+   an authenticated dashboard is unusable by the person it is for, which is
+   the reliable way to end up with an unauthenticated one.
+
+9. **A content security policy of `default-src 'none'`.** Decided during
+   implementation. "Pages request nothing from outside the cluster" is a
+   promise in the spec; the header is the same promise made to the browser,
+   which enforces it. It also means no inline script or style anywhere,
+   which is why the refresh code is a served file rather than a `<script>`
+   block.
+
 ## Risks / Trade-offs
 
 - **Disclosure.** Alert labels can carry sensitive names. Mitigated by
