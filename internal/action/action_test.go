@@ -231,3 +231,15 @@ func TestAction_PlanDoesNotExecute(t *testing.T) {
 		t.Errorf("Plan received target %q", a.lastPlan)
 	}
 }
+
+// Actions that reach outside the cluster resolve to nothing, and a bare "/"
+// in every message about them reads like a bug in remedik rather than a
+// report of the one in the endpoint.
+func TestTarget_ZeroRendersAsNothing(t *testing.T) {
+	if got := (Target{}).String(); got != "" {
+		t.Errorf("Target{}.String() = %q, want an empty string", got)
+	}
+	if _, err := ParseTarget((Target{}).String()); err == nil {
+		t.Error("an empty target parsed as a real one")
+	}
+}
