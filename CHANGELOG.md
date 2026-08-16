@@ -527,6 +527,28 @@ a proposal.
 
 ### Fixed
 
+- **The first CI run on GitHub failed twice, for reasons worth keeping.**
+  `verify` passed both times; `vuln` and `e2e` did not, which is why this was
+  pushed before it was tagged.
+
+  `go.mod` pinned `go 1.26.0` and CI installs exactly what `go.mod` says, so
+  every job ran on a toolchain carrying eleven standard-library advisories.
+  Nothing in this repository's own code was implicated. It was invisible
+  locally because govulncheck ran only in CI and the local toolchain happened
+  to be newer — a check passing by accident of the machine. `make verify`
+  runs it now, and CI runs `make vuln` rather than installing
+  `govulncheck@latest` inline, so there is one definition and a green run
+  yesterday means the same thing today.
+
+  `e2e` could not install kind: `/usr/local/bin` is root-owned on the hosted
+  runner, so the download landed and the chmod was refused.
+
+  Then a flake: the strategies page is served from the manager's cache, and a
+  page can answer 200 before that cache holds what the page is about — most
+  visibly just after a `helm upgrade` restarts the pod. The assertion now
+  waits for the content, like the guard-event assertions already did, and
+  says what it saw when it does fail.
+
 - **The dashboard filter did not work, and neither of the first two fixes
   reached anybody.** The stylesheet, the script and the page shell live
   outside the content region, and the auto-refresh replaces only that
