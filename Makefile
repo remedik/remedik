@@ -186,6 +186,12 @@ dev-deploy: docker-build ## Build, load and install remedik into the dev cluster
 		--set actions.workloadRestart.enabled=true \
 		--set actions.podDelete.enabled=true \
 		--set actions.jobDelete.enabled=true \
+		--set actions.deploymentRollback.enabled=true \
+		--set actions.deploymentScale.enabled=true \
+		--set actions.hpaScale.enabled=true \
+		--set actions.nodeCordon.enabled=true \
+		--set actions.nodeUncordon.enabled=true \
+		--set guards.blastRadius.enabled=true \
 		--set serviceMonitor.enabled=true \
 		--set serviceMonitor.additionalLabels.release=monitoring \
 		--set prometheusRule.enabled=true \
