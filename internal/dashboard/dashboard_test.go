@@ -331,7 +331,7 @@ func TestOverviewEmptyStates(t *testing.T) {
 		{
 			name:       "enabled, but nothing has matched",
 			strategies: []v1alpha1.RemediationStrategy{enabledStrategy()},
-			want:       "Nothing has run yet",
+			want:       "Nothing has matched yet",
 		},
 	}
 
@@ -346,7 +346,9 @@ func TestOverviewEmptyStates(t *testing.T) {
 	}
 }
 
-func TestOverviewCapsTheListAndSaysSo(t *testing.T) {
+// The overview shows a short tail and sends the reader to the list, which is
+// the whole point of the list existing.
+func TestOverviewShowsATailAndLinksToTheList(t *testing.T) {
 	records := make([]v1alpha1.Remediation, 0, recentLimit+5)
 	for i := range recentLimit + 5 {
 		records = append(records, succeededRemediation("ok-"+strconv.Itoa(i), i))
@@ -355,8 +357,25 @@ func TestOverviewCapsTheListAndSaysSo(t *testing.T) {
 	h, _ := newHandler(t, Config{Reader: &fakeReader{remediations: records}})
 	body := get(t, h, "/", nil).Body.String()
 
-	mustContain(t, body, "showing 50 of 55", "state how much of the history is listed")
-	mustContain(t, body, "5 older records not listed", "say what was left out")
+	if rows := strings.Count(body, `<tr>`); rows > recentLimit+4 {
+		t.Errorf("the overview drew %d rows; it is a summary, not the list", rows)
+	}
+	mustContain(t, body, `href="/remediations"`, "link to the full list")
+	mustContain(t, body, "All 13 remediations", "say how many there are in total")
+}
+
+// The list page draws what it can and says what it could not, because a page
+// that silently truncates is a page that lies about what happened.
+func TestRemediationsListCapsAndSaysSo(t *testing.T) {
+	records := make([]v1alpha1.Remediation, 0, listLimit+5)
+	for i := range listLimit + 5 {
+		records = append(records, succeededRemediation("ok-"+strconv.Itoa(i), i))
+	}
+
+	h, _ := newHandler(t, Config{Reader: &fakeReader{remediations: records}})
+	body := get(t, h, "/remediations", nil).Body.String()
+
+	mustContain(t, body, "5 older records matched", "say what was left out")
 }
 
 // --------------------------------------------------------------------------
@@ -443,16 +462,16 @@ func TestUnknownRemediationIs404(t *testing.T) {
 		"explain that terminal records do not live forever")
 }
 
-func TestRemediationsIndexRedirectsToTheOverview(t *testing.T) {
-	h, _ := newHandler(t, Config{Reader: &fakeReader{}})
+func TestRemediationsIndexIsTheList(t *testing.T) {
+	h, _ := newHandler(t, Config{Reader: &fakeReader{
+		remediations: []v1alpha1.Remediation{succeededRemediation("ok-1", 5)},
+	}})
 
 	rec := get(t, h, "/remediations/", nil)
-	if rec.Code != http.StatusSeeOther {
-		t.Fatalf("GET /remediations/ = %d, want 303", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /remediations/ = %d, want 200", rec.Code)
 	}
-	if loc := rec.Header().Get("Location"); loc != "/" {
-		t.Errorf("Location = %q, want /", loc)
-	}
+	mustContain(t, rec.Body.String(), "ok-1", "list the executions")
 }
 
 // --------------------------------------------------------------------------

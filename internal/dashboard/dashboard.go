@@ -47,13 +47,27 @@ import (
 // "on": an empty address means the dashboard is not served at all.
 const DefaultBindAddress = ":8082"
 
-// recentLimit caps the executions listed on the overview.
+// remediationsPath is the list page. Every filter control links to it, and
+// every panel on the overview that counts something links to the view of it.
+const remediationsPath = "/remediations"
+
+// listLimit caps the executions drawn on the list page.
 //
 // History is already bounded by pruning, so this is not what keeps the page
 // finite — it is what keeps rendering cheap. A dashboard that could draw
 // thousands of rows would be a way to make the operator slow at its real
 // job, which is remediation.
-const recentLimit = 50
+const listLimit = 200
+
+// recentLimit is how many the overview shows before sending the reader to
+// the list. The front page answers "is anything wrong now?", and a long
+// table is not how that question is answered.
+const recentLimit = 8
+
+// activityHours is the span of the overview's activity panel: one bar per
+// hour over a day, which is long enough to show a night and short enough
+// that a bar means something.
+const activityHours = 24
 
 // readTimeout bounds a single page's reads. The manager's cache answers
 // from memory, so anything slower than this means the cache is not there.
@@ -155,12 +169,13 @@ func New(cfg Config) (*Handler, error) {
 
 	h.mux = http.NewServeMux()
 	h.mux.HandleFunc("/{$}", h.overview)
-	h.mux.HandleFunc("/strategies", h.strategies)
+	// Both spellings serve the list. Registering only the trailing-slash
+	// form makes the mux answer "/remediations" with a 307 to it, so every
+	// link on every page would cost a redirect.
+	h.mux.HandleFunc(remediationsPath, h.remediations)
+	h.mux.HandleFunc(remediationsPath+"/{$}", h.remediations)
 	h.mux.HandleFunc("/remediations/{name}", h.remediation)
-	// "/remediations" and "/remediations/" are not pages of their own; the
-	// overview is the list. Redirecting is friendlier than a 404 for a URL
-	// someone shortened by hand.
-	h.mux.HandleFunc("/remediations/{$}", redirectToOverview)
+	h.mux.HandleFunc("/strategies", h.strategies)
 	h.mux.Handle("/static/", http.StripPrefix("/static/", staticHandler()))
 	h.mux.HandleFunc("/", h.notFound)
 
@@ -268,10 +283,6 @@ func securityHeaders(w http.ResponseWriter) {
 	head.Set("Referrer-Policy", "no-referrer")
 }
 
-func redirectToOverview(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, "/", http.StatusSeeOther)
-}
-
 // --------------------------------------------------------------------------
 // Pages
 // --------------------------------------------------------------------------
@@ -292,10 +303,29 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filter := ParseFilter(r.URL.Query())
-	view := buildOverview(remediations.Items, strategies.Items, h.posture.DryRun, filter, h.now())
+	view := buildOverview(remediations.Items, strategies.Items, h.posture, h.now())
 	view.Page = h.page("Overview", navOverview)
 	h.render(w, r, overviewTemplate, view)
+}
+
+// remediations is the list: every execution, the filters, and the counts.
+//
+// It exists as its own page because "is anything wrong right now?" and "what
+// happened to payments last Tuesday?" are different questions, and the front
+// page answering both answered neither well.
+func (h *Handler) remediations(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), readTimeout)
+	defer cancel()
+
+	var remediations v1alpha1.RemediationList
+	if err := h.reader.List(ctx, &remediations, client.InNamespace(h.namespace)); err != nil {
+		h.unavailable(w, r, "list remediations", err)
+		return
+	}
+
+	view := buildRemediations(remediations.Items, ParseFilter(r.URL.Query()), h.now())
+	view.Page = h.page("Remediations", navRemediations)
+	h.render(w, r, remediationsTemplate, view)
 }
 
 func (h *Handler) remediation(w http.ResponseWriter, r *http.Request) {
@@ -320,7 +350,7 @@ func (h *Handler) remediation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	view := buildRemediation(&rem, h.now())
-	view.Page = h.page(rem.Name, navOverview)
+	view.Page = h.page(rem.Name, navRemediations)
 	h.render(w, r, remediationTemplate, view)
 }
 

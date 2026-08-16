@@ -203,7 +203,7 @@ func TestFilterOptions_AnyIsFalseWhenThereIsNothingToChooseBetween(t *testing.T)
 
 // The counts above the table must describe the rows in it. Numbers that
 // disagreed with the list below them would be worse than no filter at all.
-func TestBuildOverview_StatsFollowTheFilter(t *testing.T) {
+func TestBuildRemediations_CountsFollowTheFilter(t *testing.T) {
 	// Targets set here rather than taken from the fixtures: this test is
 	// about which namespace a record is in, so that must be visible in it.
 	remediations := []v1alpha1.Remediation{
@@ -215,12 +215,12 @@ func TestBuildOverview_StatsFollowTheFilter(t *testing.T) {
 	remediations[1].Spec.Target = "deployment/payments/api"
 	remediations[2].Spec.Target = "deployment/checkout/web"
 
-	all := buildOverview(remediations, nil, false, Filter{}, testNow())
+	all := buildRemediations(remediations, Filter{}, testNow())
 	if all.Total != 3 || all.Filtered() {
 		t.Fatalf("unfiltered: Total = %d, Filtered = %v", all.Total, all.Filtered())
 	}
 
-	only := buildOverview(remediations, nil, false, Filter{Namespace: "checkout"}, testNow())
+	only := buildRemediations(remediations, Filter{Namespace: "checkout"}, testNow())
 
 	if only.Total != 1 {
 		t.Errorf("Total = %d, want 1", only.Total)
@@ -234,51 +234,87 @@ func TestBuildOverview_StatsFollowTheFilter(t *testing.T) {
 	if !only.Filtered() {
 		t.Error("Filtered() = false with a namespace selected")
 	}
-	for _, stat := range only.Stats {
-		if stat.Label == "Failed" && stat.Value != "0" {
-			t.Errorf("Failed = %s, want 0: the failure is in another namespace", stat.Value)
+	if only.Failed != 0 {
+		t.Errorf("Failed = %d, want 0: the failure is in another namespace", only.Failed)
+	}
+	if len(only.Rows) != 1 || only.Rows[0].Name != "ok-checkout" {
+		t.Errorf("rows = %+v, want only the checkout record", only.Rows)
+	}
+
+	// The controls stay complete, so a selection can always be undone.
+	namespaces := groupNamed(t, only.Groups, "Namespace")
+	if len(namespaces.Options) != 2 {
+		t.Errorf("namespace options = %+v, want both namespaces even while filtered",
+			namespaces.Options)
+	}
+}
+
+// Filtering is navigation: each option is a link, and the one in force links
+// to the page without it, so the same control narrows and widens.
+func TestFilterGroups_LinksBothNarrowAndWiden(t *testing.T) {
+	remediations := []v1alpha1.Remediation{
+		succeededRemediation("ok-payments", 30),
+		succeededRemediation("ok-checkout", 10),
+	}
+	remediations[0].Spec.Target = "deployment/payments/api"
+	remediations[1].Spec.Target = "deployment/checkout/web"
+
+	view := buildRemediations(remediations, Filter{Namespace: "payments"}, testNow())
+	group := groupNamed(t, view.Groups, "Namespace")
+
+	if group.AllURL != "/remediations" {
+		t.Errorf("AllURL = %q, want the unfiltered list", group.AllURL)
+	}
+	if group.AllSelected {
+		t.Error("AllSelected = true although a namespace is in force")
+	}
+
+	for _, option := range group.Options {
+		switch option.Value {
+		case "payments":
+			if !option.Selected {
+				t.Error("payments is not marked selected")
+			}
+			if option.URL != "/remediations" {
+				t.Errorf("the selected option links to %q, want the page without it", option.URL)
+			}
+		case "checkout":
+			if option.Selected {
+				t.Error("checkout is marked selected")
+			}
+			if option.URL != "/remediations?namespace=checkout" {
+				t.Errorf("an unselected option links to %q", option.URL)
+			}
+		}
+		if option.Count != 1 {
+			t.Errorf("%s counted %d, want 1", option.Value, option.Count)
 		}
 	}
+}
 
-	// The choices stay complete, so a selection can always be undone.
-	if len(only.Options.Namespaces) != 2 {
-		t.Errorf("Options.Namespaces = %v, want both namespaces even while filtered",
-			only.Options.Namespaces)
+// A dimension with one value is not a choice, and a row offering it is
+// furniture on a page whose job is to be scanned.
+func TestFilterGroups_OmitADimensionWithNothingToChoose(t *testing.T) {
+	remediations := []v1alpha1.Remediation{
+		succeededRemediation("ok-1", 30),
+		succeededRemediation("ok-2", 10),
+	}
+	view := buildRemediations(remediations, Filter{}, testNow())
+
+	for _, group := range view.Groups {
+		if len(group.Options) < 2 {
+			t.Errorf("group %q offers %d option(s)", group.Label, len(group.Options))
+		}
 	}
 }
 
-// Each clause must be liftable on its own, keeping the others: a reader who
-// narrowed twice and wants to widen once should not have to start over.
-func TestFilter_ChipsRemoveOneClauseAtATime(t *testing.T) {
-	chips := Filter{Namespace: "payments", State: "Failed"}.Chips()
-
-	if len(chips) != 2 {
-		t.Fatalf("got %d chips, want 2", len(chips))
+func groupNamed(t *testing.T, groups []FilterGroup, label string) FilterGroup {
+	t.Helper()
+	for _, group := range groups {
+		if group.Label == label {
+			return group
+		}
 	}
-	if chips[0].Label != "namespace" || chips[0].Value != "payments" {
-		t.Errorf("first chip = %+v", chips[0])
-	}
-	if chips[0].RemoveURL != "/?state=Failed" {
-		t.Errorf("removing the namespace gave %q, want the state kept", chips[0].RemoveURL)
-	}
-	if chips[1].RemoveURL != "/?namespace=payments" {
-		t.Errorf("removing the state gave %q, want the namespace kept", chips[1].RemoveURL)
-	}
-}
-
-func TestFilter_ChipsAreEmptyWhenNothingIsFiltered(t *testing.T) {
-	if chips := (Filter{}).Chips(); len(chips) != 0 {
-		t.Errorf("an inactive filter produced %d chips", len(chips))
-	}
-}
-
-// The last chip removed must land on an unfiltered page, not on "/?".
-func TestFilter_TheLastChipClearsEverything(t *testing.T) {
-	chips := Filter{Strategy: "restart-api"}.Chips()
-	if len(chips) != 1 {
-		t.Fatalf("got %d chips, want 1", len(chips))
-	}
-	if chips[0].RemoveURL != "/" {
-		t.Errorf("RemoveURL = %q, want %q", chips[0].RemoveURL, "/")
-	}
+	t.Fatalf("no %q filter group in %+v", label, groups)
+	return FilterGroup{}
 }

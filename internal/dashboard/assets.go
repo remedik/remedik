@@ -28,10 +28,11 @@ var files embed.FS
 const layoutName = "layout.html"
 
 var (
-	overviewTemplate    = mustParsePage("overview.html")
-	remediationTemplate = mustParsePage("remediation.html")
-	strategiesTemplate  = mustParsePage("strategies.html")
-	errorTemplate       = mustParsePage("error.html")
+	overviewTemplate     = mustParsePage("overview.html")
+	remediationsTemplate = mustParsePage("remediations.html")
+	remediationTemplate  = mustParsePage("remediation.html")
+	strategiesTemplate   = mustParsePage("strategies.html")
+	errorTemplate        = mustParsePage("error.html")
 )
 
 // mustParsePage parses one page together with the layout.
@@ -40,8 +41,19 @@ var (
 // page defines a block named "content", and a single set could only hold
 // one of them.
 func mustParsePage(page string) *template.Template {
-	return template.Must(template.New(layoutName).ParseFS(files,
+	return template.Must(template.New(layoutName).Funcs(pageFuncs).ParseFS(files,
 		"templates/"+layoutName, "templates/"+page))
+}
+
+// pageFuncs are the few helpers a template may call.
+//
+// Deliberately few. Logic belongs in the view builders, where it is a pure
+// function from resources to a struct and can be tested as one; a template
+// that can compute is a template that grows behaviour nobody reviews. These
+// are here because writing "1 strategies" is a defect a reader notices and
+// threading a pre-pluralised string through every struct is worse.
+var pageFuncs = template.FuncMap{
+	"plural": plural,
 }
 
 // staticAsset is one embedded file, with everything needed to serve it

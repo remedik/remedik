@@ -18,9 +18,10 @@ import (
 
 // Navigation identifiers, used to mark the current page in the header.
 const (
-	navNone       = ""
-	navOverview   = "overview"
-	navStrategies = "strategies"
+	navNone         = ""
+	navOverview     = "overview"
+	navRemediations = "remediations"
+	navStrategies   = "strategies"
 )
 
 // Tones map a state onto the palette. They are names, not colours: the
@@ -97,11 +98,16 @@ type Label struct {
 }
 
 // Stat is one figure on the overview.
+//
+// Every figure links to the list it counts. A number somebody cannot click
+// is a number they have to go and look for, which on a dashboard is the same
+// as not having it.
 type Stat struct {
 	Label  string
 	Value  string
 	Detail string
 	Tone   string
+	URL    string
 }
 
 // RemediationRow is one execution in a list.
@@ -132,43 +138,6 @@ const (
 	escalationSent   = "sent"
 	escalationFailed = "failed"
 )
-
-// OverviewView is the front page.
-type OverviewView struct {
-	Page
-
-	Stats      []Stat
-	Recent     []RemediationRow
-	Total      int
-	Shown      int
-	Hidden     int
-	DryRunning *DryRunReport
-
-	// StrategyCount and EnabledCount let the empty state say something
-	// useful: "nothing has matched yet" and "there are no strategies" are
-	// different problems with different fixes.
-	StrategyCount int
-	EnabledCount  int
-
-	// Filter is what is currently being narrowed, and Options are the
-	// choices offered. Everything above — the stats included — describes
-	// the filtered set, because numbers that disagreed with the table
-	// below them would be worse than no filter at all.
-	Filter  Filter
-	Options FilterOptions
-	// TotalUnfiltered is how many records exist regardless of the filter,
-	// so the page can say what is being hidden rather than looking empty.
-	TotalUnfiltered int
-}
-
-// Filtered reports whether the page is showing a subset.
-func (v OverviewView) Filtered() bool { return v.Filter.Active() }
-
-// Excluded is how many records the filter is hiding.
-func (v OverviewView) Excluded() int { return v.TotalUnfiltered - v.Total }
-
-// HasRecords reports whether anything has run.
-func (v OverviewView) HasRecords() bool { return v.Total > 0 }
 
 // DryRunReport is the summary an operator shows their team before turning
 // dry-run off: how much would have happened, over how long, and by which
@@ -372,104 +341,6 @@ type ErrorView struct {
 // --------------------------------------------------------------------------
 // Builders
 // --------------------------------------------------------------------------
-
-func buildOverview(
-	remediations []v1alpha1.Remediation,
-	strategies []v1alpha1.RemediationStrategy,
-	dryRun bool,
-	filter Filter,
-	now time.Time,
-) OverviewView {
-	sortNewestFirst(remediations)
-
-	// The options come from everything, the rest of the page from what
-	// survives: a control whose choices shrank as you used it would be a
-	// control you can get stuck in.
-	options := BuildFilterOptions(remediations)
-	total := len(remediations)
-	remediations = applyFilter(remediations, filter)
-
-	var succeeded, failed, simulated, inFlight int
-	for i := range remediations {
-		switch remediations[i].Status.State {
-		case v1alpha1.RemediationStateSucceeded:
-			succeeded++
-		case v1alpha1.RemediationStateFailed:
-			failed++
-		case v1alpha1.RemediationStateSimulated:
-			simulated++
-		case v1alpha1.RemediationStatePending, v1alpha1.RemediationStateRunning:
-			inFlight++
-		default:
-			// An empty state is a record the reconciler has not picked up
-			// yet, which is in flight by any reading an operator cares
-			// about.
-			inFlight++
-		}
-	}
-
-	view := OverviewView{
-		Total:           len(remediations),
-		TotalUnfiltered: total,
-		StrategyCount:   len(strategies),
-		Filter:          filter,
-		Options:         options,
-	}
-	for i := range strategies {
-		if strategies[i].IsEnabled() {
-			view.EnabledCount++
-		}
-	}
-
-	view.Stats = []Stat{
-		{
-			Label:  "Executions",
-			Value:  fmt.Sprint(len(remediations)),
-			Detail: fmt.Sprintf("across %s", plural(view.StrategyCount, "strategy-strategies")),
-			Tone:   toneMuted,
-		},
-		{
-			Label:  "Succeeded",
-			Value:  fmt.Sprint(succeeded),
-			Detail: successRate(succeeded, failed),
-			Tone:   toneOK,
-		},
-		{
-			Label:  "Failed",
-			Value:  fmt.Sprint(failed),
-			Detail: failedDetail(failed),
-			Tone:   toneFailed,
-		},
-		{
-			Label:  "Simulated",
-			Value:  fmt.Sprint(simulated),
-			Detail: "recorded, nothing changed",
-			Tone:   toneDryRun,
-		},
-		{
-			Label:  "In flight",
-			Value:  fmt.Sprint(inFlight),
-			Detail: "pending or running",
-			Tone:   toneRunning,
-		},
-	}
-
-	view.Recent = make([]RemediationRow, 0, min(len(remediations), recentLimit))
-	for i := range remediations {
-		if i == recentLimit {
-			break
-		}
-		view.Recent = append(view.Recent, buildRow(&remediations[i], now))
-	}
-	view.Shown = len(view.Recent)
-	view.Hidden = len(remediations) - view.Shown
-
-	if report := buildDryRunReport(remediations, dryRun, now); report != nil {
-		view.DryRunning = report
-	}
-
-	return view
-}
 
 // buildDryRunReport summarises the simulated records.
 //
@@ -989,6 +860,19 @@ func shortDuration(d time.Duration) string {
 	default:
 		return d.String()
 	}
+}
+
+// unit is plural's other half: the noun alone, for places that already show
+// the number. "1 1 escalation failed" is what happens without it.
+func unit(n int, name string) string {
+	singular, pluralForm, irregular := strings.Cut(name, "-")
+	if !irregular {
+		pluralForm = singular + "s"
+	}
+	if n == 1 {
+		return singular
+	}
+	return pluralForm
 }
 
 // plural handles the units this package counts. Irregular plurals are given

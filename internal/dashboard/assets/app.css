@@ -621,6 +621,320 @@ main.wrap {
   font-size: 0.75rem;
 }
 
+/* Every figure links to the list it counts. A number nobody can click is a
+   number they have to go and look for, which on a dashboard is the same as
+   not having it. */
+a.stat {
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+
+a.stat:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  a.stat:hover {
+    transform: none;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Panels
+
+   The overview is panels: each one a claim, with a link to its evidence.
+   Adding "namespace health" later is a struct, a builder and a block — not a
+   rearrangement of the page — so the panel is the unit worth styling once.
+   -------------------------------------------------------------------------- */
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px 18px 18px;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.panel-head h2 {
+  font-size: 0.95rem;
+}
+
+.panel-meta {
+  color: var(--text-3);
+  font-size: 0.76rem;
+}
+
+.panel-subtitle {
+  margin: 16px 0 8px;
+  color: var(--text-3);
+  font-size: 0.72rem;
+  font-weight: 620;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.panel-subtitle:first-of-type {
+  margin-top: 4px;
+}
+
+.panel-lede {
+  color: var(--text-2);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.panel-foot {
+  margin-top: 12px;
+  color: var(--text-3);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.panel-quiet {
+  color: var(--text-2);
+  font-size: 0.88rem;
+}
+
+.panel-ok {
+  border-color: var(--ok-border);
+  background: var(--ok-bg);
+}
+
+.panel-dryrun {
+  border-color: var(--dryrun-border);
+  background: var(--dryrun-bg);
+}
+
+.panel-running {
+  border-color: var(--running-border);
+  background: var(--running-bg);
+}
+
+.panel-failed {
+  border-color: var(--failed-border);
+  background: var(--failed-bg);
+}
+
+/* --------------------------------------------------------------------------
+   Needs attention
+
+   The one panel that should be loud, and empty most of the time.
+   -------------------------------------------------------------------------- */
+
+.attention {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 12px;
+}
+
+.attention-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  text-decoration: none;
+  color: inherit;
+}
+
+.attention-item:hover {
+  border-color: var(--border-strong);
+}
+
+.attention-count {
+  font-size: 1.6rem;
+  font-weight: 680;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.attention-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.attention-label {
+  font-weight: 620;
+  font-size: 0.88rem;
+}
+
+.attention-detail {
+  color: var(--text-3);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.attention-failed {
+  border-color: var(--failed-border);
+  background: var(--failed-bg);
+}
+
+.attention-failed .attention-count {
+  color: var(--failed);
+}
+
+.attention-waiting {
+  border-color: var(--waiting-border);
+  background: var(--waiting-bg);
+}
+
+.attention-waiting .attention-count {
+  color: var(--text-2);
+}
+
+/* --------------------------------------------------------------------------
+   Activity
+
+   Twenty-four bars from numbers the server already has. A charting library
+   to draw twenty-four rectangles would cost a bundler, a release artifact
+   and a request leaving the cluster, which this page's CSP forbids anyway.
+   The same numbers are in a <details> table underneath.
+   -------------------------------------------------------------------------- */
+
+.chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 120px;
+  padding: 4px 0;
+}
+
+.chart-col {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  min-width: 0;
+}
+
+.chart-bar {
+  width: 100%;
+  min-height: 2px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+
+.chart-seg {
+  display: block;
+  min-height: 2px;
+}
+
+.chart-ok {
+  background: var(--ok);
+}
+
+.chart-failed {
+  background: var(--failed);
+}
+
+.chart-dryrun {
+  background: var(--dryrun);
+}
+
+.chart-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  color: var(--text-3);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-table {
+  margin-top: 12px;
+}
+
+.chart-table summary {
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: 0.8rem;
+}
+
+.chart-table summary:hover {
+  color: var(--accent);
+}
+
+/* --------------------------------------------------------------------------
+   Where: a name, a bar, a count, and the list behind it
+   -------------------------------------------------------------------------- */
+
+.breakdown {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.breakdown-row {
+  display: grid;
+  grid-template-columns: minmax(0, 9rem) 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  color: inherit;
+}
+
+.breakdown-row:hover {
+  background: var(--surface-2);
+}
+
+.breakdown-name {
+  font-family: var(--mono);
+  font-size: 0.79rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.breakdown-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.breakdown-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  opacity: 0.55;
+  border-radius: 3px;
+}
+
+.breakdown-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 620;
+  font-size: 0.82rem;
+}
+
+.breakdown-bad {
+  color: var(--failed);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
 /* --------------------------------------------------------------------------
    The dry-run report
    -------------------------------------------------------------------------- */
@@ -1340,139 +1654,40 @@ main.wrap {
 /* --------------------------------------------------------------------------
    Filters
 
-   A plain GET form. The dashboard allowlists GET and HEAD before routing, so
-   a filter that needed a write could not exist here — and the consequence is
-   a filtered view that is a URL, which is what somebody wants during an
-   incident. It works with JavaScript disabled, which the auto-refresh does
-   not need to.
+   Links, not a form. A <select> plus a submit button holds state between the
+   choice and the submission, and that state was destroyed by the ten-second
+   refresh — twice, in two different ways. A link has nothing to lose: one
+   click filters, with no JavaScript on the path at all.
    -------------------------------------------------------------------------- */
-
-/* The band sits between the top bar and <main>, which is where the filter
-   lives in the markup too — outside the region the auto-refresh replaces. */
-.toolbar {
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-}
-
-.toolbar-inner {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 12px 18px;
-  padding-block: 12px;
-}
 
 .filters {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
+  flex-direction: column;
   gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
 }
 
-.filter {
+.filter-row {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 10px;
 }
 
 .filter-label {
+  min-width: 5.5rem;
+  color: var(--text-3);
   font-size: 0.72rem;
   font-weight: 620;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--text-3);
 }
 
-.filters select {
-  appearance: none;
-  font: inherit;
-  font-size: 0.83rem;
-  padding: 6px 30px 6px 10px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-strong);
-  background-color: var(--surface);
-  color: var(--text);
-  max-width: 15rem;
-  /* An inline chevron, so no request leaves the page. */
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 6.5 8 10.5 12 6.5' fill='none' stroke='%23667085' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-  background-size: 14px;
-}
-
-.filters select:hover {
-  border-color: var(--accent);
-}
-
-.filter-apply {
-  font: inherit;
-  font-size: 0.83rem;
-  font-weight: 600;
-  padding: 6px 16px;
-  border-radius: var(--radius-sm);
-  border: 1px solid transparent;
-  background: var(--accent);
-  color: var(--accent-text);
-  cursor: pointer;
-}
-
-.filter-apply:hover {
-  filter: brightness(1.08);
-}
-
-.filter-clear {
-  font-size: 0.83rem;
-  padding: 6px 4px;
-  color: var(--text-2);
-  text-decoration: none;
-}
-
-.filter-clear:hover {
-  color: var(--accent);
-  text-decoration: underline;
-}
-
-@media (width <= 560px) {
-  .toolbar-inner,
-  .filters {
-    align-items: stretch;
-  }
-
-  .active-filter {
-    margin-left: 0;
-  }
-
-  .filter,
-  .filters select,
-  .filter-apply {
-    width: 100%;
-    max-width: none;
-  }
-}
-
-/* The applied filter, stated rather than implied. "2 hidden by the filter" in
-   the section meta is true and easy to read past; a page that is showing a
-   subset should look like it is. Each chip is the link that lifts just that
-   clause. */
-
-.active-filter {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-}
-
-.active-filter-label {
-  font-size: 0.76rem;
-  font-weight: 620;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: var(--text-3);
-}
-
-.active-filter-chips {
+.filter-values {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -1481,26 +1696,100 @@ main.wrap {
   list-style: none;
 }
 
-.chip-active {
+.pill-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 0.78rem;
+  font-weight: 540;
   text-decoration: none;
+  white-space: nowrap;
+}
+
+.pill-link:hover {
   border-color: var(--accent);
-  background: var(--accent-bg);
-  cursor: pointer;
-}
-
-.chip-active .chip-key {
   color: var(--accent);
 }
 
-.chip-active:hover {
-  filter: brightness(0.97);
+.pill-link.is-on {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 620;
 }
 
-.chip-remove {
-  margin-left: 6px;
-  font-weight: 700;
-  color: var(--accent);
-  line-height: 1;
+.pill-count {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.72rem;
+  opacity: 0.7;
+}
+
+.filter-summary {
+  margin: 2px 0 0;
+  color: var(--text-3);
+  font-size: 0.8rem;
+}
+
+.tallies {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-3);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.tallies li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.dot-ok {
+  background: var(--ok);
+}
+
+.dot-failed {
+  background: var(--failed);
+}
+
+.dot-dryrun {
+  background: var(--dryrun);
+}
+
+.dot-running {
+  background: var(--running);
+}
+
+.table-note {
+  margin-top: 10px;
+  font-size: 0.8rem;
+}
+
+.section-link {
+  font-size: 0.8rem;
+  font-weight: 560;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.section-link:hover {
+  text-decoration: underline;
 }
 
 /* --------------------------------------------------------------------------

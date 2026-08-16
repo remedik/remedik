@@ -68,6 +68,12 @@ func (f Filter) Matches(rem *v1alpha1.Remediation) bool {
 	return true
 }
 
+// Path is the list page carrying this filter, which is what every filter
+// control links to. Filtering is navigation: a link has no state between
+// being chosen and being submitted, so there is nothing a background refresh
+// can destroy and no Apply button to reach before it fires.
+func (f Filter) Path() string { return remediationsPath + f.Query() }
+
 // Query renders the filter back into a query string, so links can preserve
 // what is already selected while changing one thing.
 func (f Filter) Query() string {
@@ -87,47 +93,6 @@ func (f Filter) Query() string {
 	return "?" + values.Encode()
 }
 
-// FilterChip is one clause of an active filter, with the link that removes
-// just that clause.
-type FilterChip struct {
-	// Label names the dimension, as the control above it does.
-	Label string
-	// Value is what was selected.
-	Value string
-	// RemoveURL is this page without this clause, keeping the others.
-	RemoveURL string
-}
-
-// Chips describes the active filter as removable clauses.
-//
-// The summary line said "2 hidden by the filter", which is true and easy to
-// read past. Saying which clauses are in force, where each can be lifted on
-// its own, is what makes a filtered page look filtered rather than empty.
-func (f Filter) Chips() []FilterChip {
-	clauses := []struct {
-		label string
-		value string
-		clear Filter
-	}{
-		{"namespace", f.Namespace, Filter{Strategy: f.Strategy, State: f.State}},
-		{"strategy", f.Strategy, Filter{Namespace: f.Namespace, State: f.State}},
-		{"state", f.State, Filter{Namespace: f.Namespace, Strategy: f.Strategy}},
-	}
-
-	chips := make([]FilterChip, 0, len(clauses))
-	for _, clause := range clauses {
-		if clause.value == "" {
-			continue
-		}
-		chips = append(chips, FilterChip{
-			Label:     clause.label,
-			Value:     clause.value,
-			RemoveURL: "/" + clause.clear.Query(),
-		})
-	}
-	return chips
-}
-
 // TargetNamespace pulls the namespace out of a "kind/namespace/name" target.
 //
 // A two-part target is cluster-scoped — a node — and belongs to no namespace;
@@ -142,11 +107,41 @@ func TargetNamespace(target string) string {
 	return parts[1]
 }
 
-// FilterOptions are the choices a filter control offers.
+// FilterOption is one choice, as the link that applies or removes it.
+type FilterOption struct {
+	// Value is the namespace, strategy or state.
+	Value string
+	// URL applies this choice on top of the rest of the filter, or removes
+	// it when it is already the one in force — so the same control both
+	// narrows and widens, and nothing is ever a dead end.
+	URL string
+	// Selected reports whether this is the value currently in force.
+	Selected bool
+	// Count is how many records carry this value, ignoring this dimension's
+	// own clause. It is the difference between a control you can use and one
+	// you have to try: a namespace showing 0 is one you can skip.
+	Count int
+}
+
+// FilterGroup is one dimension of the filter, rendered as a row of links.
+type FilterGroup struct {
+	// Label names the dimension.
+	Label string
+	// Param is the query parameter it sets.
+	Param string
+	// AllURL clears just this dimension.
+	AllURL string
+	// AllSelected reports whether nothing is chosen here.
+	AllSelected bool
+	// Options are the values present in the records.
+	Options []FilterOption
+}
+
+// FilterOptions are the choices the controls offer.
 //
 // They are derived from every record, not from the filtered ones, so a
-// selection can always be changed or undone. A control whose options shrink
-// as you use it is a control you can get stuck in.
+// choice can always be changed or undone. A control whose options shrink as
+// you use it is a control you can get stuck in.
 type FilterOptions struct {
 	Namespaces []string
 	Strategies []string
@@ -189,4 +184,94 @@ func sortedKeys(set map[string]bool) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// Groups turns the available values into rows of links, one row per
+// dimension, with the counts each choice would yield.
+//
+// The counts ignore the row's own clause, so the namespace row always shows
+// every namespace's total under the *other* filters — which is what makes it
+// usable for switching rather than only for narrowing.
+func (o FilterOptions) Groups(active Filter, remediations []v1alpha1.Remediation) []FilterGroup {
+	groups := []FilterGroup{
+		{
+			Label: "Namespace", Param: paramNamespace,
+			AllURL: Filter{Strategy: active.Strategy, State: active.State}.Path(),
+			Options: buildOptions(o.Namespaces, active.Namespace, remediations,
+				func(f *Filter, v string) { f.Namespace = v },
+				Filter{Strategy: active.Strategy, State: active.State}),
+		},
+		{
+			Label: "Strategy", Param: paramStrategy,
+			AllURL: Filter{Namespace: active.Namespace, State: active.State}.Path(),
+			Options: buildOptions(o.Strategies, active.Strategy, remediations,
+				func(f *Filter, v string) { f.Strategy = v },
+				Filter{Namespace: active.Namespace, State: active.State}),
+		},
+		{
+			Label: "State", Param: paramState,
+			AllURL: Filter{Namespace: active.Namespace, Strategy: active.Strategy}.Path(),
+			Options: buildOptions(o.States, active.State, remediations,
+				func(f *Filter, v string) { f.State = v },
+				Filter{Namespace: active.Namespace, Strategy: active.Strategy}),
+		},
+	}
+
+	kept := groups[:0]
+	for _, group := range groups {
+		// One value is not a choice, and a row offering it is furniture.
+		if len(group.Options) > 1 {
+			group.AllSelected = !anySelected(group.Options)
+			kept = append(kept, group)
+		}
+	}
+	return kept
+}
+
+func buildOptions(
+	values []string,
+	current string,
+	remediations []v1alpha1.Remediation,
+	set func(*Filter, string),
+	rest Filter,
+) []FilterOption {
+	options := make([]FilterOption, 0, len(values))
+	for _, value := range values {
+		// Clicking the value already in force removes it, so the same link
+		// both narrows and widens and nothing is a dead end.
+		target := rest
+		if value != current {
+			set(&target, value)
+		}
+
+		counted := rest
+		set(&counted, value)
+
+		options = append(options, FilterOption{
+			Value:    value,
+			URL:      target.Path(),
+			Selected: value == current,
+			Count:    countMatching(remediations, counted),
+		})
+	}
+	return options
+}
+
+func countMatching(remediations []v1alpha1.Remediation, filter Filter) int {
+	n := 0
+	for i := range remediations {
+		if filter.Matches(&remediations[i]) {
+			n++
+		}
+	}
+	return n
+}
+
+func anySelected(options []FilterOption) bool {
+	for _, option := range options {
+		if option.Selected {
+			return true
+		}
+	}
+	return false
 }

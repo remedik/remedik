@@ -345,11 +345,27 @@ refusals says more about an automation than another verb does:
 
 ## The dashboard
 
-Off by default. When enabled it serves three pages on its own port — an
-overview, one page per `Remediation`, and the strategy list — and answers
-the two questions that are painful through kubectl: *what would this have
-done* during a dry-run trial, and *why did nothing happen* during an
-incident.
+Off by default. When enabled it serves four pages on its own port and
+answers the questions that are painful through kubectl: *what would this
+have done* during a dry-run trial, *why did nothing happen* during an
+incident, and *is anything wrong right now*.
+
+The pages split by the question they answer, which is the shape the first
+version got wrong by putting all of them on one:
+
+| Page | Question |
+| --- | --- |
+| `/` | Is anything wrong right now? Posture, what needs attention, activity over the last day, where remediation is happening |
+| `/remediations` | What happened, and to what? The full list, with the filters |
+| `/remediations/{name}` | What did this one do, step by step |
+| `/strategies` | What could happen, and under what guards |
+
+The overview is panels. Each is a claim with a link to its evidence, and
+each is one struct, one builder and one template block — so adding
+"namespace health" later is an addition rather than a rearrangement. The
+"needs attention" panel orders by how much silence each entry represents: a
+failed escalation, which means nobody was told, outranks a failure somebody
+has already seen.
 
 Read-only is structural rather than promised. The handler is constructed
 from a `client.Reader`, so it holds no method that writes; a method
@@ -374,25 +390,33 @@ Filtering is a query string — `?namespace=payments&state=Failed` — which
 falls out of the read-only rule rather than being a shortcut: a filter that
 needed a write could not exist behind a GET-only allowlist. The consequence
 is the useful part, that a narrowed view is a URL somebody can send during
-an incident. The controls are a plain `<form method="get">`, so they work
-with JavaScript off, and the auto-refresh re-fetches
-`window.location.href`, so a filter survives it.
+an incident.
 
-The controls sit above `<main>`, outside the region the auto-refresh
-replaces. That is not layout preference: with them inside, a selection made
-and not yet applied was destroyed within ten seconds, faster than anybody
-reaches the Apply button, and the filter appeared not to work. The first fix
-carried the selection across the swap in JavaScript — which worked, and made
-a filter's correctness depend on an enhancement the page is meant to survive
-without. Moving the markup makes the failure impossible and deleted the
-JavaScript written for it. The cost is that the options do not gain a
-namespace first seen since the page loaded, until a reload.
+**Every filter control is a link**, and that is the second attempt. The
+first was a `<select>` and an Apply button, which holds state between the
+choice and the submission — and the ten-second refresh replaces the content
+region, so that state was destroyed on average within five seconds, faster
+than anybody reaches the button. Moving the controls out of the refreshed
+region fixed it and left a design whose correctness depended on where the
+markup sat. A link has nothing to lose: one click filters, no JavaScript is
+involved at any point, and clicking the value already in force removes it,
+so the same control narrows and widens.
 
-The counts above the table follow the filter, and the choices in the
-controls do not: numbers that disagreed with the rows beneath them would be
-worse than no filter, and a control whose options shrink as you use it is a
-control you can get stuck in. An active filter is stated as its clauses,
-each removable on its own.
+Each control carries the count its choice would yield, computed without that
+dimension's own clause, so switching between namespaces does not mean trying
+each one. The counts above the table follow the filter and the choices do
+not: numbers that disagreed with the rows beneath them would be worse than
+no filter, and a control whose options shrink as you use it is one you can
+get stuck in.
+
+**The page reloads itself when the operator changes.** Only the content
+region is swapped by a refresh, so `<head>`, the stylesheet and this script
+are whatever the tab loaded — for ever, in a tab open across an upgrade,
+whose data would keep updating through last week's markup. The refresh
+compares the asset fingerprint it fetched with the running one and reloads
+when they differ. That defect is why two correct filter fixes were reported
+as "still does not work": they were correct, and the tab reading them
+predated both.
 
 There is no cluster filter, and the omission is deliberate. remedik watches
 the cluster it runs in, so a control offering a choice of clusters would be

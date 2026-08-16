@@ -108,11 +108,13 @@ resolved once when the record is created and written onto it, so every
 `Remediation` says which posture it ran under and an in-flight execution
 keeps the one it started with.
 
-There is also a read-only dashboard, off by default, that answers the same
-questions in a browser — how much a dry-run trial would have done, why
-nothing happened during an incident, and whether a failure reached a person.
-Filter it by namespace, strategy or state; the filter is a query string, so
-a narrowed view is a URL you can send to whoever is on call.
+There is also a read-only dashboard, off by default. Its front page answers
+"is anything wrong right now?" — posture, what needs attention, activity
+over the last day, and where remediation is happening — and each panel links
+into the list behind it. `/remediations` is that list, filtered by
+namespace, strategy or state. Every filter control is a link, so a narrowed
+view is a URL you can paste to whoever is on call, and it works with
+JavaScript off.
 
 ## Try it in five minutes
 

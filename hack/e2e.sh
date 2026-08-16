@@ -641,7 +641,7 @@ else
 	fail "the dashboard answered $status without a token, want 401"
 fi
 
-for path in / /strategies; do
+for path in / /remediations /strategies; do
 	status=$(dashboard_status "$path")
 	if [ "$status" = "200" ]; then
 		pass "GET $path rendered"
@@ -716,36 +716,67 @@ else
 	fail "the cluster name is not in the title"
 fi
 
+# --- the overview is a dashboard, not a list -------------------------------
+# It answers "is anything wrong right now?"; the list answers "what happened
+# to payments last Tuesday?". Merging them is what this replaced.
+for panel in posture-heading attention-heading activity-heading where-heading; do
+	if echo "$overview" | grep -q "$panel"; then
+		pass "the overview has its ${panel%-heading} panel"
+	else
+		fail "the overview is missing the ${panel%-heading} panel"
+	fi
+done
+if echo "$overview" | grep -q 'href="/remediations"'; then
+	pass "and it sends the reader to the list"
+else
+	fail "the overview does not link to the list"
+fi
+
 # --- filtering --------------------------------------------------------------
-# The filter is entirely in the URL, which is what makes a narrowed view
-# something somebody can paste into an incident channel. Every record so far
-# targets e2e-payments, so the assertions are about which of them survive.
-filtered=$(dashboard_body "/?namespace=e2e-payments")
+# Filtering is navigation. A select plus Apply holds state between the choice
+# and the submission, and that state was destroyed by the ten-second refresh
+# — twice, in two different ways. A link has nothing to lose.
+list=$(dashboard_body /remediations)
+if echo "$list" | grep -q '<form' || echo "$list" | grep -q '<select'; then
+	fail "the list page has a form; filtering must be navigation, with no state to lose"
+else
+	pass "filtering uses links, so a refresh has nothing to destroy"
+fi
+
+# Everything so far targets one namespace, so the namespace row is correctly
+# absent: a dimension with one value is not a choice. The state row is not.
+if echo "$list" | grep -q 'href="/remediations?state='; then
+	pass "the list offers filter links for a dimension with more than one value"
+else
+	fail "the list offers no state filter link"
+fi
+if echo "$list" | grep -q 'id="filter-namespace"'; then
+	fail "the list offers a namespace filter although every record is in one namespace"
+else
+	pass "and omits the namespace row, which would offer a choice of one"
+fi
+
+filtered=$(dashboard_body "/remediations?namespace=e2e-payments")
 if echo "$filtered" | grep -q 'e2e-payments'; then
 	pass "a namespace filter renders that namespace's records"
 else
 	fail "the namespace filter hid everything in its own namespace"
 fi
-
-# The controls must be outside <main>, which is what the ten-second refresh
-# replaces. Inside it, a selection made and not yet applied is destroyed
-# faster than anybody reaches Apply, and the filter appears not to work.
-form_line=$(echo "$filtered" | grep -n '<form class="filters"' | head -1 | cut -d: -f1)
-main_line=$(echo "$filtered" | grep -n '<main id="content"' | head -1 | cut -d: -f1)
-if [ -n "$form_line" ] && [ -n "$main_line" ] && [ "$form_line" -lt "$main_line" ]; then
-	pass "the filter controls render outside the region the refresh replaces"
+if echo "$filtered" | grep -q 'hidden'; then
+	pass "and the page says how much it is hiding"
 else
-	fail "the filter controls are inside <main> (form=${form_line}, main=${main_line})"
+	fail "a filtered page does not say what it is hiding"
 fi
 
-# And the applied filter is stated, with each clause removable on its own.
-if echo "$filtered" | grep -q 'Filtered by' && echo "$filtered" | grep -q 'chip-active'; then
-	pass "the applied filter is stated on the page"
+# The shell reloads itself when the operator changes, which is the defect
+# that made two correct filter fixes invisible in an already-open tab.
+if echo "$overview" | grep -q '<meta name="remedik-asset"'; then
+	pass "the page carries its build fingerprint, so a stale tab can notice"
 else
-	fail "a filtered page does not say what it is filtered by"
+	fail "the page has no asset fingerprint for the refresh to compare"
 fi
 
-empty=$(dashboard_body "/?namespace=no-such-namespace")
+empty=$(dashboard_body "/remediations?namespace=no-such-namespace")
 if echo "$empty" | grep -q "Nothing matches this filter"; then
 	pass "a filter that matches nothing says so, rather than looking like an empty cluster"
 else
@@ -759,7 +790,7 @@ fi
 
 # An unknown parameter value is honoured, not rejected: a URL pasted from a
 # week-old incident channel must not become an error page.
-status=$(dashboard_status "/?namespace=no-such-namespace&state=Nonsense")
+status=$(dashboard_status "/remediations?namespace=no-such-namespace&state=Nonsense")
 if [ "$status" = "200" ]; then
 	pass "an unrecognised filter value still renders"
 else
@@ -767,7 +798,7 @@ else
 fi
 
 # Filtering must not become a way in for a write.
-status=$(dashboard_method POST "/?namespace=e2e-payments")
+status=$(dashboard_method POST "/remediations?namespace=e2e-payments")
 if [ "$status" = "405" ]; then
 	pass "a filtered URL is still GET-only"
 else

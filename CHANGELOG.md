@@ -14,6 +14,28 @@ a proposal.
 
 ### Added
 
+- **The dashboard is four pages, and the front one is a dashboard**
+  (`rework-dashboard-pages`). The overview carried the stats, the dry-run
+  report, the filters and a fifty-row table; it read as a list with
+  decoration, so "is anything wrong right now?" was three scrolls down under
+  a filter for a different question.
+
+  `/` is now panels — posture, what needs attention, activity over the last
+  day as bars, and where remediation is happening — each one a claim with a
+  link to its evidence. The "needs attention" panel orders by how much
+  silence each entry represents, so a failed escalation, which means nobody
+  was told, is listed above a failure that was reported. Every figure links
+  to the list that explains it.
+
+  `/remediations` is the list, with the filters and the counts. A panel is
+  one struct, one builder and one template block, and a page is a route, a
+  view, a template and a nav entry — so "namespace health" is an addition
+  rather than a rearrangement.
+
+  No new dependency and no request leaving the cluster: the activity chart
+  is bars in CSS from numbers the server already has, with the same numbers
+  in a table underneath.
+
 - **Per-namespace posture** (`add-namespace-posture`). `dryRun` was one flag
   on the operator, so a cluster was either all simulation or all action —
   which is not how anybody adopts a tool that holds write access. The real
@@ -475,6 +497,27 @@ a proposal.
   release, so drift is visible without hunting through files.
 
 ### Fixed
+
+- **The dashboard filter did not work, and neither of the first two fixes
+  reached anybody.** The stylesheet, the script and the page shell live
+  outside the content region, and the auto-refresh replaces only that
+  region. A tab left open across an operator upgrade therefore keeps the old
+  assets and the old markup for ever, refreshing its data through them —
+  which is the most convincing way for a page to be wrong, and why "the
+  filter still does not work" was the correct report each time.
+
+  The page now carries its asset fingerprint, and the refresh reloads when
+  the one it fetches differs. That is a defect in its own right: after any
+  upgrade, an open dashboard was rendering new data through old markup.
+
+  Filtering is now navigation. Every choice is a link, so there is no state
+  between choosing and applying — nothing a refresh can destroy, no Apply
+  button to reach before a timer fires, and no JavaScript on the path at
+  all. Clicking the value in force removes it, so the same control narrows
+  and widens, and each carries the count its choice would yield.
+
+- **`/remediations` answered 307.** Only the trailing-slash form was
+  registered, so the mux redirected every link on every page.
 
 - **An action with no target no longer reports "on /".** `webhook.call`,
   `job.run` and `script.run` act outside the cluster and resolve to nothing,
