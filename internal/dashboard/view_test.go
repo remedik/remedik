@@ -439,3 +439,107 @@ func sorted(remediations []v1alpha1.Remediation) []v1alpha1.Remediation {
 	sortNewestFirst(remediations)
 	return remediations
 }
+
+func TestBuildRemediation_EscalationIsSeparateFromTheSteps(t *testing.T) {
+	rem := failedRemediation("bad-1", 10)
+	rem.Spec.EscalationSteps = []v1alpha1.Step{{Action: "webhook.call"}}
+	rem.Status.Escalation = &v1alpha1.EscalationStatus{
+		Phase: v1alpha1.StepPhaseSucceeded,
+		Steps: []v1alpha1.StepStatus{{
+			Index: 0, Action: "webhook.call", Phase: v1alpha1.StepPhaseSucceeded,
+			Plan: "POST https://events.pagerduty.com/v2/enqueue",
+		}},
+	}
+
+	view := buildRemediation(&rem, testNow())
+
+	if view.Escalation == nil {
+		t.Fatal("the page does not say whether anybody was told")
+	}
+	if !view.Escalation.Sent {
+		t.Error("Sent = false for a succeeded escalation")
+	}
+	if len(view.Escalation.Steps) != 1 || view.Escalation.Steps[0].Action != "webhook.call" {
+		t.Errorf("escalation steps = %+v, want the webhook", view.Escalation.Steps)
+	}
+	// The remediation's own steps must not have grown a page.
+	for _, step := range view.Steps {
+		if step.Action == "webhook.call" {
+			t.Error("the escalation leaked into the remediation's steps")
+		}
+	}
+	if view.NobodyWasTold() {
+		t.Error("NobodyWasTold is true although the escalation was sent")
+	}
+}
+
+func TestBuildRemediation_FailedEscalationIsTheLoudCase(t *testing.T) {
+	rem := failedRemediation("bad-1", 10)
+	rem.Spec.EscalationSteps = []v1alpha1.Step{{Action: "webhook.call"}}
+	rem.Status.Escalation = &v1alpha1.EscalationStatus{
+		Phase:   v1alpha1.StepPhaseFailed,
+		Message: "pagerduty returned 503",
+		Steps: []v1alpha1.StepStatus{{
+			Index: 0, Action: "webhook.call", Phase: v1alpha1.StepPhaseFailed,
+			Message: "pagerduty returned 503",
+		}},
+	}
+
+	view := buildRemediation(&rem, testNow())
+
+	if view.Escalation == nil || view.Escalation.Sent {
+		t.Fatalf("escalation = %+v, want a recorded failure", view.Escalation)
+	}
+	if view.Escalation.Tone != toneFailed {
+		t.Errorf("Tone = %q, want %q: a page nobody received must not look calm",
+			view.Escalation.Tone, toneFailed)
+	}
+	if view.Escalation.Message == "" {
+		t.Error("the page does not say why the escalation failed")
+	}
+	// The remediation's own verdict is untouched: the restart failed first.
+	if view.Reason != v1alpha1.ReasonStepFailed {
+		t.Errorf("Reason = %q, want the remediation's own", view.Reason)
+	}
+}
+
+func TestBuildRemediation_FailureWithNoEscalationSaysSo(t *testing.T) {
+	view := buildRemediation(ptr(failedRemediation("bad-1", 10)), testNow())
+
+	if view.Escalation != nil {
+		t.Fatalf("escalation = %+v, want none", view.Escalation)
+	}
+	if !view.NobodyWasTold() {
+		t.Error("a failed remediation with no escalation did not say nothing was sent")
+	}
+}
+
+func TestBuildRemediation_SuccessNeverClaimsNobodyWasTold(t *testing.T) {
+	rem := failedRemediation("bad-1", 10)
+	rem.Status.State = v1alpha1.RemediationStateSucceeded
+	rem.Status.Reason = ""
+
+	if buildRemediation(&rem, testNow()).NobodyWasTold() {
+		t.Error("a succeeded remediation was reported as un-escalated; there was nothing to escalate")
+	}
+}
+
+func TestEscalationView_DoesNotRepeatTheStepsMessage(t *testing.T) {
+	same := EscalationView{
+		Message: "pagerduty returned 503",
+		Steps:   []StepView{{Action: "webhook.call", Message: "pagerduty returned 503"}},
+	}
+	if same.ShowMessage() {
+		t.Error("the escalation's message is shown although a step already says it")
+	}
+
+	// A failure that is not any one step's — an unknown action, say — has
+	// nowhere else to appear, so it must still be shown.
+	orphan := EscalationView{
+		Message: `no action named "pagerduty.notify"`,
+		Steps:   []StepView{{Action: "pagerduty.notify", Phase: "Pending"}},
+	}
+	if !orphan.ShowMessage() {
+		t.Error("an escalation failure that no step reports was hidden")
+	}
+}

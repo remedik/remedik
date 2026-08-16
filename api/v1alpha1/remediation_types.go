@@ -89,6 +89,29 @@ type RemediationSpec struct {
 	// +optional
 	Retries int32 `json:"retries,omitempty"`
 
+	// EscalationSteps is the plan to run once this remediation has failed
+	// for good, copied from the strategy at creation time for the same
+	// reason Steps is.
+	//
+	// They are given the alert's labels plus a handful describing the
+	// remediation that failed, so a webhook body or a job's environment can
+	// say what happened without any templating:
+	//
+	//	remedik_remediation   this record's name
+	//	remedik_strategy      the strategy that matched
+	//	remedik_target        the object, as "kind/namespace/name"
+	//	remedik_reason        the machine-readable cause
+	//	remedik_message       the human-readable detail
+	//	remedik_attempts      how many attempts were made
+	//	remedik_dry_run       "true" when nothing was actually changed
+	//
+	// Those keys are set by remedik and overwrite any alert label of the
+	// same name, because an escalation that can be lied to by an alert
+	// label is worse than no escalation.
+	//
+	// +optional
+	EscalationSteps []Step `json:"escalationSteps,omitempty"`
+
 	// DryRun records whether the operator was in dry-run mode. It is kept
 	// on the record so a Simulated result is self-explanatory.
 	//
@@ -159,12 +182,48 @@ type RemediationStatus struct {
 	// +optional
 	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
 
+	// Escalation records the attempt to tell somebody that this remediation
+	// failed. It is absent when the strategy declares no escalation, and
+	// present whether the escalation worked or not — "we tried to tell you
+	// and could not" is exactly the thing somebody needs to find later.
+	//
+	// +optional
+	Escalation *EscalationStatus `json:"escalation,omitempty"`
+
 	// Conditions follow the standard Kubernetes convention.
 	//
 	// +listType=map
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+// EscalationStatus is the outcome of the onFailure plan.
+//
+// It never changes the remediation's own state: a remediation that escalated
+// is still a remediation that did not work.
+type EscalationStatus struct {
+	// Phase is Succeeded when every escalation step ran, Failed otherwise.
+	// It is never Simulated: escalation runs for real even when the
+	// remediation did not.
+	//
+	// +optional
+	Phase StepPhase `json:"phase,omitempty"`
+
+	// Steps records each escalation step, in order.
+	//
+	// +optional
+	Steps []StepStatus `json:"steps,omitempty"`
+
+	// Message explains a failed escalation.
+	//
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// CompletedAt is when the escalation finished.
+	//
+	// +optional
+	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
 }
 
 // StepPhase is the outcome of a single step.

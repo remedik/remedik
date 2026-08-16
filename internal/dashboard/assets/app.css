@@ -1317,6 +1317,70 @@ main.wrap {
 }
 
 /* --------------------------------------------------------------------------
+   Escalation
+
+   The verdict leads, because the question a reader arrives with is "did
+   anybody find out?" and not "which webhook ran". A failed escalation carries
+   the same weight as a failed remediation: it is the case where the system
+   knows something is wrong and nobody else does.
+   -------------------------------------------------------------------------- */
+
+.escalation-verdict {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.escalation-verdict code {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--muted-bg);
+  color: var(--text);
+}
+
+.escalation-ok {
+  border-color: var(--ok-border);
+  background: var(--ok-bg);
+  color: color-mix(in srgb, var(--ok) 78%, var(--text));
+}
+
+.escalation-failed {
+  border-color: var(--failed-border);
+  background: var(--failed-bg);
+  color: color-mix(in srgb, var(--failed) 82%, var(--text));
+}
+
+.escalation-muted {
+  border-color: var(--muted-border);
+  background: var(--muted-bg);
+}
+
+.escalation-message {
+  margin: 0 0 14px;
+  padding: 9px 12px;
+  border-radius: 6px;
+  background: var(--failed-bg);
+  border: 1px solid var(--failed-border);
+  color: color-mix(in srgb, var(--failed) 80%, var(--text));
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.escalation-note {
+  margin: 14px 0 0;
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+/* --------------------------------------------------------------------------
    Narrow screens
    -------------------------------------------------------------------------- */
 

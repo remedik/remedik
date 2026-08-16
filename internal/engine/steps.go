@@ -198,7 +198,7 @@ func (r *StepRunner) runStep(
 		planned, planErr := act.Plan(ctx, req)
 		record(planned)
 		if planErr != nil {
-			return fail(fmt.Errorf("plan %s on %s: %w", step.Action, target, planErr))
+			return fail(fmt.Errorf("%s: %w", describe("plan", step.Action, target), planErr))
 		}
 		return finish(v1alpha1.StepPhaseSimulated, ""), nil
 	}
@@ -213,7 +213,7 @@ func (r *StepRunner) runStep(
 	done, execErr := act.Execute(ctx, req)
 	record(done)
 	if execErr != nil {
-		err := fmt.Errorf("execute %s on %s: %w", step.Action, target, execErr)
+		err := fmt.Errorf("%s: %w", describe("execute", step.Action, target), execErr)
 		events.Finished(ctx, target, step.Action, index, err)
 		return fail(err)
 	}
@@ -249,7 +249,7 @@ func (r *StepRunner) verify(
 
 	timeout, err := action.VerifyTimeout(req.Params)
 	if err != nil {
-		return fmt.Errorf("verify %s on %s: %w", act.Name(), req.Target, err)
+		return fmt.Errorf("%s: %w", describe("verify", act.Name(), req.Target), err)
 	}
 
 	verifyCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -294,4 +294,16 @@ func TerminalState(dryRun bool, err error) v1alpha1.RemediationState {
 	default:
 		return v1alpha1.RemediationStateSucceeded
 	}
+}
+
+// describe names what is being done to what, for an error message.
+//
+// Actions that reach outside the cluster resolve to no target, and "execute
+// webhook.call on /" reads like a bug in the message rather than a report of
+// the one in the endpoint.
+func describe(verb, actionName string, target action.Target) string {
+	if target.IsZero() {
+		return verb + " " + actionName
+	}
+	return verb + " " + actionName + " on " + target.String()
 }

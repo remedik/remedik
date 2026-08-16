@@ -158,7 +158,53 @@ type RemediationView struct {
 	Duration    string
 	Alert       AlertView
 	Steps       []StepView
+	// Escalation is who was told, and whether telling them worked. Nil when
+	// the strategy declares no escalation — which is itself worth seeing on
+	// a failed remediation, so the page says so rather than staying silent.
+	Escalation *EscalationView
+	// Failed is the terminal state, kept as a bool because the page asks the
+	// question more than once and State is a display string.
+	Failed bool
 }
+
+// EscalationView is the onFailure plan and what became of it.
+//
+// It is deliberately a separate block on the page. A page that folded these
+// into the steps would make "we told PagerDuty" read as a fourth attempt at
+// the restart, and would hide the case that matters most: the remediation
+// failed and the page failed too, so nobody knows.
+type EscalationView struct {
+	Phase     string
+	Tone      string
+	Message   string
+	Completed string
+	Steps     []StepView
+	// Sent reports whether anybody was actually told.
+	Sent bool
+}
+
+// ShowMessage reports whether the escalation's own message adds anything to
+// the steps below it. With one step it is the same sentence twice, and a page
+// that repeats itself looks like it is padding.
+func (v EscalationView) ShowMessage() bool {
+	if v.Message == "" {
+		return false
+	}
+	for _, step := range v.Steps {
+		if step.Message == v.Message {
+			return false
+		}
+	}
+	return true
+}
+
+// NobodyWasTold reports a failed remediation with no escalation declared.
+//
+// It is not a criticism — most strategies do not need one. It is on the page
+// because this is the moment somebody discovers the feature exists, and
+// because "it failed and no alert went anywhere" is a fact worth stating out
+// loud rather than leaving to be inferred from an absence.
+func (v RemediationView) NobodyWasTold() bool { return v.Failed && v.Escalation == nil }
 
 // ShowRawMessage reports whether the status message adds anything to the
 // summary. For a failed step the summary already quotes it, and saying the
@@ -482,6 +528,8 @@ func buildRemediation(rem *v1alpha1.Remediation, now time.Time) RemediationView 
 		},
 		Steps: buildSteps(rem),
 	}
+	view.Failed = rem.Status.State == v1alpha1.RemediationStateFailed
+	view.Escalation = buildEscalation(rem)
 	view.Summary = summarise(rem, view.Steps)
 	return view
 }
@@ -494,25 +542,31 @@ func buildRemediation(rem *v1alpha1.Remediation, now time.Time) RemediationView 
 // step that never started still appears, which is exactly what someone
 // reading a failure needs to see.
 func buildSteps(rem *v1alpha1.Remediation) []StepView {
-	status := make(map[int32]*v1alpha1.StepStatus, len(rem.Status.Steps))
+	return joinSteps(rem.Spec.Steps, rem.Status.Steps)
+}
+
+// joinSteps pairs a plan with its outcome. It serves the remediation's own
+// steps and the escalation's alike, because they are the same join.
+func joinSteps(plan []v1alpha1.Step, recorded []v1alpha1.StepStatus) []StepView {
+	status := make(map[int32]*v1alpha1.StepStatus, len(recorded))
 	highest := -1
-	for i := range rem.Status.Steps {
-		st := &rem.Status.Steps[i]
+	for i := range recorded {
+		st := &recorded[i]
 		status[st.Index] = st
 		if int(st.Index) > highest {
 			highest = int(st.Index)
 		}
 	}
 
-	count := max(len(rem.Spec.Steps), highest+1)
+	count := max(len(plan), highest+1)
 	steps := make([]StepView, 0, count)
 
 	for i := range count {
 		view := StepView{Number: i + 1, Phase: string(v1alpha1.StepPhasePending)}
 
-		if i < len(rem.Spec.Steps) {
-			view.Action = rem.Spec.Steps[i].Action
-			view.Params = sortedLabels(rem.Spec.Steps[i].With)
+		if i < len(plan) {
+			view.Action = plan[i].Action
+			view.Params = sortedLabels(plan[i].With)
 		}
 
 		if st, ok := status[int32(i)]; ok {
@@ -536,6 +590,24 @@ func buildSteps(rem *v1alpha1.Remediation) []StepView {
 	}
 
 	return steps
+}
+
+// buildEscalation renders the onFailure plan's outcome, when there was one.
+func buildEscalation(rem *v1alpha1.Remediation) *EscalationView {
+	esc := rem.Status.Escalation
+	if esc == nil {
+		return nil
+	}
+
+	sent := esc.Phase == v1alpha1.StepPhaseSucceeded
+	return &EscalationView{
+		Phase:     string(esc.Phase),
+		Tone:      phaseTone(esc.Phase),
+		Message:   esc.Message,
+		Completed: FormatTimestampOf(esc.CompletedAt),
+		Steps:     joinSteps(rem.Spec.EscalationSteps, esc.Steps),
+		Sent:      sent,
+	}
 }
 
 // summarise writes the one line that answers "so what happened?" without

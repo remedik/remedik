@@ -8,6 +8,13 @@
 # Nothing about the response is trusted beyond its status code: anything
 # outside 2xx fails the step, and the body is recorded so the failure
 # explains itself.
+#
+# Know what that success means. A pipeline API answers 200 "run queued", not
+# "run succeeded", so this step records a success once the pipeline *starts*.
+# Where the outcome matters, use `job.run` with an image that triggers and
+# then polls — see escalate-on-failure.yaml. And to be told when the pipeline
+# could not even be reached, give this strategy an `onFailure.steps` of its
+# own.
 apiVersion: remedik.dev/v1alpha1
 kind: RemediationStrategy
 metadata:

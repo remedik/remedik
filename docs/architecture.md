@@ -54,6 +54,9 @@ one, rather than quietly remediating without the approval it asked for.
 (new) --> Pending --> Running --> Succeeded | Simulated
              ^            |
              |            +-----> Failed          (no retries left)
+             |                      |
+             |                      +--> onFailure.steps, if declared
+             |                           (recorded, never changes the state)
              +------------+-----> Pending         (retry, after backoff)
           Running on entry -----> Failed/Interrupted
 ```
@@ -73,6 +76,47 @@ at an incident review.
 Terminal records are pruned per strategy (200 by default), and the record
 that just finished is never a pruning candidate whatever the timestamps
 say.
+
+## Escalation
+
+`onFailure.steps` is a second plan, run once the remediation has failed and
+the retries are spent. It is how "and if that does not work, tell somebody"
+is written down, and it is deliberately made of the same actions as
+everything else: escalating is a `webhook.call` to PagerDuty, or a `job.run`
+that hands the incident to a pipeline. There is no notification subsystem,
+so there is nothing to configure separately, nothing that bypasses RBAC, and
+nothing that escapes the audit trail.
+
+Four properties, each chosen against an obvious alternative:
+
+- **It cannot change the outcome.** A remediation that escalated is still a
+  remediation that did not work. A record turning green because somebody was
+  paged would be the most misleading thing this project could do.
+- **It runs once the retries are spent, not per attempt.** Paging on the
+  first failure of three pages for something about to fix itself, and a page
+  that is usually unnecessary is a page people learn to ignore.
+- **It runs during a dry run**, and it is the only thing in remedik that
+  does. A trial is exactly when an operator wants to see the escalation path
+  work; the steps are told `remedik_dry_run="true"` so nobody is paged for
+  an incident that did not happen. Put nothing mutating in an escalation.
+- **It is not retried.** If the page fails during an incident, looping on it
+  helps nobody. `status.escalation` records that it failed, the dashboard
+  says so plainly, and `remedik_escalations_total{outcome="Failed"}` is its
+  own alertable signal — a remediation failed and nobody was told.
+
+The steps receive the alert's labels plus remedik's own —
+`remedik_remediation`, `remedik_strategy`, `remedik_target`,
+`remedik_reason`, `remedik_message`, `remedik_attempts`, `remedik_dry_run` —
+so a webhook body or a Job's environment explains the incident with no
+templating. remedik's keys overwrite any alert label of the same name: an
+escalation that can be lied to by whoever writes the alerting rules is worse
+than no escalation.
+
+**Know what a webhook's success means.** A pipeline API answers 200 "run
+queued", not "run succeeded", so a bare `webhook.call` records success the
+moment the pipeline *starts*. Where the outcome matters, use `job.run` with
+an image that triggers and then polls: the step waits for the Job, and the
+exit code and last log lines land in the record.
 
 Executions are serialised: the controller reconciles one at a time. During
 an alert storm that means remediations queue rather than running at once,

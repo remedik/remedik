@@ -165,6 +165,32 @@ type OnFailure struct {
 	// +kubebuilder:validation:Maximum=10
 	// +optional
 	Retries int32 `json:"retries,omitempty"`
+
+	// Steps is the escalation: what to do once the remediation has failed
+	// and no retries remain. It is how "and if that does not work, tell
+	// somebody" is written down — usually a "webhook.call" to PagerDuty or
+	// Alertmanager, or a "job.run" that hands the incident to a pipeline.
+	//
+	// Escalation steps are ordinary actions and are recorded separately
+	// from the remediation's own, because "the restart failed" and "the
+	// page failed" are different facts.
+	//
+	// Two things about them are unlike every other step, and both are
+	// deliberate:
+	//
+	//   - They run even when the remediation was a dry run. A trial run is
+	//     exactly when an operator wants to see the escalation path work,
+	//     and the steps are told the run was simulated (see the labels on
+	//     RemediationSpec.EscalationSteps) so nobody is paged for an
+	//     incident that did not happen. Put nothing here that changes the
+	//     cluster.
+	//   - They do not change the outcome. The remediation failed; a
+	//     successful page does not make it a success, and a failed page
+	//     does not make it worse.
+	//
+	// +optional
+	// +kubebuilder:validation:MaxItems=8
+	Steps []Step `json:"steps,omitempty"`
 }
 
 // RemediationStrategyStatus reports observed state.

@@ -29,16 +29,20 @@ type countingRecorder struct {
 	rejected  map[string]int
 	started   int
 	finished  map[string]int
+	escalated map[string]int
 }
 
 func newCountingRecorder() *countingRecorder {
-	return &countingRecorder{rejected: map[string]int{}, finished: map[string]int{}}
+	return &countingRecorder{
+		rejected: map[string]int{}, finished: map[string]int{}, escalated: map[string]int{},
+	}
 }
 
 func (r *countingRecorder) Unmatched()                                 { r.unmatched++ }
 func (r *countingRecorder) GuardRejected(_, guard string)              { r.rejected[guard]++ }
 func (r *countingRecorder) RemediationStarted(string)                  { r.started++ }
 func (r *countingRecorder) RemediationFinished(_, o string, _ float64) { r.finished[o]++ }
+func (r *countingRecorder) EscalationFinished(_, o string)             { r.escalated[o]++ }
 
 // remediation builds a record in the state a freshly created one has.
 func remediation(name string, steps ...v1alpha1.Step) *v1alpha1.Remediation {

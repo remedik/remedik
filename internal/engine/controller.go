@@ -166,6 +166,13 @@ func (r *RemediationReconciler) runAttempt(
 	}
 
 	log.Error("remediation failed", "err", result.Err, "reason", result.Reason)
+
+	// The retry budget is spent, so this is where somebody gets told. The
+	// escalation runs before the terminal write, so the record reaches its
+	// final state with the outcome of the page already in it: a reader who
+	// sees Failed never has to wonder whether an escalation is still coming.
+	rem.Status.Escalation = r.escalate(ctx, rem, attempt, result.Reason, result.Err.Error(), log)
+
 	return ctrl.Result{}, r.finish(ctx, rem,
 		v1alpha1.RemediationStateFailed, result.Reason, result.Err.Error(), log)
 }

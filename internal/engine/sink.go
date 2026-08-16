@@ -210,9 +210,10 @@ func (s *Sink) create(
 			// still explains the run after the strategy is edited or
 			// deleted, and so an in-flight execution keeps the behaviour
 			// it started with.
-			Steps:   strategy.Spec.Steps,
-			Retries: strategy.Spec.OnFailure.Retries,
-			DryRun:  s.DryRun,
+			Steps:           strategy.Spec.Steps,
+			Retries:         strategy.Spec.OnFailure.Retries,
+			EscalationSteps: strategy.Spec.OnFailure.Steps,
+			DryRun:          s.DryRun,
 		},
 	}
 

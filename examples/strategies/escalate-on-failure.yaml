@@ -1,0 +1,97 @@
+# The whole loop: try to fix it, and if that does not work, tell somebody.
+#
+#   alert → remedik → remediate → it worked, done
+#                              └→ it did not work → page whoever is on call
+#
+# `onFailure.steps` runs once the remediation has failed and the retries are
+# spent. It is not a notification setting — it is a second plan, made of the
+# same actions, audited in the same record. "Escalate" therefore means
+# whatever your cluster already uses: PagerDuty, Alertmanager, a pipeline, a
+# Slack webhook.
+#
+# Three things about it are worth knowing before you copy this:
+#
+#   1. It never makes the remediation a success. The record stays Failed. A
+#      page is not a fix.
+#   2. It runs during a dry run too — the only thing in remedik that does —
+#      so you can prove the path works before you need it. The steps are told
+#      `remedik_dry_run="true"` so they can say so.
+#   3. It is not retried. If the page fails during an incident, looping on it
+#      helps nobody; the record says so instead, and the dashboard shows it.
+#
+# The escalation steps receive the alert's labels plus remedik's own, so the
+# webhook body explains itself with no templating:
+#
+#   remedik_remediation  remedik_strategy  remedik_target
+#   remedik_reason       remedik_message   remedik_attempts  remedik_dry_run
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: restart-then-page
+spec:
+  enabled: true
+  trigger:
+    match:
+      alertname: KubePodCrashLooping
+  guards:
+    cooldown: 15m
+    maxPerHour: 4
+    # Never take the last healthy replica: if a restart cannot be done
+    # safely, being paged is the correct outcome.
+    blastRadius:
+      minAvailable: 1
+  steps:
+    - action: deployment.restart
+  onFailure:
+    # Two attempts before anybody is woken. Paging on the first failure of a
+    # rollout that is about to settle is how a page becomes noise.
+    retries: 1
+    steps:
+      - action: webhook.call
+        with:
+          url: https://events.pagerduty.com/v2/enqueue
+          # The routing key comes from a Secret in remedik's own namespace,
+          # so an alert's labels cannot choose which credential is used.
+          secretRef: pagerduty-routing-key
+          secretKey: key
+          header: Authorization
+          headerPrefix: "Token token="
+          timeout: 15s
+---
+# The same shape, but the escalation hands the incident to a pipeline and
+# waits for its verdict rather than trusting the trigger.
+#
+# This matters more than it looks. A pipeline API answers 200 "run queued",
+# not "run succeeded" — so a bare `webhook.call` records a success the moment
+# the pipeline *starts*. If you need the outcome, run something that polls:
+# `job.run` waits for the Job, and the Job's exit code and last log lines
+# land in the record.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: cordon-then-hand-over
+spec:
+  enabled: true
+  trigger:
+    match:
+      alertname: KubeNodeNotReady
+  guards:
+    cooldown: 30m
+    maxPerHour: 2
+  steps:
+    # Reversible and immediate: stop scheduling onto it while the slower
+    # process runs. Nothing is moved and nothing is deleted.
+    - action: node.cordon
+  onFailure:
+    retries: 0
+    steps:
+      # Runs in remedik's own namespace, under a ServiceAccount you name and
+      # control — never remedik's. The image triggers the pipeline and polls
+      # it, so a non-zero exit is a pipeline that actually failed.
+      - action: job.run
+        with:
+          image: ghcr.io/example/pipeline-trigger:v1.4.0
+          command: '["/trigger", "--pipeline", "replace-node", "--wait"]'
+          serviceAccount: pipeline-trigger
+          backoffLimit: "0"
+          ttlSecondsAfterFinished: "3600"
