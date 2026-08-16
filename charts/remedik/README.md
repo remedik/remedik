@@ -53,13 +53,15 @@ what the operator already reads.
 | actions.hpaScale.enabled | bool | `false` | Enable `hpa.scale`: raises an autoscaler's `maxReplicas`, the one mechanical answer to `KubeHpaMaxedOut`. It never lowers one. |
 | actions.jobDelete.enabled | bool | `false` | Enable `job.delete`: deletes a failed Job, and its pods with it, so the CronJob that owns it creates a clean run. |
 | actions.jobRun.enabled | bool | `false` | Enable `job.run`: runs a container image as a Job in remedik's own namespace, with the alert's labels as environment variables. The Job runs under a ServiceAccount your strategy names — never remedik's, which is refused — so its authority is granted deliberately rather than inherited. This is the widest action in the catalogue; enable it when you have decided which ServiceAccount it may use. |
+| actions.nodeCordon.enabled | bool | `false` | Enable `node.cordon`: stop new work landing on a node. The safest action here — nothing moves, nothing restarts, one command undoes it — and the right first response to almost every node alert. |
+| actions.nodeDrain.enabled | bool | `false` | Enable `node.drain`: cordon a node, then evict its pods through the Eviction API, honouring PodDisruptionBudgets. **This is the widest permission remedik holds** — `list` on pods and `create` on `pods/eviction` across every namespace — and there is no narrower way to drain a node. Enable it last, and leave it in dry-run longer than the rest: the dry-run report names every pod that would move. |
+| actions.nodeUncordon.enabled | bool | `false` | Enable `node.uncordon`: the undo. Separate from the cordon so a strategy can be granted one without the other. |
 | actions.podDelete.enabled | bool | `false` | Enable `pod.delete`: evicts one pod through the Eviction API, so a PodDisruptionBudget can refuse it. It cannot delete pods outright — the permission granted is `create` on `pods/eviction`, not `delete` on `pods`. Refuses a pod with no controller owner, since nothing would recreate it. |
+| actions.pvcExpand.enabled | bool | `false` | Enable `pvc.expand`: grow a PersistentVolumeClaim, but only where the StorageClass allows expansion. Where it does not, the API accepts the change and nothing happens, so the action checks first and refuses. Expansion is one-way: Kubernetes cannot shrink a volume back. |
 | actions.scriptRun.enabled | bool | `false` | Enable `script.run`: `job.run` with the script taken from a ConfigMap in remedik's namespace, so a runbook can be edited without rebuilding an image. The ConfigMap is read from remedik's namespace only: reading one from anywhere else would let anyone with write access to any namespace get code executed by the operator. |
 | actions.webhookCall.enabled | bool | `false` | Enable `webhook.call`: POSTs the alert, the strategy and the plan to a URL you configure, optionally with a token from a Secret in remedik's namespace. The cheapest way to reach a pipeline remedik will never implement, and it moves the blast radius outside the cluster. |
 | actions.workloadRestart.enabled | bool | `false` | Enable `workload.restart`: the same rolling restart for Deployments, StatefulSets and DaemonSets. Off by default because it grants patch on all three; if you only ever restart Deployments, leave this off and use `deployment.restart`. |
 | affinity | object | `{}` | Affinity for the operator pod |
-| ai.enabled | bool | `false` | Read-only bring-your-own-LLM diagnosis — planned for v0.2.0 |
-| audit.sinks | list | `[]` | Structured audit export (Splunk HEC, Loki, Elasticsearch, S3) — planned for v0.2.0 |
 | dashboard.auth.disabled | bool | `false` | Serve the dashboard without authentication. Anything that can reach the port could then read every alert label, namespace and workload name remedik has recorded. |
 | dashboard.auth.existingSecret | string | `""` | Name of a Secret you manage that holds the dashboard token |
 | dashboard.auth.secretKey | string | `"token"` | Key inside the token Secret |
@@ -67,7 +69,6 @@ what the operator already reads.
 | dashboard.enabled | bool | `false` | Serve the read-only web dashboard. Off by default: its pages disclose alert labels, namespaces and workload names, and deciding who may see those is the cluster owner's call, not the chart's. Enabling it grants remedik no additional permission — the dashboard reads what the operator already reads. |
 | dashboard.port | int | `8082` | Port the dashboard listens on |
 | dryRun | bool | `true` | Global execution posture. The install default is dry-run: remedik matches alerts, evaluates guards and records Simulated remediations, changing nothing. Turn it off once the reports look right. |
-| escalation.pagerduty.enabled | bool | `false` | PagerDuty escalation — planned for v0.2.0 |
 | fullnameOverride | string | `""` | Override the fully qualified release name |
 | gateway.auth.disabled | bool | `false` | Disable authentication entirely. Local development only: anything that can reach the service could then ask remedik to act. |
 | gateway.auth.existingSecret | string | `""` | Name of a Secret you manage that holds the bearer token |
@@ -93,7 +94,6 @@ what the operator already reads.
 | networkPolicy.gatewayFrom | list | `[]` | Who may reach the gateway — the port that makes the cluster change itself. Required when the policy is enabled. A list of NetworkPolicy peers, for example:   - namespaceSelector:       matchLabels:         kubernetes.io/metadata.name: monitoring |
 | networkPolicy.metricsFrom | list | `[]` | Who may scrape metrics. Defaults to whoever may reach the gateway, which is right when Alertmanager and Prometheus are the same install. |
 | nodeSelector | object | `{}` | Node selector for the operator pod |
-| packs | object | `{}` | Cloud packs such as `awsNodes` for node replacement — planned for v0.2.0 |
 | podAnnotations | object | `{}` | Extra annotations for the operator pod |
 | priorityClassName | string | `""` | PriorityClass for the operator pod. A single-replica operator evicted under node pressure stops remediating without anyone being told, so on a busy cluster this is worth setting to something like `system-cluster-critical`. |
 | probes.port | int | `8081` | Port the health and readiness probes listen on |
@@ -115,7 +115,6 @@ what the operator already reads.
 | serviceMonitor.namespace | string | `""` | Namespace for the ServiceMonitor; defaults to the release namespace |
 | serviceMonitor.relabelings | list | `[]` | Relabelings applied before the scrape |
 | serviceMonitor.scrapeTimeout | string | `"10s"` | How long a scrape may take. The posture metrics read the operator's cache, so a slow scrape means the cache is gone. |
-| slack.enabled | bool | `false` | Socket Mode Slack bot with approval buttons — planned for v0.2.0 |
 | tolerations | list | `[]` | Tolerations for the operator pod |
 
 ## Maintainers

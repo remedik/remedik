@@ -1,0 +1,37 @@
+# Give a volume more room before it fills.
+#
+# `pvc.expand` only works where the StorageClass sets allowVolumeExpansion.
+# Where it does not, the API server accepts the change and nothing happens —
+# so remedik reads the class first and refuses rather than recording a
+# success that did nothing.
+#
+# Two things worth knowing before enabling this:
+#
+#   - Expansion is one-way. Kubernetes cannot shrink a volume back, so every
+#     remediation here is permanent and costs money for ever.
+#   - Growing the disk does not fix whatever is filling it. This buys time;
+#     it does not solve anything. `maxSize` is how you decide how much time
+#     you are willing to buy before a person has to look.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: volume-filling-up
+spec:
+  enabled: true
+  trigger:
+    match:
+      alertname: KubePersistentVolumeFillingUp
+  guards:
+    # Slow and permanent, so rarely.
+    cooldown: 6h
+    maxPerHour: 1
+  steps:
+    - action: pvc.expand
+      with:
+        increasePercent: "50"
+        # The ceiling is the point at which a person has to look instead.
+        maxSize: 500Gi
+        # CSI drivers vary; some finish only when the pod restarts.
+        verifyTimeout: 5m
+  onFailure:
+    retries: 0

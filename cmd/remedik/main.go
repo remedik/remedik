@@ -30,6 +30,7 @@ import (
 	"github.com/ratyx/remedik/api/v1alpha1"
 	"github.com/ratyx/remedik/internal/action"
 	"github.com/ratyx/remedik/internal/action/external"
+	"github.com/ratyx/remedik/internal/action/node"
 	"github.com/ratyx/remedik/internal/action/workload"
 	"github.com/ratyx/remedik/internal/dashboard"
 	"github.com/ratyx/remedik/internal/engine"
@@ -382,6 +383,10 @@ func buildRegistry(deps registryDeps, enabled []string) (*action.Registry, error
 		external.NewWebhookCall(c, deps.namespace),
 		external.NewJobRun(c, deps.logs, deps.serviceAccount, time.Now),
 		external.NewScriptRun(c, deps.logs, deps.serviceAccount, time.Now),
+		node.NewCordon(c),
+		node.NewUncordon(c),
+		node.NewDrain(c),
+		node.NewPVCExpand(c),
 	}
 
 	if len(enabled) == 0 {

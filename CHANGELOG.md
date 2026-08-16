@@ -14,6 +14,34 @@ rather than a proposal.
 
 ### Added
 
+- **Node actions and volume expansion** (`add-node-actions`), landing last
+  on purpose — after the contract could verify its own work and after a
+  guard existed that could bound them:
+
+  - **`node.cordon`** and **`node.uncordon`** — the safest pair in the
+    catalogue and the right first response to almost every node alert:
+    nothing moves, nothing restarts, and one command undoes either. Two
+    verbs, so a strategy can be granted "stop scheduling here" without being
+    granted the ability to drain. Both are idempotent, because an alert
+    fires repeatedly and a strategy that failed on the second firing would
+    be unusable.
+  - **`node.drain`** — cordons first (draining without it races the
+    scheduler), then evicts every eligible pod through the Eviction API. It
+    is the one place in remedik where a 429 is not an immediate failure: a
+    drain is a loop, and a PodDisruptionBudget saying "not yet" is the
+    normal answer partway through one, so refusals are retried until the
+    step's timeout. **A drain that does not finish fails the step, and the
+    node stays cordoned** — half-drained is the worst state to leave a node
+    in, and reporting it as success would lose capacity no dashboard
+    accounts for. DaemonSet pods, mirror pods and pods with no controller
+    are skipped, with the record saying how many and why. This is the widest
+    permission remedik holds, and the chart says so.
+  - **`pvc.expand`** — grows a claim, but only where the StorageClass sets
+    `allowVolumeExpansion`. Without that check the API server accepts the
+    patch and nothing happens: remedik would record a success that did
+    nothing, which is worse than failing because nobody goes looking. It
+    never shrinks, and it says on the record that expansion is one-way.
+
 - **Scaling and rollback** (`add-scaling-and-rollback`), the *careful* tier
   the `blastRadius` guard was built to bound:
 
@@ -311,6 +339,12 @@ rather than a proposal.
 
 ### Changed
 
+- **The chart no longer ships values that do nothing.** `slack`,
+  `escalation.pagerduty`, `audit.sinks`, `ai` and `packs` described features
+  that are designed and not built. A key that quietly does nothing is worse
+  than a missing one, because somebody sets it, believes it, and finds out
+  during an incident. The designs stay in `docs/advanced-setup.md`, which
+  says on its first line that none of it has shipped.
 - Events are published through `k8s.io/client-go/tools/events` rather than
   the deprecated `record` API, which also gives each event an `action`
   field naming the verb that ran.

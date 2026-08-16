@@ -105,6 +105,10 @@ jobDelete: job.delete
 deploymentRollback: deployment.rollback
 deploymentScale: deployment.scale
 hpaScale: hpa.scale
+nodeCordon: node.cordon
+nodeUncordon: node.uncordon
+nodeDrain: node.drain
+pvcExpand: pvc.expand
 webhookCall: webhook.call
 jobRun: job.run
 scriptRun: script.run

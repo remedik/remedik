@@ -17,6 +17,9 @@ suit your alerts, and start with the operator in dry-run.
 | [bounded-eviction.yaml](bounded-eviction.yaml) | `KubePodNotReady` | Evicts a pod, but never the last healthy replica |
 | [rollback-a-bad-deploy.yaml](rollback-a-bad-deploy.yaml) | `KubeDeploymentReplicasMismatch` | Puts the previous revision back; refuses under GitOps |
 | [hpa-maxed-out.yaml](hpa-maxed-out.yaml) | `KubeHpaMaxedOut` | Raises the autoscaler's ceiling |
+| [node-not-ready.yaml](node-not-ready.yaml) | `KubeNodeNotReady` | Cordons the node — reversible, moves nothing |
+| [drain-a-dead-node.yaml](drain-a-dead-node.yaml) | `KubeNodeUnreachable` | Drains it, honouring disruption budgets |
+| [volume-filling-up.yaml](volume-filling-up.yaml) | `KubePersistentVolumeFillingUp` | Expands the claim, where the class allows |
 
 Every action a recipe uses must be enabled in the chart, because each one is
 a permission: `--set actions.podDelete.enabled=true`. The chart's

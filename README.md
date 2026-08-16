@@ -43,21 +43,33 @@ pod-crashloop-x7k2q   pod-crashloop   deployment/payments/api   Succeeded   2m
 pod-crashloop-b91mm   pod-crashloop   deployment/checkout/web   Simulated   1h
 ```
 
-**Four actions ship today**, each a separate permission the chart grants only
-when you enable it:
+**Thirteen actions ship today**, each a separate permission the chart grants
+only when you enable it, and only `deployment.restart` on by default:
 
-| Action | What it does |
-| --- | --- |
-| `deployment.restart` | Rolling restart of a Deployment |
-| `workload.restart` | The same, for StatefulSets and DaemonSets too |
-| `pod.delete` | Evicts one pod **through the Eviction API**, so a PodDisruptionBudget can refuse it |
-| `job.delete` | Deletes a failed Job so its CronJob makes a clean run |
+| | Action | What it does |
+| --- | --- | --- |
+| **Workloads** | `deployment.restart` | Rolling restart of a Deployment |
+| | `workload.restart` | The same, for StatefulSets and DaemonSets too |
+| | `pod.delete` | Evicts one pod **through the Eviction API**, so a PodDisruptionBudget can refuse |
+| | `job.delete` | Deletes a failed Job so its CronJob makes a clean run |
+| **Capacity** | `deployment.rollback` | Puts the previous revision back — refuses under Argo CD or Flux |
+| | `deployment.scale` | Sets or increases replicas — refuses when an HPA owns the workload |
+| | `hpa.scale` | Raises an autoscaler's ceiling; never lowers it |
+| **Nodes** | `node.cordon` / `node.uncordon` | Stop and resume scheduling. Reversible, moves nothing |
+| | `node.drain` | Cordon, then evict everything, honouring disruption budgets |
+| | `pvc.expand` | Grows a volume — only where the StorageClass allows it |
+| **Anything else** | `webhook.call` | POSTs the incident to your pipeline |
+| | `job.run` / `script.run` | Runs your container or your runbook script as a Job |
 
-The eviction detail is not a detail. Deleting a pod ignores disruption
-budgets entirely; eviction is the only call that checks them. remedik cannot
-delete a pod even if it wanted to — the permission it holds is `create` on
-`pods/eviction`, never `delete` on `pods` — and it refuses a pod with no
-controller owner, because nothing would recreate it.
+Several of those descriptions say "refuses", and that is the interesting
+part. Deleting a pod ignores disruption budgets entirely; eviction is the
+only call that checks them, so remedik holds `create` on `pods/eviction` and
+never `delete` on `pods` — it *cannot* force a pod out. A rollback in a
+GitOps cluster would be reverted within minutes, so it refuses rather than
+recording a success while the outage continues. A volume whose StorageClass
+forbids expansion accepts the patch and does nothing, so remedik checks
+first. And a remediation Job runs as a ServiceAccount you name, never
+remedik's own, which is refused.
 
 There is also a read-only dashboard, off by default, that answers the same
 questions in a browser — how much a dry-run trial would have done, and why
@@ -114,7 +126,14 @@ touched the cluster even if an action is buggy.
 **Minimal trust.** One agent per cluster, RBAC generated only for the
 actions you enable, distroless non-root image, no external orchestrator and
 no database. Turning off `deployment.restart` removes its permission to
-patch Deployments.
+patch Deployments — and `make helm-lint` checks that with every action off,
+nothing at all is granted on any workload.
+
+**Guards bound the damage.** `cooldown` and `maxPerHour` ask about time;
+`blastRadius` asks about state — never the last available replica, never a
+workload already too degraded to touch. It **fails closed**: a guard that
+permits an execution when it could not evaluate its own condition is not a
+guard.
 
 **The audit trail is a first-class object.** Every run — including dry-run
 simulations — is a `Remediation` resource carrying the triggering alert, the
@@ -139,13 +158,13 @@ the record still explains the run after the strategy is edited or deleted.
 
 - **v0.1.0 (in progress)** — alert gateway, `RemediationStrategy` and
   `Remediation` CRDs, deterministic engine with guards, dry-run and retries,
-  seven actions — `deployment.restart`, `workload.restart`, `pod.delete`,
-  `job.delete`, `webhook.call`, `job.run`, `script.run` — read-only
-  dashboard, Helm chart, Prometheus metrics with a Grafana dashboard and
-  alerts, signed releases.
-- **v0.2.0** — the `blastRadius` guard, node actions (`cordon`, `drain`,
-  `uncordon`), scaling and rollback, the Slack bot with approval buttons and
-  manual commands, audit sinks (Splunk HEC, Loki, Elasticsearch).
+  thirteen actions across workloads, capacity, nodes and escape hatches,
+  three guards including `blastRadius`, a read-only dashboard, a Helm chart
+  whose RBAC follows the features you enable, Prometheus metrics with a
+  Grafana dashboard and alerts, signed releases.
+- **v0.2.0** — per-namespace posture (act here, report there), the Slack bot
+  with approval buttons and manual commands, namespace health, audit sinks
+  (Splunk HEC, Loki, Elasticsearch).
 - **Later** — hub/spoke multi-cluster, cloud packs, `ActionPlugin` CRD, MCP
   server, workload-aware cost recommendations.
 

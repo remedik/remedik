@@ -1,0 +1,48 @@
+# Move everything off a node that is not coming back.
+#
+# This is the widest thing remedik can do, and the honest advice is: leave it
+# in dry-run for a long time. The dry-run report names every pod that would
+# move — read that list a few times before letting this run unattended.
+#
+# What it does, in order:
+#   1. Cordons the node, so pods it evicts cannot land back on it.
+#   2. Evicts each pod through the Eviction API, so a PodDisruptionBudget can
+#      refuse. A refusal means "not yet" and is retried until verifyTimeout.
+#   3. Skips DaemonSet pods (their controller replaces them immediately),
+#      mirror pods (the kubelet owns them), and pods with no controller
+#      (nothing would recreate them).
+#
+# A drain that does not finish FAILS the step, and the node stays cordoned.
+# Half-drained is the worst state to leave a node in, and reporting it as
+# done would lose capacity nobody accounted for.
+#
+# What this deliberately does not do: delete the node or ask a cloud provider
+# to replace it. That is a different trust model with different credentials —
+# use `webhook.call` to trigger the pipeline that owns it.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: drain-a-dead-node
+spec:
+  enabled: true
+  trigger:
+    match:
+      alertname: KubeNodeUnreachable
+  guards:
+    # Draining is slow and consequential. Once per node per day, twice across
+    # the fleet per hour: if more than that is failing, the problem is not
+    # one node.
+    cooldown: 24h
+    maxPerHour: 2
+  steps:
+    - action: node.drain
+      with:
+        # How long to keep retrying evictions a disruption budget refuses.
+        verifyTimeout: 10m
+        # Refuse a node holding more than this many evictable pods. A large
+        # node moving all at once is a different decision from a small one.
+        maxPods: "30"
+  onFailure:
+    # No retry. A drain that timed out has already moved some pods; running
+    # it again immediately would be a second wave during the same incident.
+    retries: 0

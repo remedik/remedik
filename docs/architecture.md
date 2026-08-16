@@ -195,6 +195,9 @@ incident it was written for.
 | `webhook.call` | POSTs the incident to a URL | no | Credential from a Secret in remedik's namespace only; non-2xx fails the step |
 | `job.run` | Runs an image as a Job | no | In remedik's namespace, under a ServiceAccount the step names — never remedik's |
 | `script.run` | `job.run`, script from a ConfigMap | no | ConfigMap read from remedik's namespace only |
+| `node.cordon` / `node.uncordon` | Stop and resume scheduling on a node | no | The safest pair here: nothing moves, one command undoes it |
+| `node.drain` | Cordon, then evict every eligible pod | no | **The widest permission remedik holds.** A partial drain is a failure |
+| `pvc.expand` | Grow a PersistentVolumeClaim | no | Refuses where the StorageClass forbids expansion; one-way |
 
 **Why eviction rather than deletion.** Deleting a pod ignores
 PodDisruptionBudgets entirely; the Eviction API is the only call that checks

@@ -1,5 +1,10 @@
 # Advanced setup
 
+> **Everything on this page is planned, not shipped.** The chart values for
+> these are not shipped either: a key that quietly does nothing is worse than
+> a missing one, because somebody sets it, believes it, and finds out during
+> an incident. The YAML below is a design, not a configuration you can apply.
+>
 > **Everything on this page is planned, not shipped.** Each section is a
 > design commitment; the values schemas show where remedik is going, and
 > become concrete, tested documentation when the capability lands. For what
