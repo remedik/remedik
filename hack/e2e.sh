@@ -124,6 +124,44 @@ send_labeled_alert() {
 		      \"fingerprint\":\"${fingerprint}\"}]}"
 }
 
+# wait_for_event <reason> <substring> [timeout-seconds]
+#
+# Events are written after the decision they describe, and how long after
+# depends on the cluster's mood. A fixed sleep here is what makes a suite
+# flaky, and a suite people learn to re-run is worth less than no suite.
+wait_for_event() {
+	local reason="$1" want="$2" timeout="${3:-45}" elapsed=0
+	while [ "$elapsed" -lt "$timeout" ]; do
+		if kubectl get events --all-namespaces --field-selector "reason=${reason}" \
+			-o jsonpath='{range .items[*]}{.message}{"\n"}{end}' 2>/dev/null \
+			| grep -q "$want"; then
+			return 0
+		fi
+		sleep 2
+		elapsed=$((elapsed + 2))
+	done
+	return 1
+}
+
+# wait_for_message <strategy> <substring> [timeout-seconds]
+#
+# Waits for any of a strategy's records to carry a status message matching
+# the substring. Used where the expected outcome is a refusal, which has no
+# state of its own to wait for.
+wait_for_message() {
+	local strategy="$1" want="$2" timeout="${3:-45}" elapsed=0
+	while [ "$elapsed" -lt "$timeout" ]; do
+		if kubectl -n "$NAMESPACE" get remediations -l "remedik.dev/strategy=${strategy}" \
+			-o jsonpath='{range .items[*]}{.status.message}{"\n"}{end}' 2>/dev/null \
+			| grep -qi "$want"; then
+			return 0
+		fi
+		sleep 2
+		elapsed=$((elapsed + 2))
+	done
+	return 1
+}
+
 # strategy_field <strategy> <jsonpath-after-.items[0]> -> the value
 strategy_field() {
 	kubectl -n "$NAMESPACE" get remediations -l "remedik.dev/strategy=$1" \
@@ -489,11 +527,10 @@ else
 fi
 
 # The refusal has to be visible where an operator looks first.
-if kubectl get events --all-namespaces --field-selector reason=GuardRejected \
-	-o jsonpath='{range .items[*]}{.message}{"\n"}{end}' 2>/dev/null | grep -q 'guard "cooldown"'; then
+if wait_for_event GuardRejected 'guard "cooldown"' 45; then
 	pass "the refusal is published as an event on the strategy"
 else
-	fail "no GuardRejected event was published"
+	fail "no GuardRejected event was published within 45s"
 fi
 
 # --------------------------------------------------------------------------
@@ -841,12 +878,10 @@ if [ "$(remediation_count)" = "$count_before" ]; then
 else
 	fail "blastRadius let a remediation through"
 fi
-if kubectl get events --all-namespaces --field-selector reason=GuardRejected \
-	-o jsonpath='{range .items[*]}{.message}{"\n"}{end}' 2>/dev/null \
-	| grep -q 'blastRadius'; then
+if wait_for_event GuardRejected blastRadius 45; then
 	pass "the refusal names blastRadius on the strategy"
 else
-	fail "no blastRadius refusal was published"
+	fail "no blastRadius refusal was published within 45s"
 fi
 
 # --- cordon, then put it back ---------------------------------------------
@@ -1018,13 +1053,10 @@ fi
 # api2 has an HPA, so scaling it directly must be refused: two controllers
 # fighting over one replica count is worse than not scaling at all.
 status=$(send_alert E2ENeedsCapacity scale-2 api2)
-sleep 10
-refusal=$(kubectl -n "$NAMESPACE" get remediations -l remedik.dev/strategy=e2e-scale \
-	-o jsonpath='{range .items[*]}{.status.message}{"\n"}{end}' 2>/dev/null | grep -i 'horizontalpodautoscaler' || true)
-if [ -n "$refusal" ]; then
+if wait_for_message e2e-scale horizontalpodautoscaler 60; then
 	pass "scaling a Deployment an HPA owns was refused"
 else
-	fail "scaling under an HPA was not refused"
+	fail "scaling under an HPA was not refused (gateway answered ${status})"
 fi
 
 # --- hpa.scale ------------------------------------------------------------

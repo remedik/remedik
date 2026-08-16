@@ -420,6 +420,12 @@ a proposal.
   page, once for the escalation and once for the single step that already
   said it.
 
+- **Three flaky e2e assertions.** Guard refusals were checked after a fixed
+  eight-second sleep, and events are written after the decision they
+  describe, by however long the cluster feels like. One run in three failed
+  on timing alone. They poll for the condition now — a suite people learn to
+  re-run is worth less than no suite.
+
 ### Changed
 
 - **The chart no longer ships values that do nothing.** `slack`,
