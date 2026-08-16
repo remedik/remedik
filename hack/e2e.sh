@@ -267,6 +267,25 @@ dashboard_status() {
 		"${header[@]}" "http://127.0.0.1:${DASHBOARD_PORT}${path}"
 }
 
+# wait_for_dashboard_body <path> <substring> [timeout-seconds]
+#
+# The pages read through the manager's cache. A page can answer 200 before
+# that cache holds what the page is about — most visibly just after a helm
+# upgrade restarts the pod — so asserting on content the moment the port
+# answers is a race. It fails about one run in five, on a runner, and never
+# here.
+wait_for_dashboard_body() {
+	local path="$1" want="$2" timeout="${3:-45}" elapsed=0
+	while [ "$elapsed" -lt "$timeout" ]; do
+		if dashboard_body "$path" | grep -q "$want"; then
+			return 0
+		fi
+		sleep 2
+		elapsed=$((elapsed + 2))
+	done
+	return 1
+}
+
 # dashboard_body <path> -> the rendered page
 dashboard_body() {
 	curl -s --max-time 10 -H "Authorization: Bearer ${DASHBOARD_TOKEN}" \
@@ -659,6 +678,9 @@ else
 	fail "the stylesheet answered $status, want 200"
 fi
 
+# Same race as the strategies page: wait for the cache rather than asserting
+# on whatever the first request happened to catch.
+wait_for_dashboard_body / "e2e-crashloop" 45 || true
 overview=$(dashboard_body /)
 if echo "$overview" | grep -q "e2e-crashloop"; then
 	pass "the overview lists the executions of the e2e strategy"
@@ -694,6 +716,7 @@ else
 	fail "no simulated remediation to open a detail page for"
 fi
 
+wait_for_dashboard_body /strategies "E2ECrashLooping" 45 || true
 strategies=$(dashboard_body /strategies)
 if echo "$strategies" | grep -q "E2ECrashLooping" && echo "$strategies" | grep -q "30m"; then
 	pass "the strategies page shows the matcher and the cooldown guard"

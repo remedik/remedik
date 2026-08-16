@@ -38,8 +38,12 @@ updates:
     commit-message:
       prefix: "chore(ci)"
     groups:
+      # Minor and patch only. A major bump of an action in release.yml is a
+      # decision about the pipeline that signs and publishes this operator,
+      # and it should arrive on its own with its changelog attached.
       actions:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: docker
     directory: /
@@ -51,3 +55,4 @@ updates:
     groups:
       docker:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
