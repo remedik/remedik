@@ -9,10 +9,14 @@
 #
 #   1. authentication      — an unauthenticated delivery is refused
 #   2. dry-run             — a matching alert records Simulated and touches nothing
-#   3. real remediation    — a matching alert actually restarts the Deployment
+#   3. real remediation    — a matching alert restarts the Deployment, the object
+#                            carries events explaining it, and the record confirms
+#                            the rollout completed
 #   4. cooldown            — an immediate repeat is refused by the guard
 #   5. no match            — an unrelated alert is accepted and ignored
 #   6. restart safety      — the cooldown still holds after the operator restarts
+#   7. dashboard           — every page renders, read-only, and the dry-run
+#                            report names what would have happened
 #
 # Usage:  make e2e            (add KEEP_CLUSTER=1 to inspect afterwards)
 set -euo pipefail
@@ -21,6 +25,8 @@ CLUSTER="${CLUSTER:-remedik-e2e}"
 NAMESPACE="${NAMESPACE:-remedik}"
 IMAGE="${IMAGE:-remedik:e2e}"
 TOKEN="${TOKEN:-e2e-token}"
+DASHBOARD_TOKEN="${DASHBOARD_TOKEN:-e2e-dashboard-token}"
+DASHBOARD_PORT="${DASHBOARD_PORT:-18082}"
 KEEP_CLUSTER="${KEEP_CLUSTER:-0}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -43,13 +49,16 @@ fail()  { printf '    %sFAIL%s %s\n' "$RED" "$RESET" "$*"; FAILED=$((FAILED + 1)
 PASSED=0
 FAILED=0
 PORT_FORWARD_PID=""
+DASHBOARD_FORWARD_PID=""
 
 cleanup() {
 	local exit_code=$?
-	if [ -n "$PORT_FORWARD_PID" ]; then
-		kill "$PORT_FORWARD_PID" 2>/dev/null || true
-		wait "$PORT_FORWARD_PID" 2>/dev/null || true
-	fi
+	for pid in "$PORT_FORWARD_PID" "$DASHBOARD_FORWARD_PID"; do
+		if [ -n "$pid" ]; then
+			kill "$pid" 2>/dev/null || true
+			wait "$pid" 2>/dev/null || true
+		fi
+	done
 	if [ "$exit_code" -ne 0 ] || [ "$FAILED" -ne 0 ]; then
 		step "Diagnostics"
 		kubectl -n "$NAMESPACE" logs deploy/remedik --tail=60 2>/dev/null || true
@@ -142,6 +151,44 @@ start_port_forward() {
 
 remediation_count() {
 	kubectl -n "$NAMESPACE" get remediations --no-headers 2>/dev/null | wc -l | tr -d ' '
+}
+
+# start_dashboard_forward opens the tunnel to the dashboard service.
+start_dashboard_forward() {
+	if [ -n "$DASHBOARD_FORWARD_PID" ]; then
+		kill "$DASHBOARD_FORWARD_PID" 2>/dev/null || true
+		wait "$DASHBOARD_FORWARD_PID" 2>/dev/null || true
+	fi
+	kubectl -n "$NAMESPACE" port-forward svc/remedik-dashboard \
+		"${DASHBOARD_PORT}:${DASHBOARD_PORT}" >/dev/null 2>&1 &
+	DASHBOARD_FORWARD_PID=$!
+	for _ in $(seq 1 30); do
+		curl -s -o /dev/null --max-time 1 "http://127.0.0.1:${DASHBOARD_PORT}/" && return 0
+		sleep 1
+	done
+	echo "the dashboard did not become reachable on 127.0.0.1:${DASHBOARD_PORT}" >&2
+	return 1
+}
+
+# dashboard_status <path> [auth] -> HTTP status
+dashboard_status() {
+	local path="$1" auth="${2:-yes}" header=()
+	[ "$auth" = "yes" ] && header=(-H "Authorization: Bearer ${DASHBOARD_TOKEN}")
+	curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+		"${header[@]}" "http://127.0.0.1:${DASHBOARD_PORT}${path}"
+}
+
+# dashboard_body <path> -> the rendered page
+dashboard_body() {
+	curl -s --max-time 10 -H "Authorization: Bearer ${DASHBOARD_TOKEN}" \
+		"http://127.0.0.1:${DASHBOARD_PORT}$1"
+}
+
+# dashboard_method <method> <path> -> HTTP status
+dashboard_method() {
+	curl -s -o /dev/null -w '%{http_code}' --max-time 10 -X "$1" \
+		-H "Authorization: Bearer ${DASHBOARD_TOKEN}" \
+		"http://127.0.0.1:${DASHBOARD_PORT}$2"
 }
 
 # --------------------------------------------------------------------------
@@ -277,6 +324,45 @@ else
 	fail "the Deployment was never restarted"
 fi
 
+# The explanation has to be where the person is already looking. Somebody
+# investigating a restart runs `kubectl describe deployment`, not
+# `kubectl get remediations` — they do not necessarily know remedik exists.
+if kubectl -n e2e-payments get events --field-selector reason=Remediated \
+	-o jsonpath='{range .items[*]}{.involvedObject.kind}/{.involvedObject.name} {.message}{"\n"}{end}' \
+	2>/dev/null | grep -q '^Deployment/api2'; then
+	pass "the Deployment carries a Remediated event naming what happened"
+else
+	fail "no Remediated event on the Deployment; kubectl describe would explain nothing"
+fi
+
+if kubectl -n e2e-payments get events --field-selector reason=Remediated \
+	-o jsonpath='{range .items[*]}{.message}{"\n"}{end}' 2>/dev/null \
+	| grep -q 'strategy e2e-crashloop'; then
+	pass "the event names the strategy responsible"
+else
+	fail "the event does not name the strategy, so the reader cannot find the manifest"
+fi
+
+# A step that reports the API call succeeded is reporting on the wrong
+# event. What matters is whether the workload came back.
+verified=$(kubectl -n "$NAMESPACE" get remediations \
+	-o jsonpath='{range .items[?(@.status.state=="Succeeded")]}{.status.steps[0].verified}{"\n"}{end}' \
+	2>/dev/null | head -1)
+if echo "$verified" | grep -q 'ready'; then
+	pass "the record confirms the rollout completed: ${verified}"
+else
+	fail "the record does not confirm the rollout; verification did not run"
+fi
+
+kubectl_line=$(kubectl -n "$NAMESPACE" get remediations \
+	-o jsonpath='{range .items[?(@.status.state=="Succeeded")]}{.status.steps[0].kubectl}{"\n"}{end}' \
+	2>/dev/null | head -1)
+if echo "$kubectl_line" | grep -q 'kubectl rollout restart'; then
+	pass "the record carries the equivalent command: ${kubectl_line}"
+else
+	fail "the record carries no kubectl equivalent"
+fi
+
 # --------------------------------------------------------------------------
 # Test 4 — the cooldown guard
 # --------------------------------------------------------------------------
@@ -354,6 +440,121 @@ if [ "$(remediation_count)" = "$count_before" ]; then
 	pass "the cooldown was still in force after the restart"
 else
 	fail "the cooldown was forgotten across the restart"
+fi
+
+# --------------------------------------------------------------------------
+# Test 7 — the read-only dashboard
+#
+# The dashboard is off by default, so enabling it is itself part of the
+# test. What matters here is what unit tests cannot prove: that the pages
+# render from a real cluster's resources, inside the distroless image, with
+# every asset embedded in the binary.
+# --------------------------------------------------------------------------
+step "7. The dashboard renders, reads only, and reports the dry run"
+
+if kubectl -n "$NAMESPACE" get svc remedik-dashboard >/dev/null 2>&1; then
+	fail "the dashboard Service exists before it was enabled"
+else
+	pass "no dashboard is installed by default"
+fi
+
+helm upgrade remedik charts/remedik \
+	--namespace "$NAMESPACE" \
+	--set image.repository="${IMAGE%%:*}" \
+	--set image.tag="${IMAGE##*:}" \
+	--set image.pullPolicy=IfNotPresent \
+	--set gateway.auth.token="$TOKEN" \
+	--set dryRun=false \
+	--set dashboard.enabled=true \
+	--set dashboard.port="$DASHBOARD_PORT" \
+	--set dashboard.auth.token="$DASHBOARD_TOKEN" \
+	--wait --timeout 3m >/dev/null
+kubectl -n "$NAMESPACE" rollout status deploy/remedik --timeout=120s >/dev/null
+start_dashboard_forward
+
+# Read-only is the guarantee that has to hold in a real cluster, not just in
+# a handler test: nothing here can change anything.
+for method in POST PUT PATCH DELETE; do
+	status=$(dashboard_method "$method" /)
+	if [ "$status" = "405" ]; then
+		pass "$method / answered 405"
+	else
+		fail "$method / answered $status, want 405"
+	fi
+done
+
+status=$(dashboard_status / no)
+if [ "$status" = "401" ]; then
+	pass "the dashboard answered 401 without a token"
+else
+	fail "the dashboard answered $status without a token, want 401"
+fi
+
+for path in / /strategies; do
+	status=$(dashboard_status "$path")
+	if [ "$status" = "200" ]; then
+		pass "GET $path rendered"
+	else
+		fail "GET $path answered $status, want 200"
+	fi
+done
+
+# The stylesheet is embedded in the binary. A distroless image with no
+# filesystem to read from is exactly where a missing go:embed would show up.
+status=$(dashboard_status /static/app.css)
+if [ "$status" = "200" ]; then
+	pass "the embedded stylesheet is served"
+else
+	fail "the stylesheet answered $status, want 200"
+fi
+
+overview=$(dashboard_body /)
+if echo "$overview" | grep -q "e2e-crashloop"; then
+	pass "the overview lists the executions of the e2e strategy"
+else
+	fail "the overview does not mention the e2e strategy"
+fi
+
+# Test 2 recorded a Simulated remediation. Whatever the operator's posture is
+# now, that trial has to be reportable — it is the report an operator shows
+# their team before turning dry-run off.
+if echo "$overview" | grep -q "What remedik would have done"; then
+	pass "the dry-run report is on the overview"
+else
+	fail "no dry-run report, although a simulated remediation exists"
+fi
+if echo "$overview" | grep -q "restartedAt"; then
+	pass "the report says what would have been done"
+else
+	fail "the report does not show the plan of the simulated remediation"
+fi
+
+simulated=$(kubectl -n "$NAMESPACE" get remediations \
+	-o jsonpath='{range .items[?(@.status.state=="Simulated")]}{.metadata.name}{"\n"}{end}' \
+	2>/dev/null | head -1)
+if [ -n "$simulated" ]; then
+	detail=$(dashboard_body "/remediations/${simulated}")
+	if echo "$detail" | grep -q "nothing in the cluster was changed"; then
+		pass "the detail page of ${simulated} explains the simulation"
+	else
+		fail "the detail page of ${simulated} does not explain the simulation"
+	fi
+else
+	fail "no simulated remediation to open a detail page for"
+fi
+
+strategies=$(dashboard_body /strategies)
+if echo "$strategies" | grep -q "E2ECrashLooping" && echo "$strategies" | grep -q "30m"; then
+	pass "the strategies page shows the matcher and the cooldown guard"
+else
+	fail "the strategies page is missing the matcher or the guard"
+fi
+
+status=$(dashboard_status /remediations/does-not-exist)
+if [ "$status" = "404" ]; then
+	pass "an unknown remediation answered 404"
+else
+	fail "an unknown remediation answered $status, want 404"
 fi
 
 # --------------------------------------------------------------------------

@@ -72,6 +72,54 @@ helm upgrade remedik ... --set dryRun=false
 
 Guards and the audit trail work identically either way.
 
+### 5. Read the same reports in a browser (optional)
+
+`kubectl describe` answers the question one record at a time. The dashboard
+answers it for the whole trial: how much would have run, over what period,
+broken down by strategy, with the exact plan line each one would have
+executed. It is the version you can show a team.
+
+It is **off by default**, because its pages disclose alert labels,
+namespaces and workload names, and deciding who may see those is your call:
+
+```bash
+helm upgrade remedik ... \
+  --set dashboard.enabled=true \
+  --set dashboard.auth.token="$(openssl rand -hex 24)"
+```
+
+The chart creates a ClusterIP Service and no Ingress. Reach it with a
+port-forward:
+
+```bash
+kubectl -n remedik port-forward svc/remedik-dashboard 8082:8082
+# then open http://127.0.0.1:8082/
+```
+
+Your browser will ask for credentials. **Leave the username empty and paste
+the token as the password** — the username is ignored; there is one
+credential. Scripts and proxies can send it as `Authorization: Bearer
+<token>` instead.
+
+```bash
+kubectl -n remedik get secret remedik-dashboard-token \
+  -o jsonpath='{.data.token}' | base64 -d
+```
+
+Three pages:
+
+- **Overview** — counts by outcome, the dry-run report, and the 50 most
+  recent executions.
+- **A remediation** — the triggering alert and its labels, the plan, each
+  step's outcome, message and timings, the attempt count, and why it ended
+  the way it did.
+- **Strategies** — every strategy with its matchers, guards, steps and last
+  run; disabled ones are marked as such.
+
+Nothing on it changes anything: it serves GET and HEAD, and answers 405 to
+everything else. Enabling it grants remedik no permission it did not already
+have.
+
 ---
 
 ## Work on it
@@ -105,10 +153,12 @@ make e2e                  # throwaway cluster, then cleans up
 KEEP_CLUSTER=1 make e2e    # keep it to inspect afterwards
 ```
 
-It asserts the five behaviours that matter: an unauthenticated delivery is
+It asserts the behaviours that matter: an unauthenticated delivery is
 refused, dry-run records a plan without touching anything, turning dry-run
 off actually restarts the Deployment, the cooldown refuses an immediate
-repeat, and an unmatched alert is accepted and ignored.
+repeat and survives an operator restart, an unmatched alert is accepted and
+ignored, and the dashboard renders every page read-only from the real
+cluster.
 
 ### A cluster to play in
 
@@ -117,6 +167,13 @@ make dev-up       # kind + kube-prometheus-stack (Grafana, Alertmanager)
 make dev-deploy   # build, load and install remedik in dry-run
 make dev-info     # how to reach the UIs
 make dev-down
+```
+
+`make dev-deploy` enables the dashboard with the same `dev-token`:
+
+```bash
+kubectl -n remedik port-forward svc/remedik-dashboard 8082:8082
+# http://127.0.0.1:8082/ — username blank, password dev-token
 ```
 
 Send it an alert by hand:

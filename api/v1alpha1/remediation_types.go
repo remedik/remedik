@@ -196,6 +196,13 @@ type StepStatus struct {
 	// Action is the verb that ran.
 	Action string `json:"action"`
 
+	// Target is the object this step acted on, as "kind/namespace/name".
+	// It is recorded per step because a plan may touch several objects, and
+	// the target on the spec names only the one the guards are scoped by.
+	//
+	// +optional
+	Target string `json:"target,omitempty"`
+
 	// Phase is the step's outcome.
 	Phase StepPhase `json:"phase"`
 
@@ -205,6 +212,28 @@ type StepStatus struct {
 	//
 	// +optional
 	Plan string `json:"plan,omitempty"`
+
+	// Kubectl is the equivalent command a human would have typed. It is
+	// recorded so the change is reviewable by someone who has never read
+	// remedik's source; nothing executes or parses it.
+	//
+	// +optional
+	Kubectl string `json:"kubectl,omitempty"`
+
+	// Outputs are whatever the action specifically knows — replicas before
+	// and after, an exit code, the revision rolled back to. Structured, so
+	// a machine can read them and a person is not made to parse prose.
+	//
+	// +optional
+	Outputs map[string]string `json:"outputs,omitempty"`
+
+	// Verified is what the action's post-condition check found, when it has
+	// one — "3/3 replicas updated, available and ready". Empty means the
+	// action does not check its own work, or the operator was in dry-run,
+	// where nothing was executed to verify.
+	//
+	// +optional
+	Verified string `json:"verified,omitempty"`
 
 	// Message carries the error detail when Phase is Failed.
 	//

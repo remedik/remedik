@@ -32,9 +32,41 @@ type StepRunner struct {
 	// DryRun selects Plan instead of Execute. The mutating path is not
 	// merely skipped by a flag inside the action: it is never called.
 	DryRun bool
+	// Events publishes what a step is doing onto the object it is doing it
+	// to. Optional: nil publishes nothing, which is what the unit tests
+	// want and what a cluster without an event recorder gets.
+	Events StepEvents
 	// Now supplies timestamps; tests inject a fixed clock.
 	Now func() time.Time
 }
+
+// StepEvents announces a step's progress on the object being remediated.
+//
+// It exists so that `kubectl describe deployment payments/api` explains an
+// unexpected restart, without the reader having to already know remedik
+// exists and go looking for its records. Publishing is best-effort by
+// contract: an event that cannot be sent is never a reason to fail a
+// remediation that otherwise worked, so no method returns an error.
+type StepEvents interface {
+	// Starting announces that a step is about to run.
+	Starting(ctx context.Context, target action.Target, actionName string, index int)
+	// Succeeded announces that a step completed, with its summary.
+	Succeeded(ctx context.Context, target action.Target, actionName string, index int, summary string)
+	// Finished announces that a step ended in failure.
+	Finished(ctx context.Context, target action.Target, actionName string, index int, err error)
+}
+
+// NopStepEvents publishes nothing.
+type NopStepEvents struct{}
+
+// Starting implements StepEvents.
+func (NopStepEvents) Starting(context.Context, action.Target, string, int) {}
+
+// Succeeded implements StepEvents.
+func (NopStepEvents) Succeeded(context.Context, action.Target, string, int, string) {}
+
+// Finished implements StepEvents.
+func (NopStepEvents) Finished(context.Context, action.Target, string, int, error) {}
 
 // RunResult is the outcome of one attempt over a plan.
 type RunResult struct {
@@ -101,43 +133,131 @@ func (r *StepRunner) runStep(
 		StartedAt: &started,
 	}
 
-	finish := func(phase v1alpha1.StepPhase, plan, message string) v1alpha1.StepStatus {
+	// record folds an action's Result onto the step. Everything the action
+	// chose to say is kept: the summary leads, the kubectl equivalent makes
+	// it reviewable, and the outputs stay machine-readable.
+	record := func(result action.Result) {
+		status.Plan = result.Summary
+		if result.Kubectl != "" {
+			status.Kubectl = result.Kubectl
+		}
+		for key, value := range result.Outputs {
+			if status.Outputs == nil {
+				status.Outputs = make(map[string]string, len(result.Outputs))
+			}
+			status.Outputs[key] = value
+		}
+	}
+
+	finish := func(phase v1alpha1.StepPhase, message string) v1alpha1.StepStatus {
 		completed := metav1.NewTime(now())
 		status.Phase = phase
-		status.Plan = plan
 		status.Message = message
 		status.CompletedAt = &completed
 		return status
 	}
 
+	fail := func(err error) (v1alpha1.StepStatus, error) {
+		return finish(v1alpha1.StepPhaseFailed, err.Error()), err
+	}
+
 	act, err := r.Registry.Get(step.Action)
 	if err != nil {
-		return finish(v1alpha1.StepPhaseFailed, "", err.Error()), err
+		return fail(err)
 	}
 
 	params := action.Params(step.With)
 
 	target, err := act.Resolve(labels, params)
 	if err != nil {
-		err = fmt.Errorf("resolve target for %s: %w", step.Action, err)
-		return finish(v1alpha1.StepPhaseFailed, "", err.Error()), err
+		return fail(fmt.Errorf("resolve target for %s: %w", step.Action, err))
 	}
+	status.Target = target.String()
 
 	if r.DryRun {
-		plan, planErr := act.Plan(ctx, target, params)
+		planned, planErr := act.Plan(ctx, target, params)
+		record(planned)
 		if planErr != nil {
-			planErr = fmt.Errorf("plan %s on %s: %w", step.Action, target, planErr)
-			return finish(v1alpha1.StepPhaseFailed, "", planErr.Error()), planErr
+			return fail(fmt.Errorf("plan %s on %s: %w", step.Action, target, planErr))
 		}
-		return finish(v1alpha1.StepPhaseSimulated, plan, ""), nil
+		return finish(v1alpha1.StepPhaseSimulated, ""), nil
 	}
 
+	// Announced before the work starts, not after: the event that matters
+	// most is the one explaining a change while it is happening, which is
+	// exactly the minute somebody is looking at the workload wondering what
+	// is restarting it.
+	events := r.events()
+	events.Starting(ctx, target, step.Action, index)
+
 	done, execErr := act.Execute(ctx, target, params)
+	record(done)
 	if execErr != nil {
-		execErr = fmt.Errorf("execute %s on %s: %w", step.Action, target, execErr)
-		return finish(v1alpha1.StepPhaseFailed, "", execErr.Error()), execErr
+		err := fmt.Errorf("execute %s on %s: %w", step.Action, target, execErr)
+		events.Finished(ctx, target, step.Action, index, err)
+		return fail(err)
 	}
-	return finish(v1alpha1.StepPhaseSucceeded, done, ""), nil
+
+	// The action changed something; whether that fixed anything is a
+	// separate question, and one only the action can answer.
+	if err := r.verify(ctx, act, target, params, &status); err != nil {
+		events.Finished(ctx, target, step.Action, index, err)
+		return fail(err)
+	}
+
+	events.Succeeded(ctx, target, step.Action, index, status.Plan)
+	return finish(v1alpha1.StepPhaseSucceeded, ""), nil
+}
+
+// verify runs an action's post-condition check, if it has one.
+//
+// A step whose check fails is a failed step. The alternative — succeeding
+// while recording that verification did not — would add a third outcome the
+// state machine does not have and an operator would have to learn, when the
+// honest reading is simply that the remediation did not work.
+func (r *StepRunner) verify(
+	ctx context.Context,
+	act action.Action,
+	target action.Target,
+	params action.Params,
+	status *v1alpha1.StepStatus,
+) error {
+	verifier, ok := act.(action.Verifier)
+	if !ok {
+		return nil
+	}
+
+	timeout, err := action.VerifyTimeout(params)
+	if err != nil {
+		return fmt.Errorf("verify %s on %s: %w", act.Name(), target, err)
+	}
+
+	verifyCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	result, err := verifier.Verify(verifyCtx, target, params)
+	// The summary is recorded either way: what the check saw is the most
+	// useful thing on the page when it failed, not only when it passed.
+	if result.Summary != "" {
+		status.Verified = result.Summary
+	}
+	for key, value := range result.Outputs {
+		if status.Outputs == nil {
+			status.Outputs = make(map[string]string, len(result.Outputs))
+		}
+		status.Outputs[key] = value
+	}
+	if err != nil {
+		return fmt.Errorf("%s ran on %s but did not take effect: %w", act.Name(), target, err)
+	}
+	return nil
+}
+
+func (r *StepRunner) events() StepEvents {
+	if r.Events == nil {
+		return NopStepEvents{}
+	}
+	return r.Events
 }
 
 func (r *StepRunner) now() time.Time { return time.Now() }

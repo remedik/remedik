@@ -25,6 +25,24 @@ Custom resource definitions are installed from the chart's `crds/`
 directory. Helm installs them on first install but never upgrades or
 deletes them: apply CRD changes yourself when upgrading across versions.
 
+## The dashboard
+
+Off by default. Its pages show alert labels, namespaces and workload names,
+so who may see them is your decision — which is also why the chart creates a
+ClusterIP Service and never an Ingress.
+
+```bash
+helm upgrade remedik ... \
+  --set dashboard.enabled=true \
+  --set dashboard.auth.token="$(openssl rand -hex 24)"
+
+kubectl -n remedik port-forward svc/remedik-dashboard 8082:8082
+```
+
+Open <http://127.0.0.1:8082/>, leave the username empty and paste the token
+as the password. Enabling the dashboard adds no RBAC rule: it reads exactly
+what the operator already reads.
+
 {{ template "chart.valuesSection" . }}
 
 {{ template "chart.maintainersSection" . }}

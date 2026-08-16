@@ -1,0 +1,142 @@
+{{define "content"}}
+
+<div class="page-head">
+  <div>
+    <h1>Strategies</h1>
+    <p class="lede">
+      What remedik is allowed to do, and for which alerts. Strategies are cluster-scoped
+      resources you keep in git; this page only reads them.
+    </p>
+  </div>
+  {{if .Total}}
+  <div class="page-head-badges">
+    <span class="mode mode-live">{{.Enabled}} enabled</span>
+    {{if .Disabled}}<span class="mode mode-off">{{.Disabled}} disabled</span>{{end}}
+  </div>
+  {{end}}
+</div>
+
+{{if .Strategies}}
+<div class="strategy-list">
+  {{range .Strategies}}
+  <article class="card strategy{{if not .Enabled}} is-disabled{{end}}" aria-labelledby="s-{{.Name}}">
+    <header class="strategy-head">
+      <h2 class="card-title mono" id="s-{{.Name}}">{{.Name}}</h2>
+      <div class="strategy-badges">
+        {{if .Enabled}}
+        <span class="pill pill-ok">Enabled</span>
+        {{else}}
+        <span class="pill pill-muted">Disabled</span>
+        {{end}}
+        <span class="pill pill-plain">mode: {{.Mode}}</span>
+      </div>
+    </header>
+
+    {{if not .Enabled}}
+    <p class="callout callout-muted">
+      This strategy never matches an alert. Its history and intent are kept; it simply
+      does not run.
+    </p>
+    {{end}}
+
+    {{if .NotReady}}
+    <p class="callout callout-failed">Not ready &mdash; {{.NotReady}}</p>
+    {{end}}
+
+    <div class="strategy-body">
+      <div class="strategy-col">
+        <h3 class="card-subtitle">Matches alerts where</h3>
+        <ul class="chips">
+          {{range .Matchers}}
+          <li class="chip"><span class="chip-key">{{.Key}}</span><span class="chip-value">{{.Value}}</span></li>
+          {{end}}
+        </ul>
+        <p class="dim hint">All matchers must be equal, exactly. The most specific matching strategy wins.</p>
+      </div>
+
+      <div class="strategy-col">
+        <h3 class="card-subtitle">Guards</h3>
+        {{if .HasGuards}}
+        <dl class="facts facts-tight">
+          {{if .Cooldown}}
+          <dt>Cooldown</dt>
+          <dd><code>{{.Cooldown}}</code> <span class="dim">per target</span></dd>
+          {{end}}
+          {{if .MaxPerHour}}
+          <dt>Max per hour</dt>
+          <dd><code>{{.MaxPerHour}}</code> <span class="dim">per strategy</span></dd>
+          {{end}}
+        </dl>
+        {{else}}
+        <p class="dim">None. Both guards are opt-in, and this strategy sets neither: a
+          matching alert may run it as often as the alert fires.</p>
+        {{end}}
+      </div>
+
+      <div class="strategy-col">
+        <h3 class="card-subtitle">Then run</h3>
+        <ol class="plan-list">
+          {{range .Steps}}
+          <li>
+            <code class="step-action">{{.Action}}</code>
+            {{if .Params}}
+            <ul class="chips chips-sm">
+              {{range .Params}}
+              <li class="chip"><span class="chip-key">{{.Key}}</span><span class="chip-value">{{.Value}}</span></li>
+              {{end}}
+            </ul>
+            {{end}}
+          </li>
+          {{end}}
+        </ol>
+      </div>
+    </div>
+
+    <footer class="strategy-foot">
+      <div class="tallies">
+        <span class="tally"><strong>{{.Runs}}</strong> run{{if ne .Runs 1}}s{{end}}</span>
+        {{if .Succeeded}}<span class="tally tally-ok">{{.Succeeded}} succeeded</span>{{end}}
+        {{if .Failed}}<span class="tally tally-failed">{{.Failed}} failed</span>{{end}}
+        {{if .Simulated}}<span class="tally tally-dryrun">{{.Simulated}} simulated</span>{{end}}
+        <span class="tally dim">
+          {{if .LastRun}}last run <time title="{{.LastRunExact}}">{{.LastRun}} ago</time>{{else}}never run{{end}}
+        </span>
+        <span class="tally dim">created {{.Age}} ago</span>
+      </div>
+
+      {{if .Recent}}
+      <ul class="recent-inline">
+        {{range .Recent}}
+        <li>
+          <a class="row-link" href="{{.URL}}">
+            <span class="pill pill-sm pill-{{.Tone}}">{{.State}}</span>
+            <code class="dim">{{if .Target}}{{.Target}}{{else}}{{.Name}}{{end}}</code>
+            <span class="dim">{{.Age}}</span>
+          </a>
+        </li>
+        {{end}}
+      </ul>
+      {{end}}
+    </footer>
+  </article>
+  {{end}}
+</div>
+
+{{else}}
+<div class="empty">
+  <svg class="empty-mark" viewBox="0 0 48 48" aria-hidden="true" focusable="false">
+    <rect x="9" y="11" width="30" height="26" rx="3" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-dasharray="4 5"/>
+    <path d="M16 20h16M16 26h10" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round"/>
+  </svg>
+  <h3>No strategies in this cluster</h3>
+  <p>
+    Without one, remedik accepts every alert and does nothing with it &mdash; which is
+    the correct behaviour, and also not a very useful one.
+  </p>
+  <pre class="code"><code>kubectl apply -f examples/strategies/pod-crashloop.yaml</code></pre>
+</div>
+{{end}}
+
+{{end}}

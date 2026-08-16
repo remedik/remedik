@@ -1,18 +1,24 @@
 // Package action defines the contract every remediation verb implements,
 // and the registry the engine resolves step names through.
 //
-// The contract has three parts, and the split is what makes dry-run
-// trustworthy rather than aspirational:
+// The contract is split so that dry-run is trustworthy rather than
+// aspirational:
 //
 //	Resolve — work out which object the step acts on, from the alert's
 //	          labels and the step's parameters. No cluster access.
-//	Plan    — describe what Execute would do, in one human-readable line.
-//	          Read-only: dry-run calls Plan and nothing else.
-//	Execute — do it, and return what was done.
+//	Plan    — describe what Execute would do. Read-only: dry-run calls Plan
+//	          and nothing else.
+//	Execute — do it, and report what was done.
+//	Verify  — optional, read-only: did it actually work? Called after
+//	          Execute, never in dry-run. See Verifier.
 //
 // Because dry-run never reaches Execute, a Simulated remediation cannot
 // mutate the cluster even if an action is buggy: the mutating code path is
 // not called at all.
+//
+// Plan, Execute and Verify all report a Result rather than a string, so
+// that an action can say what it specifically knows — a replica count, an
+// exit code, the equivalent kubectl command — without burying it in prose.
 //
 // This package depends on the standard library only. Concrete actions hold
 // whatever client they need, injected when they are constructed.
@@ -24,6 +30,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 // ErrUnknownAction is returned when a step names an action the operator
@@ -81,6 +88,59 @@ func (p Params) Get(key, fallback string) string {
 	return fallback
 }
 
+// Duration returns the value for key parsed as a Go duration, or fallback
+// when unset. An unparseable value is an error rather than a silent
+// fallback: a step that asked for "30" and got the default would be a
+// remediation behaving differently from what its author wrote.
+func (p Params) Duration(key string, fallback time.Duration) (time.Duration, error) {
+	raw := p.Get(key, "")
+	if raw == "" {
+		return fallback, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("parameter %q: %w (want a Go duration such as \"90s\" or \"2m\")", key, err)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("parameter %q: %s is not a positive duration", key, raw)
+	}
+	return d, nil
+}
+
+// Result is what an action reports about one step.
+//
+// It is a struct rather than a longer return signature because the
+// catalogue is going to grow: adding a field here is a compile-safe change
+// for every action that does not set it, and adding a return value is not.
+type Result struct {
+	// Summary is the one human-readable line describing what was done, or
+	// in dry-run what would be done. It is what the record and the
+	// dashboard lead with, so it should read as a sentence and name the
+	// object it acted on.
+	Summary string
+
+	// Kubectl is the equivalent command a human would have typed. It is
+	// never executed and nothing parses it: it exists so that someone who
+	// has never read remedik's source can tell exactly what happened, which
+	// is the cheapest trust an automation can buy.
+	Kubectl string
+
+	// Outputs carries whatever this action specifically knows — replicas
+	// before and after, an exit code, the revision rolled back to. Keeping
+	// it out of Summary means a machine can read it and a person is not
+	// made to parse prose.
+	Outputs map[string]string
+}
+
+// Output records one structured value, allocating the map on first use so
+// that actions do not each have to.
+func (r *Result) Output(key, value string) {
+	if r.Outputs == nil {
+		r.Outputs = make(map[string]string, 4)
+	}
+	r.Outputs[key] = value
+}
+
 // Action is one remediation verb, named "noun.verb" — for example
 // "deployment.restart".
 //
@@ -96,13 +156,57 @@ type Action interface {
 	// error when the alert does not carry enough information.
 	Resolve(labels map[string]string, params Params) (Target, error)
 
-	// Plan returns a one-line description of what Execute would do. It
-	// must not mutate anything; dry-run calls only Plan.
-	Plan(ctx context.Context, target Target, params Params) (string, error)
+	// Plan describes what Execute would do. It must not mutate anything;
+	// dry-run calls only Plan.
+	Plan(ctx context.Context, target Target, params Params) (Result, error)
 
-	// Execute performs the action and returns what it did, in the same
-	// form Plan describes.
-	Execute(ctx context.Context, target Target, params Params) (string, error)
+	// Execute performs the action and reports what it did, in the same form
+	// Plan describes.
+	Execute(ctx context.Context, target Target, params Params) (Result, error)
+}
+
+// Verifier is an action that can check its own work.
+//
+// It is deliberately separate from Action. Some verbs have nothing to
+// verify — a cordon either applied or returned an error — and forcing them
+// to implement a check would produce one that always succeeds, which is
+// worse than no check because it looks like one.
+//
+// The engine calls Verify after Execute and never in dry-run, where nothing
+// was executed for it to verify. A failed Verify fails the step: if the
+// rollout did not complete, the remediation did not work, and the retry
+// budget is the mechanism for trying again.
+type Verifier interface {
+	// Verify reports whether the action achieved what it set out to do. It
+	// must be read-only, and must return within the deadline on ctx: an
+	// attempt runs to completion inside a single reconcile, so a check that
+	// waits forever holds every other remediation behind it.
+	Verify(ctx context.Context, target Target, params Params) (Result, error)
+}
+
+// VerifyTimeoutParam is the step parameter bounding a post-condition check.
+const VerifyTimeoutParam = "verifyTimeout"
+
+// DefaultVerifyTimeout bounds a check that does not set one. It covers a
+// rolling restart of a small workload and is short enough that a stuck
+// check is not mistaken for a stuck operator.
+const DefaultVerifyTimeout = 60 * time.Second
+
+// MaxVerifyTimeout caps what a step may ask for. Executions are serialised,
+// so a long check is time no other remediation can use.
+const MaxVerifyTimeout = 10 * time.Minute
+
+// VerifyTimeout reads the bound for a step's post-condition check.
+func VerifyTimeout(params Params) (time.Duration, error) {
+	d, err := params.Duration(VerifyTimeoutParam, DefaultVerifyTimeout)
+	if err != nil {
+		return 0, err
+	}
+	if d > MaxVerifyTimeout {
+		return 0, fmt.Errorf("parameter %q: %s exceeds the maximum of %s",
+			VerifyTimeoutParam, d, MaxVerifyTimeout)
+	}
+	return d, nil
 }
 
 // Registry resolves action names to implementations. It is read-only after

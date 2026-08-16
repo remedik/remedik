@@ -30,16 +30,16 @@ func (f *fakeAction) Resolve(labels map[string]string, p Params) (Target, error)
 	return Target{Kind: "Deployment", Namespace: labels["namespace"], Name: labels["deployment"]}, nil
 }
 
-func (f *fakeAction) Plan(_ context.Context, t Target, _ Params) (string, error) {
+func (f *fakeAction) Plan(_ context.Context, t Target, _ Params) (Result, error) {
 	f.planned++
 	f.lastPlan = t
-	return f.planValue, f.planErr
+	return Result{Summary: f.planValue}, f.planErr
 }
 
-func (f *fakeAction) Execute(_ context.Context, t Target, _ Params) (string, error) {
+func (f *fakeAction) Execute(_ context.Context, t Target, _ Params) (Result, error) {
 	f.executed++
 	f.lastExec = t
-	return f.planValue, f.execErr
+	return Result{Summary: f.planValue}, f.execErr
 }
 
 func TestTarget_String(t *testing.T) {
@@ -221,7 +221,7 @@ func TestAction_PlanDoesNotExecute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Plan() error = %v", err)
 	}
-	if plan == "" {
+	if plan.Summary == "" {
 		t.Error("Plan() returned an empty description")
 	}
 	if a.executed != 0 {

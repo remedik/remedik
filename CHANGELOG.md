@@ -14,6 +14,65 @@ rather than a proposal.
 
 ### Added
 
+- **A step now reports whether the remediation worked, not just that the API
+  call was accepted** (`add-action-contract-v2`). Actions may implement an
+  optional `Verify`: a read-only post-condition the engine calls after
+  `Execute` and never in dry-run. `deployment.restart` uses it to wait for
+  the rollout to reach the observed generation with every replica updated,
+  available and ready. A rollout that does not finish inside the step's
+  `verifyTimeout` fails the step, and the retry budget applies as it would
+  to any other failure — because a restart that did not fix anything is not
+  a success.
+
+- **The object being remediated now explains itself.** Events are published
+  on the workload — `Remediating` before a step, `Remediated` or
+  `RemediationFailed` after — each naming the Remediation record and the
+  strategy responsible. `kubectl describe deployment payments/api` answers
+  "what restarted this?" without the reader having to know remedik exists.
+  Targets are addressed through the manager's RESTMapper, so actions added
+  later inherit this with nothing to register; an event that cannot be
+  addressed is logged and skipped rather than failing a remediation that
+  worked. No new RBAC: publishing events is a permission the operator
+  already held.
+
+- **Steps record the equivalent kubectl command and structured outputs.**
+  `status.steps[].kubectl` carries the command a human would have typed —
+  recorded, never executed — so a change is reviewable by someone who has
+  never read remedik's source. `status.steps[].outputs` carries what the
+  action specifically knew (replicas, restart timestamp, resource version),
+  and `status.steps[].target` names the object each step acted on, which a
+  multi-step plan needs and the single target on the spec cannot express.
+  The dashboard shows all of it.
+
+- **A read-only dashboard** (`add-readonly-gui`), served by the operator on
+  its own port and **off by default**. Three pages: an overview with counts
+  by outcome and the 50 most recent executions; one page per `Remediation`
+  showing the triggering alert and its labels, the plan, each step's phase,
+  message and timings, the attempt count and why it ended as it did; and the
+  strategy list with matchers, guards, steps and last run, with disabled
+  strategies visibly disabled.
+
+  When dry-run is on, the overview leads with the report an operator shows
+  their team: how many remediations would have run, over what period, across
+  how many targets, broken down by strategy, with the exact plan line each
+  one would have executed.
+
+  Read-only is structural. The handler is built from a `client.Reader`, so
+  it holds no method that writes; GET and HEAD are allowlisted before
+  routing, so anything else is 405 on every path, including ones added
+  later. It adds no RBAC — the pages read what the reconciler already
+  watches, from the manager's cache — and `make helm-lint` fails if the
+  rendered Role or ClusterRole differ by a byte between the dashboard being
+  on and off.
+
+  Pages and the stylesheet are `html/template` and `go:embed`: no npm, no
+  bundler, no second release artifact, and no request to any host outside
+  the cluster, which a test asserts against the embedded files and the
+  rendered output. A content security policy of `default-src 'none'` says
+  the same thing to the browser. The chart exposes a ClusterIP Service and
+  no Ingress; the token is presented either as a bearer header or as the
+  password in the browser's own prompt, because a browser cannot be told to
+  send a bearer header.
 - **The MVP loop works end to end.** An Alertmanager delivery reaches the
   gateway, a strategy matches it, guards decide, the engine executes and
   records the outcome as a `Remediation` resource — installable with

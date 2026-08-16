@@ -57,11 +57,28 @@ or the chart creates one from gateway.auth.token.
 {{- end -}}
 
 {{/*
+Name of the Secret holding the dashboard token.
+
+Either the user points at their own Secret with dashboard.auth.existingSecret,
+or the chart creates one from dashboard.auth.token.
+*/}}
+{{- define "remedik.dashboardTokenSecret" -}}
+{{- if .Values.dashboard.auth.existingSecret -}}
+{{- .Values.dashboard.auth.existingSecret -}}
+{{- else -}}
+{{- printf "%s-dashboard-token" (include "remedik.fullname" .) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Fail early on a configuration that cannot work, with a message that says
 what to do about it.
 */}}
 {{- define "remedik.validateValues" -}}
 {{- if and (not .Values.gateway.auth.disabled) (not .Values.gateway.auth.token) (not .Values.gateway.auth.existingSecret) -}}
 {{- fail "\nremedik: the gateway needs a bearer token so only Alertmanager can submit alerts.\nSet one of:\n  gateway.auth.token=<value>            (the chart creates the Secret)\n  gateway.auth.existingSecret=<name>    (you manage the Secret; key: token)\nTo run without authentication — local development only — set gateway.auth.disabled=true.\n" -}}
+{{- end -}}
+{{- if and .Values.dashboard.enabled (not .Values.dashboard.auth.disabled) (not .Values.dashboard.auth.token) (not .Values.dashboard.auth.existingSecret) -}}
+{{- fail "\nremedik: the dashboard shows alert labels, namespaces and workload names, so it needs a token.\nSet one of:\n  dashboard.auth.token=<value>            (the chart creates the Secret)\n  dashboard.auth.existingSecret=<name>    (you manage the Secret; key: token)\nTo serve it without authentication — local development only — set dashboard.auth.disabled=true.\n" -}}
 {{- end -}}
 {{- end -}}

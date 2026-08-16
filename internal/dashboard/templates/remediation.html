@@ -1,0 +1,164 @@
+{{define "content"}}
+
+<nav class="crumbs" aria-label="Breadcrumb">
+  <a href="/">Overview</a>
+  <span aria-hidden="true">/</span>
+  <span aria-current="page">{{.Name}}</span>
+</nav>
+
+<div class="page-head">
+  <div>
+    <h1 class="mono">{{.Name}}</h1>
+    <p class="lede">
+      Strategy <code>{{.Strategy}}</code>
+      {{if .Target}}&middot; target <code>{{.Target}}</code>{{end}}
+    </p>
+  </div>
+  <div class="page-head-badges">
+    <span class="pill pill-lg pill-{{.Tone}}">{{.State}}</span>
+    {{if .DryRun}}<span class="mode mode-dry">Dry-run</span>{{end}}
+  </div>
+</div>
+
+<p class="callout callout-{{.Tone}}">{{.Summary}}</p>
+
+{{if .ShowRawMessage}}
+<p class="callout callout-muted"><strong>{{.Reason}}</strong> &mdash; {{.Message}}</p>
+{{end}}
+
+<section class="grid-2">
+  <div class="card">
+    <h2 class="card-title">Execution</h2>
+    <dl class="facts">
+      <dt>State</dt>
+      <dd><span class="pill pill-{{.Tone}}">{{.State}}</span></dd>
+
+      {{if .Reason}}
+      <dt>Reason</dt>
+      <dd><code>{{.Reason}}</code></dd>
+      {{end}}
+
+      <dt>Attempt</dt>
+      <dd>{{if .Attempt}}{{.Attempt}} of {{.MaxAttempts}}{{else}}<span class="dim">not started</span>{{end}}</dd>
+
+      <dt>Created</dt>
+      <dd>{{.Created}} <span class="dim">({{.CreatedAge}} ago)</span></dd>
+
+      <dt>Started</dt>
+      <dd>{{if .Started}}{{.Started}}{{else}}<span class="dim">&mdash;</span>{{end}}</dd>
+
+      <dt>Completed</dt>
+      <dd>{{if .Completed}}{{.Completed}}{{else}}<span class="dim">&mdash;</span>{{end}}</dd>
+
+      <dt>Took</dt>
+      <dd>{{if .Duration}}{{.Duration}}{{else}}<span class="dim">&mdash;</span>{{end}}</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2 class="card-title">Triggering alert</h2>
+    <dl class="facts">
+      <dt>Alert</dt>
+      <dd>{{if .Alert.Name}}<strong>{{.Alert.Name}}</strong>{{else}}<span class="dim">unnamed</span>{{end}}</dd>
+
+      <dt>Fingerprint</dt>
+      <dd><code>{{.Alert.Fingerprint}}</code></dd>
+
+      <dt>Firing since</dt>
+      <dd>
+        {{if .Alert.StartsAt}}{{.Alert.StartsAt}} <span class="dim">({{.Alert.StartsAge}} ago)</span>
+        {{else}}<span class="dim">&mdash;</span>{{end}}
+      </dd>
+    </dl>
+
+    {{if .Alert.Labels}}
+    <h3 class="card-subtitle">Labels</h3>
+    <ul class="chips">
+      {{range .Alert.Labels}}
+      <li class="chip"><span class="chip-key">{{.Key}}</span><span class="chip-value">{{.Value}}</span></li>
+      {{end}}
+    </ul>
+    {{else}}
+    <p class="dim">The alert carried no labels.</p>
+    {{end}}
+  </div>
+</section>
+
+<section aria-labelledby="plan-heading">
+  <div class="section-head">
+    <h2 id="plan-heading">{{if .DryRun}}The plan{{else}}Steps{{end}}</h2>
+    <p class="section-meta">
+      {{if .DryRun}}what each step would have done{{else}}in order; execution stops at the first failure{{end}}
+    </p>
+  </div>
+
+  {{if .Steps}}
+  <ol class="steps">
+    {{range .Steps}}
+    <li class="step step-{{.Tone}}">
+      <div class="step-marker" aria-hidden="true"><span>{{.Number}}</span></div>
+      <div class="step-body">
+        <div class="step-head">
+          <code class="step-action">{{.Action}}</code>
+          <span class="pill pill-{{.Tone}}">{{.Phase}}</span>
+          {{if .Target}}<code class="dim step-target">{{.Target}}</code>{{end}}
+          {{if .Duration}}<span class="dim step-timing">{{.Duration}}</span>{{end}}
+        </div>
+
+        {{if .Plan}}<p class="step-plan"><code class="plan">{{.Plan}}</code></p>{{end}}
+
+        {{if .Kubectl}}
+        <p class="step-kubectl" title="The command a human would have typed. remedik records it; it never runs it.">
+          <span class="kubectl-mark" aria-hidden="true">$</span><code>{{.Kubectl}}</code>
+        </p>
+        {{end}}
+
+        {{if .Verified}}
+        <p class="step-verified">
+          <svg viewBox="0 0 16 16" class="icon" aria-hidden="true" focusable="false">
+            <path d="M3.5 8.4 6.3 11l6-6.4" fill="none" stroke="currentColor"
+                  stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>{{.Verified}}</span>
+        </p>
+        {{end}}
+
+        {{if .Message}}<p class="step-message">{{.Message}}</p>{{end}}
+
+        {{if .Outputs}}
+        <ul class="chips chips-sm">
+          {{range .Outputs}}
+          <li class="chip"><span class="chip-key">{{.Key}}</span><span class="chip-value">{{.Value}}</span></li>
+          {{end}}
+        </ul>
+        {{end}}
+
+        {{if .Params}}
+        <ul class="chips chips-sm">
+          {{range .Params}}
+          <li class="chip chip-param"><span class="chip-key">{{.Key}}</span><span class="chip-value">{{.Value}}</span></li>
+          {{end}}
+        </ul>
+        {{end}}
+
+        {{if not .Ran}}
+        <p class="dim step-note">This step has no recorded outcome: it never started.</p>
+        {{end}}
+        {{if .Started}}<p class="dim step-note">started {{.Started}}</p>{{end}}
+      </div>
+    </li>
+    {{end}}
+  </ol>
+  {{else}}
+  <div class="empty">
+    <h3>No steps were recorded</h3>
+    <p>
+      The record carries no plan. That happens when a strategy was created without
+      steps, which the schema does not allow, or when the record was written by an
+      older version of remedik.
+    </p>
+  </div>
+  {{end}}
+</section>
+
+{{end}}

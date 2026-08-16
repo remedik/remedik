@@ -37,6 +37,30 @@ gateway:
     # that can reach the service could then ask remedik to act.
     disabled: false
 
+dashboard:
+  # -- Serve the read-only web dashboard. Off by default: its pages disclose
+  # alert labels, namespaces and workload names, and deciding who may see
+  # those is the cluster owner's call, not the chart's. Enabling it grants
+  # remedik no additional permission — the dashboard reads what the operator
+  # already reads.
+  enabled: false
+  # -- Port the dashboard listens on
+  port: 8082
+  auth:
+    # -- Token required to read the dashboard. The chart creates a Secret
+    # holding it. Present it as a bearer token, or as the password in the
+    # browser's own prompt (the username is ignored). Prefer
+    # `existingSecret` in production so the value is not in your values file.
+    token: ""
+    # -- Name of a Secret you manage that holds the dashboard token
+    existingSecret: ""
+    # -- Key inside the token Secret
+    secretKey: token
+    # -- Serve the dashboard without authentication. Anything that can reach
+    # the port could then read every alert label, namespace and workload
+    # name remedik has recorded.
+    disabled: false
+
 metrics:
   # -- Port the Prometheus metrics endpoint listens on
   port: 8080

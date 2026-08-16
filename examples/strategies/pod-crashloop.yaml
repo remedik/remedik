@@ -24,5 +24,16 @@ spec:
     maxPerHour: 4
   steps:
     - action: deployment.restart
+      with:
+        # How long to wait for the rollout to actually finish before calling
+        # the step failed. Optional; 60s by default, 10m at most.
+        #
+        # This is what makes the record honest: without it a step would
+        # report success the moment the API server accepted the patch, which
+        # says nothing about whether the workload came back.
+        verifyTimeout: 90s
   onFailure:
+    # A restart that did not take effect is a failure, so this retry covers
+    # the rollout that was merely slow as well as the patch that was
+    # rejected.
     retries: 1
