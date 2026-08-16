@@ -81,9 +81,14 @@ what the operator already reads.
 | logLevel | string | `"info"` | Log level: debug, info, warn or error |
 | metrics.port | int | `8080` | Port the Prometheus metrics endpoint listens on |
 | nameOverride | string | `""` | Override the chart name |
+| networkPolicy.dashboardFrom | list | `[]` | Who may reach the read-only dashboard. Empty allows nothing, which is the right default: reach it with `kubectl port-forward`, which the kubelet proxies and a NetworkPolicy does not govern. |
+| networkPolicy.enabled | bool | `false` | Restrict who may reach remedik's ports. Off by default because a policy naming the wrong peers stops Alertmanager silently, and silence is this project's worst failure mode. Ingress only: remedik's one outbound call is to the API server, whose address is specific to your cluster. |
+| networkPolicy.gatewayFrom | list | `[]` | Who may reach the gateway — the port that makes the cluster change itself. Required when the policy is enabled. A list of NetworkPolicy peers, for example:   - namespaceSelector:       matchLabels:         kubernetes.io/metadata.name: monitoring |
+| networkPolicy.metricsFrom | list | `[]` | Who may scrape metrics. Defaults to whoever may reach the gateway, which is right when Alertmanager and Prometheus are the same install. |
 | nodeSelector | object | `{}` | Node selector for the operator pod |
 | packs | object | `{}` | Cloud packs such as `awsNodes` for node replacement — planned for v0.2.0 |
 | podAnnotations | object | `{}` | Extra annotations for the operator pod |
+| priorityClassName | string | `""` | PriorityClass for the operator pod. A single-replica operator evicted under node pressure stops remediating without anyone being told, so on a busy cluster this is worth setting to something like `system-cluster-critical`. |
 | probes.port | int | `8081` | Port the health and readiness probes listen on |
 | prometheusRule.additionalLabels | object | `{}` | Labels the PrometheusRule needs to be selected, as for the ServiceMonitor |
 | prometheusRule.enabled | bool | `false` | Create a PrometheusRule alerting on remedik itself: down, ingest failing, nothing matching, remediations failing, deliveries truncated, unauthenticated attempts. Something that holds write access to a cluster should be watched by the same monitoring it consumes. |

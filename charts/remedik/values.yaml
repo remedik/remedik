@@ -123,6 +123,32 @@ probes:
   # -- Port the health and readiness probes listen on
   port: 8081
 
+networkPolicy:
+  # -- Restrict who may reach remedik's ports. Off by default because a
+  # policy naming the wrong peers stops Alertmanager silently, and silence is
+  # this project's worst failure mode. Ingress only: remedik's one outbound
+  # call is to the API server, whose address is specific to your cluster.
+  enabled: false
+  # -- Who may reach the gateway — the port that makes the cluster change
+  # itself. Required when the policy is enabled. A list of NetworkPolicy
+  # peers, for example:
+  #   - namespaceSelector:
+  #       matchLabels:
+  #         kubernetes.io/metadata.name: monitoring
+  gatewayFrom: []
+  # -- Who may scrape metrics. Defaults to whoever may reach the gateway,
+  # which is right when Alertmanager and Prometheus are the same install.
+  metricsFrom: []
+  # -- Who may reach the read-only dashboard. Empty allows nothing, which is
+  # the right default: reach it with `kubectl port-forward`, which the
+  # kubelet proxies and a NetworkPolicy does not govern.
+  dashboardFrom: []
+
+# -- PriorityClass for the operator pod. A single-replica operator evicted
+# under node pressure stops remediating without anyone being told, so on a
+# busy cluster this is worth setting to something like `system-cluster-critical`.
+priorityClassName: ""
+
 history:
   # -- Terminal Remediation records retained per strategy
   keepPerStrategy: 200

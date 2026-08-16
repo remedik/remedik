@@ -1,0 +1,66 @@
+{{- if .Values.networkPolicy.enabled }}
+{{/*
+Ingress only, and opt-in.
+
+remedik listens on three ports and each has exactly one legitimate caller:
+Alertmanager on the gateway, Prometheus on metrics, and a person on the
+dashboard. Naming them is worth doing, because the gateway is a port that
+makes a cluster change itself, and "anything that can route to the pod" is a
+larger set than anyone means to allow.
+
+Egress is deliberately not restricted here. remedik's only outbound call is
+to the Kubernetes API server, whose address is specific to the cluster; a
+chart that guessed it would produce a policy that works until it does not,
+which is the worst kind. Restricting egress is the cluster owner's job, and
+they know the address.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "remedik.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "remedik.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "remedik.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    # The gateway: the port that makes the cluster change itself.
+    - from:
+        {{- toYaml .Values.networkPolicy.gatewayFrom | nindent 8 }}
+      ports:
+        - port: {{ .Values.gateway.port }}
+          protocol: TCP
+
+    # Metrics. Defaults to whoever may reach the gateway, on the assumption
+    # that Alertmanager and Prometheus are the same installation — which is
+    # true of kube-prometheus-stack and worth overriding when it is not.
+    - from:
+        {{- toYaml (.Values.networkPolicy.metricsFrom | default .Values.networkPolicy.gatewayFrom) | nindent 8 }}
+      ports:
+        - port: {{ .Values.metrics.port }}
+          protocol: TCP
+
+    {{- if .Values.dashboard.enabled }}
+    # The dashboard. With no peers configured this rule allows nothing,
+    # which is the right default for a page that discloses alert labels and
+    # workload names: reach it with `kubectl port-forward`, which the
+    # kubelet proxies and a NetworkPolicy does not govern.
+    - from:
+        {{- toYaml .Values.networkPolicy.dashboardFrom | nindent 8 }}
+      ports:
+        - port: {{ .Values.dashboard.port }}
+          protocol: TCP
+    {{- end }}
+
+    # Health and readiness probes come from the kubelet, which is not a pod
+    # and matches no selector. An empty `from` allows the port from
+    # anywhere; without it, the kubelet's probes fail and the pod is killed
+    # and restarted for ever.
+    - ports:
+        - port: {{ .Values.probes.port }}
+          protocol: TCP
+{{- end }}

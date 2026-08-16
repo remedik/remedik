@@ -30,6 +30,11 @@ spec:
         {{- end }}
     spec:
       serviceAccountName: {{ include "remedik.serviceAccountName" . }}
+      {{- with .Values.priorityClassName }}
+      {{- /* A single-replica operator evicted under node pressure stops
+             remediating, and nothing reports that it has. */}}
+      priorityClassName: {{ . }}
+      {{- end }}
       securityContext:
         runAsNonRoot: true
         seccompProfile:

@@ -14,6 +14,28 @@ rather than a proposal.
 
 ### Added
 
+- **The chart ships the NetworkPolicy SECURITY.md promised.** It named
+  NetworkPolicies as a v0.1.0 commitment and the chart created none, which
+  is the kind of gap that costs more credibility than the feature was worth.
+  It is ingress-only and opt-in, naming who may reach the gateway, metrics
+  and the dashboard — and the chart *refuses to render* one with no peers
+  for the gateway, because that policy would stop Alertmanager silently and
+  silence is this project's worst failure mode. Egress is deliberately not
+  restricted: remedik's one outbound call is to the API server, whose
+  address belongs to the cluster rather than to a chart that would be
+  guessing.
+
+- **`priorityClassName`**, because a single-replica operator evicted under
+  node pressure stops remediating and nothing reports that it has.
+
+- **`make specs`** checks that the spec-first workflow was actually
+  followed: every change carries its reasoning, every capability spec states
+  requirements with scenarios and the word SHALL, nothing is archived with
+  unfinished tasks, and every archived change's capability reached
+  `openspec/specs/`. CONTRIBUTING.md made those claims; now something checks
+  them. Dependency-free on purpose — a gate that only runs where somebody
+  installed a tool is not a gate.
+
 - **remedik can now be monitored** (`add-observability-bundle`). The metrics
   had existed since the MVP and nothing had ever scraped them:
   kube-prometheus-stack discovers `ServiceMonitor` resources, and the chart

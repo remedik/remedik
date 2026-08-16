@@ -25,7 +25,7 @@ HELMDOCS  := $(TOOLS_BIN)/helm-docs
 KIND_CLUSTER := remedik-dev
 
 .PHONY: all build test vet fmt tidy lint yaml-lint yaml-fix helm-lint helm-docs \
-        generate manifests verify verify-codegen tools docker-build e2e \
+        specs generate manifests verify verify-codegen tools docker-build e2e \
         dev-up dev-down dev-info dev-deploy versions clean help
 
 all: verify build
@@ -83,6 +83,14 @@ helm-lint: ## Lint the Helm chart (requires helm)
 		--set dashboard.enabled=true --set dashboard.auth.token=lint >/dev/null
 	helm template remedik charts/remedik --set gateway.auth.token=lint \
 		--set dashboard.enabled=true --set dashboard.auth.disabled=true >/dev/null
+	@# The NetworkPolicy renders with peers, and refuses to render without them.
+	helm template remedik charts/remedik --set gateway.auth.token=lint \
+		--set networkPolicy.enabled=true \
+		--set 'networkPolicy.gatewayFrom[0].namespaceSelector.matchLabels.name=monitoring' >/dev/null
+	@helm template remedik charts/remedik --set gateway.auth.token=lint \
+		--set networkPolicy.enabled=true >/dev/null 2>&1 \
+		&& { echo "the chart rendered a NetworkPolicy that would stop Alertmanager"; exit 1; } \
+		|| echo "chart refuses a NetworkPolicy with no peers, as intended"
 	@# The observability bundle renders on and off.
 	helm template remedik charts/remedik --set gateway.auth.token=lint \
 		--set serviceMonitor.enabled=true --set prometheusRule.enabled=true \
@@ -97,7 +105,10 @@ helm-lint: ## Lint the Helm chart (requires helm)
 helm-docs: $(HELMDOCS) ## Regenerate chart README.md from values.yaml annotations
 	$(HELMDOCS) --chart-search-root charts
 
-verify: fmt vet lint yaml-lint helm-lint test ## Everything CI runs
+verify: fmt vet lint yaml-lint helm-lint specs test ## Everything CI runs
+
+specs: ## Check that the spec-first workflow was followed
+	./hack/openspec-check.sh
 
 verify-codegen: generate manifests ## Fail if generated code or CRDs are stale
 	@git diff --exit-code api/ charts/remedik/crds/ \

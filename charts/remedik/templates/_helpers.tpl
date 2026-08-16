@@ -105,6 +105,9 @@ what to do about it.
 {{- if and (not .Values.gateway.auth.disabled) (not .Values.gateway.auth.token) (not .Values.gateway.auth.existingSecret) -}}
 {{- fail "\nremedik: the gateway needs a bearer token so only Alertmanager can submit alerts.\nSet one of:\n  gateway.auth.token=<value>            (the chart creates the Secret)\n  gateway.auth.existingSecret=<name>    (you manage the Secret; key: token)\nTo run without authentication — local development only — set gateway.auth.disabled=true.\n" -}}
 {{- end -}}
+{{- if and .Values.networkPolicy.enabled (not .Values.networkPolicy.gatewayFrom) -}}
+{{- fail "\nremedik: networkPolicy.enabled is set but networkPolicy.gatewayFrom is empty.\nThat policy would stop Alertmanager reaching the gateway, and nothing would say so:\nremediation would simply stop happening.\nName who may reach it, for example:\n  networkPolicy:\n    gatewayFrom:\n      - namespaceSelector:\n          matchLabels:\n            kubernetes.io/metadata.name: monitoring\n" -}}
+{{- end -}}
 {{- if and .Values.dashboard.enabled (not .Values.dashboard.auth.disabled) (not .Values.dashboard.auth.token) (not .Values.dashboard.auth.existingSecret) -}}
 {{- fail "\nremedik: the dashboard shows alert labels, namespaces and workload names, so it needs a token.\nSet one of:\n  dashboard.auth.token=<value>            (the chart creates the Secret)\n  dashboard.auth.existingSecret=<name>    (you manage the Secret; key: token)\nTo serve it without authentication — local development only — set dashboard.auth.disabled=true.\n" -}}
 {{- end -}}

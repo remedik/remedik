@@ -20,11 +20,18 @@ Pre-release: only the latest `main` is supported.
 - **Release artifacts**: container images signed with cosign, SBOM
   published, SLSA provenance generated in CI.
 - **Runtime**: distroless base, non-root, read-only root filesystem, seccomp
-  profile; NetworkPolicies shipped in the chart (gateway accepts only
-  Alertmanager traffic; the Slack bot only makes outbound connections).
+  profile.
+- **Network**: an opt-in NetworkPolicy in the chart naming who may reach each
+  port — the gateway, metrics and the dashboard. It is opt-in rather than
+  default because a policy naming the wrong peers stops Alertmanager
+  silently, and the chart refuses to render one that would. Ingress only:
+  remedik's single outbound call is to the API server, whose address belongs
+  to your cluster rather than to this chart.
 - **Access**: RBAC generated per enabled feature — never cluster-admin.
-- **Data**: secret values are never logged, never sent to Slack, and never
-  included in LLM context (automatic redaction).
+- **Data**: secret values are never logged, and never included in LLM
+  context. The read-only dashboard shows alert labels, namespaces and
+  workload names, which is why it is off by default, served on a ClusterIP
+  Service with no Ingress, and authenticated.
 - **Dependencies**: scanned in CI (govulncheck) on every PR.
 
 ## Threat model
