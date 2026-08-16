@@ -31,6 +31,7 @@ IMAGE="${IMAGE:-remedik:e2e}"
 TOKEN="${TOKEN:-e2e-token}"
 DASHBOARD_TOKEN="${DASHBOARD_TOKEN:-e2e-dashboard-token}"
 DASHBOARD_PORT="${DASHBOARD_PORT:-18082}"
+METRICS_PORT="${METRICS_PORT:-18080}"
 KEEP_CLUSTER="${KEEP_CLUSTER:-0}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -54,10 +55,11 @@ PASSED=0
 FAILED=0
 PORT_FORWARD_PID=""
 DASHBOARD_FORWARD_PID=""
+METRICS_FORWARD_PID=""
 
 cleanup() {
 	local exit_code=$?
-	for pid in "$PORT_FORWARD_PID" "$DASHBOARD_FORWARD_PID"; do
+	for pid in "$PORT_FORWARD_PID" "$DASHBOARD_FORWARD_PID" "$METRICS_FORWARD_PID"; do
 		if [ -n "$pid" ]; then
 			kill "$pid" 2>/dev/null || true
 			wait "$pid" 2>/dev/null || true
@@ -211,7 +213,12 @@ wait_for_strategy_state() {
 
 # restart_annotation <deployment>
 restart_annotation() {
-	kubectl -n e2e-payments get deploy "$1" \
+	restart_annotation_in e2e-payments "$1"
+}
+
+# restart_annotation_in <namespace> <deployment>
+restart_annotation_in() {
+	kubectl -n "$1" get deploy "$2" \
 		-o jsonpath='{.spec.template.metadata.annotations.kubectl\.kubernetes\.io/restartedAt}' 2>/dev/null || true
 }
 
@@ -611,6 +618,7 @@ helm upgrade remedik charts/remedik \
 	--set dashboard.enabled=true \
 	--set dashboard.port="$DASHBOARD_PORT" \
 	--set dashboard.auth.token="$DASHBOARD_TOKEN" \
+	--set clusterName=e2e-cluster \
 	--wait --timeout 3m >/dev/null
 kubectl -n "$NAMESPACE" rollout status deploy/remedik --timeout=120s >/dev/null
 start_dashboard_forward
@@ -698,6 +706,54 @@ if [ "$status" = "404" ]; then
 	pass "an unknown remediation answered 404"
 else
 	fail "an unknown remediation answered $status, want 404"
+fi
+
+# The cluster's name, which is what tells three port-forwarded dashboards
+# apart. It is in the tab title so it survives being one of twenty tabs.
+if echo "$overview" | grep -q '<title>e2e-cluster'; then
+	pass "the cluster name leads the browser title"
+else
+	fail "the cluster name is not in the title"
+fi
+
+# --- filtering --------------------------------------------------------------
+# The filter is entirely in the URL, which is what makes a narrowed view
+# something somebody can paste into an incident channel. Every record so far
+# targets e2e-payments, so the assertions are about which of them survive.
+filtered=$(dashboard_body "/?namespace=e2e-payments")
+if echo "$filtered" | grep -q 'e2e-payments'; then
+	pass "a namespace filter renders that namespace's records"
+else
+	fail "the namespace filter hid everything in its own namespace"
+fi
+
+empty=$(dashboard_body "/?namespace=no-such-namespace")
+if echo "$empty" | grep -q "Nothing matches this filter"; then
+	pass "a filter that matches nothing says so, rather than looking like an empty cluster"
+else
+	fail "an empty filter result did not explain itself"
+fi
+if echo "$empty" | grep -q "No strategies, so nothing can run"; then
+	fail "an empty filter result claimed the cluster has no strategies"
+else
+	pass "and it does not claim the cluster is unconfigured"
+fi
+
+# An unknown parameter value is honoured, not rejected: a URL pasted from a
+# week-old incident channel must not become an error page.
+status=$(dashboard_status "/?namespace=no-such-namespace&state=Nonsense")
+if [ "$status" = "200" ]; then
+	pass "an unrecognised filter value still renders"
+else
+	fail "an unrecognised filter value answered $status, want 200"
+fi
+
+# Filtering must not become a way in for a write.
+status=$(dashboard_method POST "/?namespace=e2e-payments")
+if [ "$status" = "405" ]; then
+	pass "a filtered URL is still GET-only"
+else
+	fail "POST to a filtered URL answered $status, want 405"
 fi
 
 # --------------------------------------------------------------------------
@@ -1199,6 +1255,124 @@ if wait_for_strategy_state e2e-escalation-fails Failed 120; then
 	fi
 else
 	fail "the second escalating remediation did not reach Failed (gateway answered ${status})"
+fi
+
+
+# --------------------------------------------------------------------------
+# Test 11 — per-namespace posture
+#
+# The combination is the whole feature: act where remediation has been
+# earned, report everywhere else, in one install. One strategy, two
+# namespaces, and the only thing that differs is where the alert points.
+#
+# It cannot be tested without a cluster because the interesting failure is
+# not "the flag was misread" — it is the posture and the record disagreeing,
+# which needs a real resource to disagree on.
+# --------------------------------------------------------------------------
+step "11. Live in one namespace, reporting in another"
+
+helm upgrade remedik charts/remedik \
+	--namespace "$NAMESPACE" \
+	--set image.repository="${IMAGE%%:*}" \
+	--set image.tag="${IMAGE##*:}" \
+	--set image.pullPolicy=IfNotPresent \
+	--set gateway.auth.token="$TOKEN" \
+	--set dryRun=true \
+	--set namespacePosture.e2e-payments=live \
+	--set actions.deploymentRestart.enabled=true \
+	--wait --timeout 3m >/dev/null
+kubectl -n "$NAMESPACE" rollout status deploy/remedik --timeout=120s >/dev/null
+start_port_forward
+
+if kubectl -n "$NAMESPACE" get deploy remedik \
+	-o jsonpath='{.spec.template.spec.containers[0].args}' | grep -q 'namespace-posture=e2e-payments=live'; then
+	pass "the chart passed the override to the operator"
+else
+	fail "the operator was not given the namespace override"
+fi
+
+# send_posture_alert <namespace> <fingerprint> -> HTTP status
+send_posture_alert() {
+	send_labeled_alert E2EPosture "$2" "\"namespace\":\"$1\",\"deployment\":\"api\""
+}
+
+# The default is dry-run, and this namespace is not overridden.
+before_reporting=$(restart_annotation_in e2e-reporting api)
+status=$(send_posture_alert e2e-reporting posture-1)
+if [ "$status" = "200" ]; then
+	pass "gateway accepted the alert for the reporting namespace"
+else
+	fail "gateway answered $status"
+fi
+
+if wait_for_strategy_state e2e-posture Simulated 90; then
+	pass "the un-overridden namespace was simulated, as the default says"
+	if [ "$(restart_annotation_in e2e-reporting api)" = "$before_reporting" ]; then
+		pass "and nothing in it was actually restarted"
+	else
+		fail "a simulated remediation restarted the deployment"
+	fi
+else
+	fail "the reporting namespace did not produce a Simulated record"
+fi
+
+# The same strategy, the same alert name, a namespace that was made live.
+before_payments=$(restart_annotation_in e2e-payments api)
+status=$(send_posture_alert e2e-payments posture-2)
+if wait_for_strategy_state e2e-posture Succeeded 120; then
+	pass "the live namespace acted although the default is dry-run"
+	after_payments=$(restart_annotation_in e2e-payments api)
+	if [ -n "$after_payments" ] && [ "$after_payments" != "$before_payments" ]; then
+		pass "and the deployment really was restarted: ${after_payments}"
+	else
+		fail "the record says Succeeded but nothing was restarted"
+	fi
+else
+	fail "the live namespace did not act (gateway answered ${status})"
+fi
+
+# Each record carries the posture it ran under, so neither needs the values
+# file to be explained.
+simulated_flag=$(kubectl -n "$NAMESPACE" get remediations -l remedik.dev/strategy=e2e-posture \
+	-o jsonpath='{range .items[?(@.status.state=="Simulated")]}{.spec.dryRun}{end}' 2>/dev/null || true)
+live_flag=$(kubectl -n "$NAMESPACE" get remediations -l remedik.dev/strategy=e2e-posture \
+	-o jsonpath='{range .items[?(@.status.state=="Succeeded")]}{.spec.dryRun}{end}' 2>/dev/null || true)
+if [ "$simulated_flag" = "true" ] && [ "$live_flag" = "false" ]; then
+	pass "each record states which posture it ran under, false included"
+else
+	fail "the records do not carry their posture (simulated=${simulated_flag}, live=${live_flag})"
+fi
+
+# And the operator says so where somebody would look for it.
+if kubectl -n "$NAMESPACE" logs deploy/remedik --tail=200 2>/dev/null | grep -q 'posture is mixed'; then
+	pass "the operator warns that the default does not describe the cluster"
+else
+	fail "no mixed-posture warning was logged"
+fi
+
+# Port-forwarded from the host rather than probed from a pod: pulling a curl
+# image would need registry access this cluster does not have.
+kubectl -n "$NAMESPACE" port-forward svc/remedik-metrics "${METRICS_PORT}:8080" >/dev/null 2>&1 &
+METRICS_FORWARD_PID=$!
+metrics_body=""
+for _ in $(seq 1 20); do
+	metrics_body=$(curl -s --max-time 2 "http://127.0.0.1:${METRICS_PORT}/metrics" || true)
+	[ -n "$metrics_body" ] && break
+	sleep 1
+done
+kill "$METRICS_FORWARD_PID" 2>/dev/null || true
+wait "$METRICS_FORWARD_PID" 2>/dev/null || true
+METRICS_FORWARD_PID=""
+
+if echo "$metrics_body" | grep -q 'remedik_namespace_posture{namespace="e2e-payments",posture="live"} 1'; then
+	pass "the override is a metric, so the posture is queryable"
+else
+	fail "remedik_namespace_posture does not report the override"
+fi
+if echo "$metrics_body" | grep -q '^remedik_dry_run 1'; then
+	pass "and remedik_dry_run still reports the default, which is 1"
+else
+	fail "remedik_dry_run does not report the default"
 fi
 
 # --------------------------------------------------------------------------

@@ -263,3 +263,16 @@ spec:
           header: Authorization
           headerPrefix: "Bearer "
           timeout: 20s
+---
+# Test 11 — per-namespace posture. One strategy, matched by both namespaces,
+# so the only thing that can differ is where the alert points.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: e2e-posture
+spec:
+  trigger:
+    match:
+      alertname: E2EPosture
+  steps:
+    - action: deployment.restart
