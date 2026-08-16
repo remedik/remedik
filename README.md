@@ -94,6 +94,7 @@ the record still explains the run after the strategy is edited or deleted.
 | [docs/adr/](docs/adr/) | Why things are the way they are |
 | [SECURITY.md](SECURITY.md) | Security policy and commitments |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Spec-first workflow |
+| [CLAUDE.md](CLAUDE.md) | Orientation for AI assistants working on the repo |
 
 ## Roadmap
 
