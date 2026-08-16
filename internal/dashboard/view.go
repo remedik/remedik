@@ -183,6 +183,7 @@ type AlertView struct {
 type StepView struct {
 	Number   int
 	Action   string
+	Target   string
 	Phase    string
 	Tone     string
 	Plan     string
@@ -190,6 +191,16 @@ type StepView struct {
 	Params   []Label
 	Started  string
 	Duration string
+	// Kubectl is the equivalent command a human would have typed. Shown so
+	// that the change is reviewable by someone who has never read remedik's
+	// source — which is most of the people who will read this page.
+	Kubectl string
+	// Outputs are what the action specifically knew: replicas, an exit
+	// code, a revision.
+	Outputs []Label
+	// Verified is what the action's own post-condition check found. Empty
+	// means the action does not check its work, or this was a dry run.
+	Verified string
 	// Ran reports whether this step has a recorded outcome. A step with
 	// none never started, which is a different thing from one that was
 	// skipped after an earlier failure.
@@ -509,9 +520,13 @@ func buildSteps(rem *v1alpha1.Remediation) []StepView {
 			if st.Action != "" {
 				view.Action = st.Action
 			}
+			view.Target = st.Target
 			view.Phase = string(st.Phase)
 			view.Plan = st.Plan
 			view.Message = st.Message
+			view.Kubectl = st.Kubectl
+			view.Outputs = sortedLabels(st.Outputs)
+			view.Verified = st.Verified
 			view.Started = FormatTimestampOf(st.StartedAt)
 			view.Duration = FormatSpan(st.StartedAt, st.CompletedAt)
 		}

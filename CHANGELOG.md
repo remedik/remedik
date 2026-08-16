@@ -14,6 +14,36 @@ rather than a proposal.
 
 ### Added
 
+- **A step now reports whether the remediation worked, not just that the API
+  call was accepted** (`add-action-contract-v2`). Actions may implement an
+  optional `Verify`: a read-only post-condition the engine calls after
+  `Execute` and never in dry-run. `deployment.restart` uses it to wait for
+  the rollout to reach the observed generation with every replica updated,
+  available and ready. A rollout that does not finish inside the step's
+  `verifyTimeout` fails the step, and the retry budget applies as it would
+  to any other failure — because a restart that did not fix anything is not
+  a success.
+
+- **The object being remediated now explains itself.** Events are published
+  on the workload — `Remediating` before a step, `Remediated` or
+  `RemediationFailed` after — each naming the Remediation record and the
+  strategy responsible. `kubectl describe deployment payments/api` answers
+  "what restarted this?" without the reader having to know remedik exists.
+  Targets are addressed through the manager's RESTMapper, so actions added
+  later inherit this with nothing to register; an event that cannot be
+  addressed is logged and skipped rather than failing a remediation that
+  worked. No new RBAC: publishing events is a permission the operator
+  already held.
+
+- **Steps record the equivalent kubectl command and structured outputs.**
+  `status.steps[].kubectl` carries the command a human would have typed —
+  recorded, never executed — so a change is reviewable by someone who has
+  never read remedik's source. `status.steps[].outputs` carries what the
+  action specifically knew (replicas, restart timestamp, resource version),
+  and `status.steps[].target` names the object each step acted on, which a
+  multi-step plan needs and the single target on the spec cannot express.
+  The dashboard shows all of it.
+
 - **A read-only dashboard** (`add-readonly-gui`), served by the operator on
   its own port and **off by default**. Three pages: an overview with counts
   by outcome and the 50 most recent executions; one page per `Remediation`

@@ -9,7 +9,9 @@
 #
 #   1. authentication      — an unauthenticated delivery is refused
 #   2. dry-run             — a matching alert records Simulated and touches nothing
-#   3. real remediation    — a matching alert actually restarts the Deployment
+#   3. real remediation    — a matching alert restarts the Deployment, the object
+#                            carries events explaining it, and the record confirms
+#                            the rollout completed
 #   4. cooldown            — an immediate repeat is refused by the guard
 #   5. no match            — an unrelated alert is accepted and ignored
 #   6. restart safety      — the cooldown still holds after the operator restarts
@@ -320,6 +322,45 @@ if [ -n "$(restart_annotation api2)" ]; then
 	pass "the Deployment was restarted: $(restart_annotation api2)"
 else
 	fail "the Deployment was never restarted"
+fi
+
+# The explanation has to be where the person is already looking. Somebody
+# investigating a restart runs `kubectl describe deployment`, not
+# `kubectl get remediations` — they do not necessarily know remedik exists.
+if kubectl -n e2e-payments get events --field-selector reason=Remediated \
+	-o jsonpath='{range .items[*]}{.involvedObject.kind}/{.involvedObject.name} {.message}{"\n"}{end}' \
+	2>/dev/null | grep -q '^Deployment/api2'; then
+	pass "the Deployment carries a Remediated event naming what happened"
+else
+	fail "no Remediated event on the Deployment; kubectl describe would explain nothing"
+fi
+
+if kubectl -n e2e-payments get events --field-selector reason=Remediated \
+	-o jsonpath='{range .items[*]}{.message}{"\n"}{end}' 2>/dev/null \
+	| grep -q 'strategy e2e-crashloop'; then
+	pass "the event names the strategy responsible"
+else
+	fail "the event does not name the strategy, so the reader cannot find the manifest"
+fi
+
+# A step that reports the API call succeeded is reporting on the wrong
+# event. What matters is whether the workload came back.
+verified=$(kubectl -n "$NAMESPACE" get remediations \
+	-o jsonpath='{range .items[?(@.status.state=="Succeeded")]}{.status.steps[0].verified}{"\n"}{end}' \
+	2>/dev/null | head -1)
+if echo "$verified" | grep -q 'ready'; then
+	pass "the record confirms the rollout completed: ${verified}"
+else
+	fail "the record does not confirm the rollout; verification did not run"
+fi
+
+kubectl_line=$(kubectl -n "$NAMESPACE" get remediations \
+	-o jsonpath='{range .items[?(@.status.state=="Succeeded")]}{.status.steps[0].kubectl}{"\n"}{end}' \
+	2>/dev/null | head -1)
+if echo "$kubectl_line" | grep -q 'kubectl rollout restart'; then
+	pass "the record carries the equivalent command: ${kubectl_line}"
+else
+	fail "the record carries no kubectl equivalent"
 fi
 
 # --------------------------------------------------------------------------

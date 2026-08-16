@@ -66,8 +66,11 @@ func simulatedRemediation(name, target string, minutesAgo int) v1alpha1.Remediat
 			Steps: []v1alpha1.StepStatus{{
 				Index:       0,
 				Action:      "deployment.restart",
+				Target:      target,
 				Phase:       v1alpha1.StepPhaseSimulated,
 				Plan:        "patch deployment " + target + " restartedAt annotation",
+				Kubectl:     "kubectl rollout restart deployment/api -n payments",
+				Outputs:     map[string]string{"replicas": "3"},
 				StartedAt:   ptr(at(minutesAgo)),
 				CompletedAt: ptr(at(minutesAgo)),
 			}},
@@ -84,6 +87,7 @@ func succeededRemediation(name string, minutesAgo int) v1alpha1.Remediation {
 	rem.Status.State = v1alpha1.RemediationStateSucceeded
 	rem.Status.Steps[0].Phase = v1alpha1.StepPhaseSucceeded
 	rem.Status.Steps[0].Plan = "restarted deployment checkout/web"
+	rem.Status.Steps[0].Verified = "3/3 replicas updated, available and ready"
 	return rem
 }
 
@@ -117,8 +121,10 @@ func failedRemediation(name string, minutesAgo int) v1alpha1.Remediation {
 			Steps: []v1alpha1.StepStatus{
 				{
 					Index: 0, Action: "deployment.restart",
-					Phase: v1alpha1.StepPhaseSucceeded,
-					Plan:  "restarted deployment payments/api",
+					Target:  "deployment/payments/api",
+					Phase:   v1alpha1.StepPhaseSucceeded,
+					Plan:    "restarted deployment payments/api",
+					Kubectl: "kubectl rollout restart deployment/api -n payments",
 				},
 				{
 					Index: 1, Action: "deployment.restart",

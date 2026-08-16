@@ -1026,6 +1026,55 @@ main.wrap {
   font-size: 0.78rem;
 }
 
+.step-target {
+  font-size: 0.78rem;
+}
+
+/* The command a human would have typed. Set as a terminal line, because
+   that is what it is — and because it is the one thing on this page a
+   reader can check against their own knowledge. */
+.step-kubectl {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin: 9px 0 0;
+  padding: 8px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.79rem;
+  overflow-x: auto;
+}
+
+.kubectl-mark {
+  color: var(--text-3);
+  font-family: var(--mono);
+  user-select: none;
+}
+
+.step-kubectl code {
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.step-verified {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 9px 0 0;
+  color: var(--ok);
+  font-size: 0.82rem;
+  font-weight: 520;
+}
+
+.step-failed .step-verified {
+  color: var(--failed);
+}
+
+.chip-param {
+  border-style: dashed;
+}
+
 .step-body .chips {
   margin-top: 9px;
 }

@@ -382,6 +382,25 @@ func TestRemediationDetailExplainsAFailure(t *testing.T) {
 	mustContain(t, body, "restarted deployment payments/api", "show the step that did work")
 }
 
+func TestRemediationDetailShowsHowTheChangeWasMade(t *testing.T) {
+	h, _ := newHandler(t, Config{Reader: &fakeReader{
+		remediations: []v1alpha1.Remediation{succeededRemediation("ok-1", 5)},
+	}})
+
+	body := get(t, h, "/remediations/ok-1", nil).Body.String()
+
+	// The command a human would have typed is the one thing on this page a
+	// reader can check against what they already know.
+	mustContain(t, body, "kubectl rollout restart deployment/api -n payments",
+		"show the equivalent command")
+	// A step that ran but did not fix anything is not a success, so the
+	// check's finding belongs next to the step.
+	mustContain(t, body, "3/3 replicas updated, available and ready",
+		"show what the post-condition check confirmed")
+	mustContain(t, body, "deployment/checkout/web", "name the object the step acted on")
+	mustContain(t, body, "replicas", "show the action's structured outputs")
+}
+
 func TestRemediationDetailShowsASimulatedPlan(t *testing.T) {
 	h, _ := newHandler(t, Config{Reader: &fakeReader{
 		remediations: []v1alpha1.Remediation{

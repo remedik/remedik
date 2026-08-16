@@ -101,17 +101,42 @@
         <div class="step-head">
           <code class="step-action">{{.Action}}</code>
           <span class="pill pill-{{.Tone}}">{{.Phase}}</span>
+          {{if .Target}}<code class="dim step-target">{{.Target}}</code>{{end}}
           {{if .Duration}}<span class="dim step-timing">{{.Duration}}</span>{{end}}
         </div>
 
         {{if .Plan}}<p class="step-plan"><code class="plan">{{.Plan}}</code></p>{{end}}
 
+        {{if .Kubectl}}
+        <p class="step-kubectl" title="The command a human would have typed. remedik records it; it never runs it.">
+          <span class="kubectl-mark" aria-hidden="true">$</span><code>{{.Kubectl}}</code>
+        </p>
+        {{end}}
+
+        {{if .Verified}}
+        <p class="step-verified">
+          <svg viewBox="0 0 16 16" class="icon" aria-hidden="true" focusable="false">
+            <path d="M3.5 8.4 6.3 11l6-6.4" fill="none" stroke="currentColor"
+                  stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>{{.Verified}}</span>
+        </p>
+        {{end}}
+
         {{if .Message}}<p class="step-message">{{.Message}}</p>{{end}}
+
+        {{if .Outputs}}
+        <ul class="chips chips-sm">
+          {{range .Outputs}}
+          <li class="chip"><span class="chip-key">{{.Key}}</span><span class="chip-value">{{.Value}}</span></li>
+          {{end}}
+        </ul>
+        {{end}}
 
         {{if .Params}}
         <ul class="chips chips-sm">
           {{range .Params}}
-          <li class="chip"><span class="chip-key">{{.Key}}</span><span class="chip-value">{{.Value}}</span></li>
+          <li class="chip chip-param"><span class="chip-key">{{.Key}}</span><span class="chip-value">{{.Value}}</span></li>
           {{end}}
         </ul>
         {{end}}

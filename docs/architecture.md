@@ -96,6 +96,54 @@ Guard state (recent completions, hourly counts) is held in memory and
 rebuilt from the `Remediation` resources at startup. A guard that evaporated
 on restart would be worse than no guard, because it is one people rely on.
 
+## The action contract
+
+Every remediation verb implements the same four-part contract, and the split
+is what makes dry-run a guarantee rather than a convention:
+
+| Part | Cluster access | Called when |
+| --- | --- | --- |
+| `Resolve` | none | always — works out the object from the alert's labels |
+| `Plan` | read-only | always; **the only mutating-adjacent call dry-run makes** |
+| `Execute` | writes | never in dry-run |
+| `Verify` | read-only | after `Execute`, never in dry-run. Optional |
+
+`Verify` is why a step can say whether the remediation *worked* rather than
+whether the API call was accepted. `deployment.restart` waits for the
+rollout to reach the observed generation with every replica updated,
+available and ready, and a rollout that does not finish inside the step's
+`verifyTimeout` (60s by default, 10m maximum) fails the step — the retry
+budget then applies as it would to any other failure. Actions with nothing
+to verify, such as a cordon, simply do not implement it: a check that always
+passes is worse than no check, because it looks like one.
+
+Each call reports a `Result` rather than a string, so what ends up on the
+record is:
+
+- the **summary** — one line naming the object and what happened to it;
+- the **kubectl equivalent** — the command a human would have typed, recorded
+  and never executed, so the change is reviewable by someone who has never
+  read this source;
+- **structured outputs** — replicas before and after, an exit code, a
+  revision. Machine-readable, so nobody has to parse prose.
+
+### Where the explanation appears
+
+Three places, deliberately, because people look in three places:
+
+- **On the object.** Events are published on the workload being remediated —
+  `Remediating` before the step, `Remediated` or `RemediationFailed` after —
+  each naming the Remediation record and the strategy responsible. Someone
+  running `kubectl describe deployment payments/api` after an unexplained
+  restart gets an answer without needing to know remedik exists. Targets are
+  addressed through the manager's RESTMapper, so every action added later
+  gets this with no table to update; an event that cannot be addressed is
+  logged and skipped, never a reason to fail a remediation that worked.
+- **On the strategy.** Guard rejections, which answer "why did nothing
+  happen?".
+- **On the `Remediation` record**, and therefore on the dashboard: the full
+  per-step trail.
+
 ## Extensibility ladder
 
 1. Compose YAML from built-in actions (the cookbook). **[shipped]**
