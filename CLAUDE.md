@@ -14,8 +14,9 @@ decide, the engine executes, and the outcome is a `Remediation` resource.
 
 This repository explains itself. Read these before proposing changes:
 
-- **`openspec/specs/`** — the current behaviour contract, five capabilities.
-  This is authoritative; code that disagrees with it is a bug in one of them.
+- **`openspec/specs/`** — the current behaviour contract, eleven
+  capabilities. This is authoritative; code that disagrees with it is a bug
+  in one of them. `make specs` checks the workflow was followed.
 - **`openspec/changes/archive/`** — what was proposed and why, including the
   reasoning that did not make it into the code.
 - **`docs/adr/`** — structural decisions and the arguments behind them.
@@ -45,12 +46,17 @@ This repository explains itself. Read these before proposing changes:
 6. **The gateway answers 200 to anything it understood**, including "no
    strategy matched". Alertmanager retries non-2xx, so a normal outcome must
    not look like a failure.
-7. **The dashboard never writes.** It is built from a `client.Reader` and
+7. **An action's authority is named, never inherited.** A remediation Job
+   runs as the ServiceAccount its step names — never remedik's, which is
+   refused — and Secrets and ConfigMaps are read from remedik's own
+   namespace only. A label on an alert must never decide which credential is
+   used, or whose code runs.
+8. **The dashboard never writes.** It is built from a `client.Reader` and
    allowlists GET and HEAD before routing. Both layers are deliberate: one
    makes a write impossible to call, the other makes it impossible to
    reach. An approve button needs the identity model the Slack change
    introduces, so that the audit trail records *who* asked.
-8. **English everywhere** in the repository: code, comments, docs, commits.
+9. **English everywhere** in the repository: code, comments, docs, commits.
 
 ## Workflow
 
@@ -68,7 +74,8 @@ updated. For anything touching cluster behaviour, `make e2e` too.
 ## Commands
 
 ```bash
-make verify        # gofmt, vet, golangci-lint, yamllint, helm lint, race tests
+make verify        # gofmt, vet, golangci-lint, yamllint, helm lint, specs, race tests
+make specs         # the spec-first workflow was actually followed
 make e2e           # throwaway kind cluster, the whole loop, then cleanup
 make generate manifests   # after changing api/ — CI fails on stale output
 make versions      # pinned versions vs. latest upstream
@@ -87,6 +94,7 @@ internal/action/     The Resolve/Plan/Execute contract + registry
 internal/engine/     Sink (alert → record) and the reconciler
 internal/metrics/    Prometheus adapters behind the Recorder interfaces
 internal/dashboard/  Read-only web UI; templates and CSS embedded in the binary
+internal/action/external/  webhook.call, job.run, script.run — the widest trust surface
 charts/remedik/      Helm chart; RBAC assembled from enabled actions
 hack/e2e.sh          The end-to-end test
 ```
@@ -96,7 +104,22 @@ most are the ones that must be easiest to test. Keep them that way.
 
 ## Open work
 
-Nothing is open. `add-readonly-gui` was implemented and archived on
-2026-08-16; the next things on the roadmap are the Slack bot with approval
-buttons (which brings the identity model), the `job` and `script` actions,
-and audit sinks.
+Nothing is open. Six changes were implemented and archived on 2026-08-16:
+the read-only dashboard, the action contract's second version, the workload
+actions, the observability bundle, launch readiness, and the escape hatches.
+
+Next, in the order the risk says they should land:
+
+1. **`blastRadius` guard** — `cooldown` and `maxPerHour` cannot express
+   "never more than 20% of a workload's pods" or "never the last healthy
+   replica". It must land **before** the node actions, not after: shipping
+   destructive verbs before the guard that bounds them is the one sequencing
+   mistake here that would be hard to walk back.
+2. **Node actions** — `node.cordon`, `node.drain`, `node.uncordon`,
+   `pvc.expand`. Highest risk in the catalogue; `node.drain` must evict
+   through the Eviction API and honour PodDisruptionBudgets, and a drain
+   that cannot finish inside its timeout is a failure, not a partial
+   success.
+3. **Slack bot with approval** — brings the identity model that makes
+   `mode: approval` auditable, which is what the *careful* tier of actions
+   is waiting for.

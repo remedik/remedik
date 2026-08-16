@@ -23,10 +23,20 @@ rules:
   - apiGroups: ["remedik.dev"]
     resources: ["remediationstrategies/status"]
     verbs: ["get", "update", "patch"]
-  # Guard rejections are published as events on the strategy. Strategies are
-  # cluster-scoped, and Kubernetes files events for a cluster-scoped object
-  # in the default namespace, so this permission cannot be narrowed to the
-  # release namespace.
+  # Events explain remedik where people look: guard rejections on the
+  # strategy, and each step's progress on the object being remediated. Both
+  # land in namespaces remedik does not own — a strategy is cluster-scoped,
+  # so its events go to `default`, and a remediated workload lives wherever
+  # the alert said — so this cannot be narrowed to the release namespace.
+  #
+  # Two API groups, and it is not redundancy: the events.k8s.io group is the
+  # current API and the core one is what older tooling still reads. remedik
+  # writes through events.k8s.io; the core rule stays because Kubernetes
+  # mirrors between them and dropping it silently loses events for anything
+  # still watching the old group.
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
+    verbs: ["create", "patch"]
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch"]
