@@ -83,6 +83,9 @@ deploymentRestart: deployment.restart
 workloadRestart: workload.restart
 podDelete: pod.delete
 jobDelete: job.delete
+webhookCall: webhook.call
+jobRun: job.run
+scriptRun: script.run
 {{- end -}}
 
 {{- define "remedik.enabledActions" -}}

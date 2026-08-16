@@ -19,6 +19,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/ratyx/remedik/api/v1alpha1"
 	"github.com/ratyx/remedik/internal/action"
+	"github.com/ratyx/remedik/internal/action/external"
 	"github.com/ratyx/remedik/internal/action/workload"
 	"github.com/ratyx/remedik/internal/dashboard"
 	"github.com/ratyx/remedik/internal/engine"
@@ -50,23 +52,29 @@ const (
 	// in. The chart sets it from the pod's own namespace.
 	namespaceEnvVar = "REMEDIK_NAMESPACE"
 
+	// serviceAccountEnvVar is remedik's own ServiceAccount, which a
+	// remediation Job is refused if it asks to run as. The chart sets it
+	// from the pod's own spec.
+	serviceAccountEnvVar = "REMEDIK_SERVICE_ACCOUNT"
+
 	// historyPruneInterval is how often the in-memory guard history drops
 	// records older than its retention.
 	historyPruneInterval = 5 * time.Minute
 )
 
 type options struct {
-	metricsAddr   string
-	probeAddr     string
-	gatewayAddr   string
-	gatewayPath   string
-	dashboardAddr string
-	actions       []string
-	namespace     string
-	dryRun        bool
-	historyLimit  int
-	logLevel      string
-	showVersion   bool
+	metricsAddr    string
+	probeAddr      string
+	gatewayAddr    string
+	gatewayPath    string
+	dashboardAddr  string
+	actions        []string
+	serviceAccount string
+	namespace      string
+	dryRun         bool
+	historyLimit   int
+	logLevel       string
+	showVersion    bool
 }
 
 func main() {
@@ -120,6 +128,9 @@ func parseFlags() options {
 			"disabled action is reported as not ready rather than failing mid-incident")
 	flag.StringVar(&opts.namespace, "namespace", os.Getenv(namespaceEnvVar),
 		"namespace Remediation resources are created in")
+	flag.StringVar(&opts.serviceAccount, "service-account", os.Getenv(serviceAccountEnvVar),
+		"remedik's own ServiceAccount. Remediation Jobs are refused if they ask to run as it, "+
+			"so that a strategy author cannot inherit the operator's permissions by writing one word")
 	flag.BoolVar(&opts.dryRun, "dry-run", true,
 		"evaluate and record what would happen without changing anything")
 	flag.IntVar(&opts.historyLimit, "history-limit", engine.DefaultHistoryLimit,
@@ -196,7 +207,20 @@ func run(logger *slog.Logger, opts options) error {
 		return fmt.Errorf("create direct client: %w", err)
 	}
 
-	registry, err := buildRegistry(directClient, opts.actions)
+	// A clientset alongside the controller-runtime client: pod logs are a
+	// subresource the latter does not model, and the tail of what a
+	// remediation Job printed is most of that action's value.
+	clientset, err := kubernetes.NewForConfig(restConfig)
+	if err != nil {
+		return fmt.Errorf("create clientset: %w", err)
+	}
+
+	registry, err := buildRegistry(registryDeps{
+		client:         directClient,
+		logs:           external.NewPodLogs(clientset),
+		namespace:      opts.namespace,
+		serviceAccount: opts.serviceAccount,
+	}, opts.actions)
 	if err != nil {
 		return fmt.Errorf("build action registry: %w", err)
 	}
@@ -337,12 +361,23 @@ func postureFrom(s *engine.Snapshotter) metrics.SnapshotFunc {
 // failing during the incident it was written for. That is why the chart
 // passes exactly the actions it granted permissions for — the two lists
 // disagreeing is a misconfiguration worth finding on a Tuesday.
-func buildRegistry(c client.Client, enabled []string) (*action.Registry, error) {
+type registryDeps struct {
+	client         client.Client
+	logs           *external.PodLogs
+	namespace      string
+	serviceAccount string
+}
+
+func buildRegistry(deps registryDeps, enabled []string) (*action.Registry, error) {
+	c := deps.client
 	available := []action.Action{
 		workload.NewDeploymentRestart(c, time.Now),
 		workload.NewWorkloadRestart(c, time.Now),
 		workload.NewPodDelete(c),
 		workload.NewJobDelete(c),
+		external.NewWebhookCall(c, deps.namespace),
+		external.NewJobRun(c, deps.logs, deps.serviceAccount, time.Now),
+		external.NewScriptRun(c, deps.logs, deps.serviceAccount, time.Now),
 	}
 
 	if len(enabled) == 0 {

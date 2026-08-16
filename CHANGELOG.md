@@ -14,6 +14,34 @@ rather than a proposal.
 
 ### Added
 
+- **Three escape hatches** (`add-escape-hatches`), because four built-in
+  verbs will never cover what people need at 3am and "remedik cannot do X"
+  is a reason not to install it at all:
+
+  - **`webhook.call`** — POSTs the alert, the strategy and the plan to a URL,
+    optionally authenticated from a Secret in remedik's own namespace. A
+    response outside 2xx fails the step, with the body on the record: a
+    pipeline that answered 500 did not run, and a Succeeded record beside it
+    would be a lie the audit trail tells for ever. The credential never
+    reaches the record or the recorded command.
+  - **`job.run`** — runs an image as a Job **in remedik's own namespace**,
+    under a ServiceAccount the step names. Never remedik's own, which is
+    refused explicitly; the default is `default`, which can do nothing, so
+    forgetting produces a Job that cannot act rather than one that can do
+    everything the operator can. The command is a JSON array, so no quoting
+    rules are invented. Verification waits for the Job and records its exit
+    code and the tail of its output.
+  - **`script.run`** — the same with the script mounted from a ConfigMap in
+    remedik's namespace, so a runbook can be edited with kubectl. Read from
+    that namespace only: anywhere else and anyone with write access to any
+    namespace could have code executed by the operator.
+
+- **`action.Request`** replaces the widening parameter list on `Plan`,
+  `Execute` and `Verify`. It carries the alert's labels and the identity of
+  the remediation and strategy, which a verb handing the incident to
+  something outside the cluster cannot work without — a gap that was
+  invisible while every action restarted something it had already resolved.
+
 - **The chart ships the NetworkPolicy SECURITY.md promised.** It named
   NetworkPolicies as a v0.1.0 commitment and the chart created none, which
   is the kind of gap that costs more credibility than the feature was worth.

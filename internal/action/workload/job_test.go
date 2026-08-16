@@ -141,7 +141,7 @@ func TestJobDelete_Resolve(t *testing.T) {
 func TestJobDelete_DeletesWithItsPods(t *testing.T) {
 	a, c := jobDeleter(failedJob("nightly-billing-28471", 3))
 
-	result, err := a.Execute(context.Background(), jobTarget, nil)
+	result, err := a.Execute(context.Background(), action.Request{Target: jobTarget, Params: nil})
 	if err != nil {
 		t.Fatalf("Execute() error = %v, want nil", err)
 	}
@@ -169,10 +169,10 @@ func TestJobDelete_RejectsAnUnknownPropagationPolicy(t *testing.T) {
 		run  func() (action.Result, error)
 	}{
 		{"Plan", func() (action.Result, error) {
-			return a.Plan(context.Background(), jobTarget, action.Params{PropagationParam: "Whenever"})
+			return a.Plan(context.Background(), action.Request{Target: jobTarget, Params: action.Params{PropagationParam: "Whenever"}})
 		}},
 		{"Execute", func() (action.Result, error) {
-			return a.Execute(context.Background(), jobTarget, action.Params{PropagationParam: "Whenever"})
+			return a.Execute(context.Background(), action.Request{Target: jobTarget, Params: action.Params{PropagationParam: "Whenever"}})
 		}},
 	} {
 		t.Run(call.name, func(t *testing.T) {
@@ -194,7 +194,7 @@ func TestJobDelete_VerifyWaitsForTheJobToGo(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	result, err := a.Verify(ctx, jobTarget, nil, action.Result{})
+	result, err := a.Verify(ctx, action.Request{Target: jobTarget, Params: nil}, action.Result{})
 	if err != nil {
 		t.Fatalf("Verify() error = %v, want nil", err)
 	}
@@ -213,7 +213,7 @@ func TestJobDelete_VerifyFailsWhenTheJobLingers(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
 
-	if _, err := a.Verify(ctx, jobTarget, nil, action.Result{}); err == nil {
+	if _, err := a.Verify(ctx, action.Request{Target: jobTarget, Params: nil}, action.Result{}); err == nil {
 		t.Fatal("Verify() error = nil; a Job held by a finalizer has not gone")
 	}
 }
@@ -223,7 +223,7 @@ func TestJobDelete_MissingJob(t *testing.T) {
 
 	// Reporting success for deleting something that was not there would put
 	// a Succeeded record next to a CronJob that still has not run.
-	if _, err := a.Execute(context.Background(), jobTarget, nil); err == nil ||
+	if _, err := a.Execute(context.Background(), action.Request{Target: jobTarget, Params: nil}); err == nil ||
 		!strings.Contains(err.Error(), "does not exist") {
 		t.Errorf("error = %v, want a not-found error", err)
 	}

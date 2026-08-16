@@ -65,6 +65,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            - name: REMEDIK_SERVICE_ACCOUNT
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.serviceAccountName
             {{- if not .Values.gateway.auth.disabled }}
             - name: REMEDIK_GATEWAY_TOKEN
               valueFrom:

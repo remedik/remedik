@@ -31,11 +31,11 @@ rules:
     resources: ["events"]
     verbs: ["create", "patch"]
 {{- $catalogue := .Files.Get "action-rbac.yaml" | fromYaml }}
-{{- range $action, $rules := $catalogue }}
+{{- range $action, $scopes := $catalogue }}
 {{- $config := index $.Values.actions $action | default dict }}
-{{- if $config.enabled }}
+{{- if and $config.enabled $scopes.cluster }}
   # action: {{ $action }} — see action-rbac.yaml for why these verbs
-  {{- toYaml $rules | nindent 2 }}
+  {{- toYaml $scopes.cluster | nindent 2 }}
 {{- end }}
 {{- end }}
 ---
@@ -72,6 +72,14 @@ rules:
   - apiGroups: ["remedik.dev"]
     resources: ["remediations/status"]
     verbs: ["get", "update", "patch"]
+{{- $catalogue := .Files.Get "action-rbac.yaml" | fromYaml }}
+{{- range $action, $scopes := $catalogue }}
+{{- $config := index $.Values.actions $action | default dict }}
+{{- if and $config.enabled $scopes.namespaced }}
+  # action: {{ $action }} — namespaced deliberately; see action-rbac.yaml
+  {{- toYaml $scopes.namespaced | nindent 2 }}
+{{- end }}
+{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

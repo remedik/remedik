@@ -9,7 +9,11 @@
 # should widen an action's permissions to make their strategy work; if an
 # action needs a verb it does not have, that is a change to the action.
 #
-# One key per action, matching the key under `actions:` in values.yaml.
+# One key per action, matching the key under `actions:` in values.yaml, and
+# under it either `cluster:` or `namespaced:` — the first goes into the
+# ClusterRole, the second into the Role scoped to the release namespace.
+# Which one an action uses is itself a statement about its reach.
+#
 # Every rule carries a comment saying what needs it, because a reviewer's
 # question is never "which verbs?" but "why these?".
 
@@ -20,17 +24,19 @@
 # patches it. It needs no list or watch because it uses a direct client
 # rather than a cache, and no delete because it never removes pods.
 deploymentRestart:
-  - apiGroups: ["apps"]
-    resources: ["deployments"]
-    verbs: ["get", "patch"]
+  cluster:
+    - apiGroups: ["apps"]
+      resources: ["deployments"]
+      verbs: ["get", "patch"]
 
 # workload.restart — the same patch, for the three workload kinds. Enabling
 # it grants patch on all three; a cluster that only wants Deployments
 # restarted should enable deployment.restart instead and get only that.
 workloadRestart:
-  - apiGroups: ["apps"]
-    resources: ["deployments", "statefulsets", "daemonsets"]
-    verbs: ["get", "patch"]
+  cluster:
+    - apiGroups: ["apps"]
+      resources: ["deployments", "statefulsets", "daemonsets"]
+      verbs: ["get", "patch"]
 
 # pod.delete — evicts one pod through the Eviction API.
 #
@@ -39,17 +45,67 @@ workloadRestart:
 # delete a pod outright, only ask for an eviction that a PodDisruptionBudget
 # is allowed to refuse.
 podDelete:
-  - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["get"]
-  - apiGroups: [""]
-    resources: ["pods/eviction"]
-    verbs: ["create"]
+  cluster:
+    - apiGroups: [""]
+      resources: ["pods"]
+      verbs: ["get"]
+    - apiGroups: [""]
+      resources: ["pods/eviction"]
+      verbs: ["create"]
 
 # job.delete — removes a failed Job so its CronJob makes a clean one. The
 # pods go with it through the deletion's propagation policy, so no
 # permission on pods is needed here.
 jobDelete:
-  - apiGroups: ["batch"]
-    resources: ["jobs"]
-    verbs: ["get", "delete"]
+  cluster:
+    - apiGroups: ["batch"]
+      resources: ["jobs"]
+      verbs: ["get", "delete"]
+
+# webhook.call — reads one Secret to authenticate the call, from remedik's
+# own namespace only. Namespaced deliberately: reading a credential from the
+# namespace an alert names would let a label decide which token remedik
+# hands to an endpoint.
+webhookCall:
+  namespaced:
+    - apiGroups: [""]
+      resources: ["secrets"]
+      verbs: ["get"]
+
+# job.run — creates a Job in remedik's own namespace and reads its result.
+#
+# Namespaced, so a strategy cannot reach into another team's namespace. The
+# Job's own authority comes from the ServiceAccount the step names, not from
+# these rules: remedik can start the container, and what the container may
+# do is a decision somebody made when they created that ServiceAccount.
+jobRun:
+  namespaced:
+    - apiGroups: ["batch"]
+      resources: ["jobs"]
+      verbs: ["create", "get", "list", "delete"]
+    - apiGroups: [""]
+      resources: ["pods"]
+      verbs: ["get", "list"]
+    - apiGroups: [""]
+      resources: ["pods/log"]
+      verbs: ["get"]
+
+# script.run — job.run, plus reading the ConfigMap holding the script.
+#
+# From remedik's own namespace only. Reading a script from anywhere else
+# would mean anyone with write access to any namespace could get code
+# executed by the operator: a privilege escalation dressed up as a feature.
+scriptRun:
+  namespaced:
+    - apiGroups: ["batch"]
+      resources: ["jobs"]
+      verbs: ["create", "get", "list", "delete"]
+    - apiGroups: [""]
+      resources: ["pods"]
+      verbs: ["get", "list"]
+    - apiGroups: [""]
+      resources: ["pods/log"]
+      verbs: ["get"]
+    - apiGroups: [""]
+      resources: ["configmaps"]
+      verbs: ["get"]

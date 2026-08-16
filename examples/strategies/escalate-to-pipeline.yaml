@@ -1,0 +1,37 @@
+# Hand the incident to something else, rather than remediating it here.
+#
+# `webhook.call` is the answer to every alert whose fix lives outside the
+# cluster: an Azure DevOps pipeline, a GitHub Actions workflow, an AWX job,
+# an internal service. remedik does the matching, the guards and the audit;
+# somebody else does the work, under their own controls.
+#
+# Nothing about the response is trusted beyond its status code: anything
+# outside 2xx fails the step, and the body is recorded so the failure
+# explains itself.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: escalate-node-to-pipeline
+spec:
+  enabled: true
+  trigger:
+    match:
+      alertname: KubeNodeNotReady
+  guards:
+    # Replacing a node is somebody else's slow, expensive operation. Do not
+    # queue a second one while the first is still running.
+    cooldown: 30m
+    maxPerHour: 2
+  steps:
+    - action: webhook.call
+      with:
+        url: https://dev.azure.com/example/_apis/pipelines/42/runs?api-version=7.0
+        # The token comes from a Secret in remedik's own namespace, so an
+        # alert's labels cannot decide which credential is used.
+        secretRef: azure-devops-token
+        secretKey: pat
+        header: Authorization
+        headerPrefix: "Basic "
+        timeout: 30s
+  onFailure:
+    retries: 1

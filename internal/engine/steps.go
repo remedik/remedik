@@ -29,6 +29,12 @@ import (
 type StepRunner struct {
 	// Registry resolves action names to implementations.
 	Registry *action.Registry
+	// Remediation, Strategy and Namespace identify the record this run
+	// belongs to, so an action can tell something outside the cluster where
+	// the work came from.
+	Remediation string
+	Strategy    string
+	Namespace   string
 	// DryRun selects Plan instead of Execute. The mutating path is not
 	// merely skipped by a flag inside the action: it is never called.
 	DryRun bool
@@ -172,10 +178,24 @@ func (r *StepRunner) runStep(
 	if err != nil {
 		return fail(fmt.Errorf("resolve target for %s: %w", step.Action, err))
 	}
-	status.Target = target.String()
+	// An action that acts on nothing in the cluster resolves to no target;
+	// recording "/" for it would be a value nobody can look up.
+	if !target.IsZero() {
+		status.Target = target.String()
+	}
+
+	req := action.Request{
+		Target:      target,
+		Params:      params,
+		Labels:      labels,
+		Remediation: r.Remediation,
+		Strategy:    r.Strategy,
+		Namespace:   r.Namespace,
+		DryRun:      r.DryRun,
+	}
 
 	if r.DryRun {
-		planned, planErr := act.Plan(ctx, target, params)
+		planned, planErr := act.Plan(ctx, req)
 		record(planned)
 		if planErr != nil {
 			return fail(fmt.Errorf("plan %s on %s: %w", step.Action, target, planErr))
@@ -190,7 +210,7 @@ func (r *StepRunner) runStep(
 	events := r.events()
 	events.Starting(ctx, target, step.Action, index)
 
-	done, execErr := act.Execute(ctx, target, params)
+	done, execErr := act.Execute(ctx, req)
 	record(done)
 	if execErr != nil {
 		err := fmt.Errorf("execute %s on %s: %w", step.Action, target, execErr)
@@ -200,7 +220,7 @@ func (r *StepRunner) runStep(
 
 	// The action changed something; whether that fixed anything is a
 	// separate question, and one only the action can answer.
-	if err := r.verify(ctx, act, target, params, done, &status); err != nil {
+	if err := r.verify(ctx, act, req, done, &status); err != nil {
 		events.Finished(ctx, target, step.Action, index, err)
 		return fail(err)
 	}
@@ -218,8 +238,7 @@ func (r *StepRunner) runStep(
 func (r *StepRunner) verify(
 	ctx context.Context,
 	act action.Action,
-	target action.Target,
-	params action.Params,
+	req action.Request,
 	executed action.Result,
 	status *v1alpha1.StepStatus,
 ) error {
@@ -228,15 +247,15 @@ func (r *StepRunner) verify(
 		return nil
 	}
 
-	timeout, err := action.VerifyTimeout(params)
+	timeout, err := action.VerifyTimeout(req.Params)
 	if err != nil {
-		return fmt.Errorf("verify %s on %s: %w", act.Name(), target, err)
+		return fmt.Errorf("verify %s on %s: %w", act.Name(), req.Target, err)
 	}
 
 	verifyCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	result, err := verifier.Verify(verifyCtx, target, params, executed)
+	result, err := verifier.Verify(verifyCtx, req, executed)
 	// The summary is recorded either way: what the check saw is the most
 	// useful thing on the page when it failed, not only when it passed.
 	if result.Summary != "" {
@@ -249,7 +268,7 @@ func (r *StepRunner) verify(
 		status.Outputs[key] = value
 	}
 	if err != nil {
-		return fmt.Errorf("%s ran on %s but did not take effect: %w", act.Name(), target, err)
+		return fmt.Errorf("%s ran on %s but did not take effect: %w", act.Name(), req.Target, err)
 	}
 	return nil
 }

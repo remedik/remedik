@@ -133,10 +133,13 @@ func (r *RemediationReconciler) runAttempt(
 	}
 
 	runner := &StepRunner{
-		Registry: r.Registry,
-		DryRun:   rem.Spec.DryRun || r.DryRun,
-		Events:   r.stepEvents(rem),
-		Now:      r.Now,
+		Registry:    r.Registry,
+		Remediation: rem.Name,
+		Strategy:    rem.Spec.StrategyName,
+		Namespace:   rem.Namespace,
+		DryRun:      rem.Spec.DryRun || r.DryRun,
+		Events:      r.stepEvents(rem),
+		Now:         r.Now,
 	}
 	result := runner.Run(ctx, rem.Spec.Alert.Labels, rem.Spec.Steps)
 	rem.Status.Steps = result.Steps

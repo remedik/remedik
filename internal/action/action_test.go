@@ -30,15 +30,15 @@ func (f *fakeAction) Resolve(labels map[string]string, p Params) (Target, error)
 	return Target{Kind: "Deployment", Namespace: labels["namespace"], Name: labels["deployment"]}, nil
 }
 
-func (f *fakeAction) Plan(_ context.Context, t Target, _ Params) (Result, error) {
+func (f *fakeAction) Plan(_ context.Context, req Request) (Result, error) {
 	f.planned++
-	f.lastPlan = t
+	f.lastPlan = req.Target
 	return Result{Summary: f.planValue}, f.planErr
 }
 
-func (f *fakeAction) Execute(_ context.Context, t Target, _ Params) (Result, error) {
+func (f *fakeAction) Execute(_ context.Context, req Request) (Result, error) {
 	f.executed++
-	f.lastExec = t
+	f.lastExec = req.Target
 	return Result{Summary: f.planValue}, f.execErr
 }
 
@@ -217,7 +217,7 @@ func TestAction_PlanDoesNotExecute(t *testing.T) {
 		t.Fatalf("Resolve() error = %v", err)
 	}
 
-	plan, err := a.Plan(context.Background(), target, nil)
+	plan, err := a.Plan(context.Background(), Request{Target: target})
 	if err != nil {
 		t.Fatalf("Plan() error = %v", err)
 	}

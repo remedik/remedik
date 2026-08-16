@@ -69,7 +69,8 @@ func (a *JobDelete) Resolve(labels map[string]string, params action.Params) (act
 
 // Plan reports what Execute would do, and reads the Job so a dry run
 // surfaces one that has already gone.
-func (a *JobDelete) Plan(ctx context.Context, target action.Target, params action.Params) (action.Result, error) {
+func (a *JobDelete) Plan(ctx context.Context, req action.Request) (action.Result, error) {
+	target, params := req.Target, req.Params
 	job, err := a.fetch(ctx, target)
 	if err != nil {
 		return action.Result{}, err
@@ -90,7 +91,8 @@ func (a *JobDelete) Plan(ctx context.Context, target action.Target, params actio
 }
 
 // Execute deletes the Job.
-func (a *JobDelete) Execute(ctx context.Context, target action.Target, params action.Params) (action.Result, error) {
+func (a *JobDelete) Execute(ctx context.Context, req action.Request) (action.Result, error) {
+	target, params := req.Target, req.Params
 	job, err := a.fetch(ctx, target)
 	if err != nil {
 		return action.Result{}, err
@@ -128,8 +130,9 @@ func (a *JobDelete) Execute(ctx context.Context, target action.Target, params ac
 // when it has finished; a Job with a finalizer, or with pods that will not
 // terminate, can outlive the call by a long way.
 func (a *JobDelete) Verify(
-	ctx context.Context, target action.Target, _ action.Params, _ action.Result,
+	ctx context.Context, req action.Request, _ action.Result,
 ) (action.Result, error) {
+	target := req.Target
 	ctx, cancel := action.WithVerifyDeadline(ctx)
 	defer cancel()
 

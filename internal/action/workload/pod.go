@@ -69,7 +69,8 @@ func (a *PodDelete) Resolve(labels map[string]string, params action.Params) (act
 // Plan reports what Execute would do, and performs every check Execute
 // performs, so that a dry run surfaces a pod that could not be evicted
 // rather than promising one that could not work.
-func (a *PodDelete) Plan(ctx context.Context, target action.Target, params action.Params) (action.Result, error) {
+func (a *PodDelete) Plan(ctx context.Context, req action.Request) (action.Result, error) {
+	target, params := req.Target, req.Params
 	pod, err := a.fetch(ctx, target)
 	if err != nil {
 		return action.Result{}, err
@@ -92,7 +93,8 @@ func (a *PodDelete) Plan(ctx context.Context, target action.Target, params actio
 }
 
 // Execute evicts the pod.
-func (a *PodDelete) Execute(ctx context.Context, target action.Target, params action.Params) (action.Result, error) {
+func (a *PodDelete) Execute(ctx context.Context, req action.Request) (action.Result, error) {
+	target, params := req.Target, req.Params
 	pod, err := a.fetch(ctx, target)
 	if err != nil {
 		return action.Result{}, err
@@ -150,8 +152,9 @@ func (a *PodDelete) Execute(ctx context.Context, target action.Target, params ac
 // replacement keeps the name, and the UID Execute recorded is the only
 // thing that tells it apart from the one still terminating.
 func (a *PodDelete) Verify(
-	ctx context.Context, target action.Target, _ action.Params, executed action.Result,
+	ctx context.Context, req action.Request, executed action.Result,
 ) (action.Result, error) {
+	target := req.Target
 	ctx, cancel := action.WithVerifyDeadline(ctx)
 	defer cancel()
 

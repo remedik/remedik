@@ -47,7 +47,7 @@ render() {
 # --------------------------------------------------------------------------
 render >"$WORK/none.yaml"
 
-for forbidden in deployments statefulsets daemonsets pods jobs; do
+for forbidden in deployments statefulsets daemonsets pods jobs secrets configmaps pods/log; do
 	if grep -q -- "- $forbidden\$" "$WORK/none.yaml"; then
 		fail "with every action disabled, the ClusterRole still grants '$forbidden'"
 	fi
@@ -75,6 +75,9 @@ check_action deploymentRestart deployments
 check_action workloadRestart statefulsets
 check_action podDelete pods/eviction
 check_action jobDelete jobs
+check_action webhookCall secrets
+check_action jobRun pods/log
+check_action scriptRun configmaps
 
 # --------------------------------------------------------------------------
 # 3. The dashboard changes nothing

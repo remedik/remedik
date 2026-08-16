@@ -232,7 +232,7 @@ func TestWorkloadRestart_PatchesEveryKind(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			a := NewWorkloadRestart(tc.client, func() time.Time { return fixedClock })
 
-			planned, err := a.Plan(context.Background(), tc.target, nil)
+			planned, err := a.Plan(context.Background(), action.Request{Target: tc.target, Params: nil})
 			if err != nil {
 				t.Fatalf("Plan() error = %v", err)
 			}
@@ -246,7 +246,7 @@ func TestWorkloadRestart_PatchesEveryKind(t *testing.T) {
 				t.Errorf("Plan patched the cluster %d times", tc.client.patches)
 			}
 
-			if _, err := a.Execute(context.Background(), tc.target, nil); err != nil {
+			if _, err := a.Execute(context.Background(), action.Request{Target: tc.target, Params: nil}); err != nil {
 				t.Fatalf("Execute() error = %v", err)
 			}
 			if tc.client.patches != 1 {
@@ -260,7 +260,7 @@ func TestWorkloadRestart_PatchesEveryKind(t *testing.T) {
 			// reader does not have to learn three vocabularies.
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			verified, err := a.Verify(ctx, tc.target, nil, action.Result{})
+			verified, err := a.Verify(ctx, action.Request{Target: tc.target, Params: nil}, action.Result{})
 			if err != nil {
 				t.Fatalf("Verify() error = %v", err)
 			}

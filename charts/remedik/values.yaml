@@ -179,6 +179,27 @@ actions:
     # -- Enable `job.delete`: deletes a failed Job, and its pods with it, so
     # the CronJob that owns it creates a clean run.
     enabled: false
+  webhookCall:
+    # -- Enable `webhook.call`: POSTs the alert, the strategy and the plan to
+    # a URL you configure, optionally with a token from a Secret in remedik's
+    # namespace. The cheapest way to reach a pipeline remedik will never
+    # implement, and it moves the blast radius outside the cluster.
+    enabled: false
+  jobRun:
+    # -- Enable `job.run`: runs a container image as a Job in remedik's own
+    # namespace, with the alert's labels as environment variables. The Job
+    # runs under a ServiceAccount your strategy names — never remedik's,
+    # which is refused — so its authority is granted deliberately rather than
+    # inherited. This is the widest action in the catalogue; enable it when
+    # you have decided which ServiceAccount it may use.
+    enabled: false
+  scriptRun:
+    # -- Enable `script.run`: `job.run` with the script taken from a ConfigMap
+    # in remedik's namespace, so a runbook can be edited without rebuilding an
+    # image. The ConfigMap is read from remedik's namespace only: reading one
+    # from anywhere else would let anyone with write access to any namespace
+    # get code executed by the operator.
+    enabled: false
 
 serviceAccount:
   # -- Create a ServiceAccount for the operator

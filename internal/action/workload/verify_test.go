@@ -117,7 +117,7 @@ func TestDeploymentRestart_VerifyWaitsForTheRollout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	result, err := a.Verify(ctx, target, nil, action.Result{})
+	result, err := a.Verify(ctx, action.Request{Target: target, Params: nil}, action.Result{})
 	if err != nil {
 		t.Fatalf("Verify() error = %v, want nil", err)
 	}
@@ -136,7 +136,7 @@ func TestDeploymentRestart_VerifyFailsWhenTheRolloutStalls(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
 
-	result, err := a.Verify(ctx, target, nil, action.Result{})
+	result, err := a.Verify(ctx, action.Request{Target: target, Params: nil}, action.Result{})
 	if err == nil {
 		t.Fatal("Verify() error = nil; a rollout that never completes is not a success")
 	}
@@ -155,7 +155,7 @@ func TestDeploymentRestart_ReportsTheEquivalentCommand(t *testing.T) {
 
 	want := "kubectl rollout restart deployment/api -n payments"
 
-	planned, err := a.Plan(context.Background(), target, nil)
+	planned, err := a.Plan(context.Background(), action.Request{Target: target, Params: nil})
 	if err != nil {
 		t.Fatalf("Plan() error = %v", err)
 	}
@@ -163,7 +163,7 @@ func TestDeploymentRestart_ReportsTheEquivalentCommand(t *testing.T) {
 		t.Errorf("Plan kubectl = %q, want %q", planned.Kubectl, want)
 	}
 
-	executed, err := a.Execute(context.Background(), target, nil)
+	executed, err := a.Execute(context.Background(), action.Request{Target: target, Params: nil})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}

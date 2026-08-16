@@ -161,6 +161,9 @@ incident it was written for.
 | `workload.restart` | The same, for Deployments, StatefulSets and DaemonSets | no | Takes its kind from the alert's label |
 | `pod.delete` | Evicts one pod | no | Eviction API, so a PodDisruptionBudget can refuse. Refuses a pod with no controller owner |
 | `job.delete` | Deletes a Job and its pods | no | So the owning CronJob makes a clean run |
+| `webhook.call` | POSTs the incident to a URL | no | Credential from a Secret in remedik's namespace only; non-2xx fails the step |
+| `job.run` | Runs an image as a Job | no | In remedik's namespace, under a ServiceAccount the step names — never remedik's |
+| `script.run` | `job.run`, script from a ConfigMap | no | ConfigMap read from remedik's namespace only |
 
 **Why eviction rather than deletion.** Deleting a pod ignores
 PodDisruptionBudgets entirely; the Eviction API is the only call that checks
@@ -168,6 +171,30 @@ them, and returns 429 when the removal would breach the budget. remedik
 records that as a refusal naming the budget, and the pod stays up. The
 permission it holds says the same thing: `create` on `pods/eviction`, never
 `delete` on `pods`.
+
+**The escape hatches.** `webhook.call`, `job.run` and `script.run` exist
+because four built-in verbs will never cover what people need at 3am, and
+"remedik cannot do X" is a reason not to install it at all. They are also
+the widest trust surface in the project, so each is bounded deliberately:
+
+- Jobs are created in **remedik's own namespace only**. A namespace
+  parameter would mean holding `create` on jobs cluster-wide permanently, so
+  that a strategy can occasionally start one somewhere. A Job that must act
+  elsewhere does so through its ServiceAccount, which is where that
+  authority belongs.
+- The Job's **ServiceAccount is named by the step**, defaults to `default`
+  — which can do nothing — and may never be remedik's own, which is refused
+  with a message saying why. Forgetting produces a Job that cannot act,
+  rather than one that can do everything the operator can.
+- The **command is a JSON array**. A string would need quoting rules, and
+  quoting rules invented for a YAML field are how a remediation ends up
+  running something nobody wrote.
+- Secrets and ConfigMaps are read from **remedik's own namespace only**.
+  Reading them from a namespace an alert names would let a label decide
+  which credential is used, or let anyone with write access anywhere have
+  code executed by the operator.
+- The alert's labels reach the container **prefixed**, so a label called
+  `PATH` cannot replace the container's.
 
 **What remedik will not do.** Published deliberately, because a list of
 refusals says more about an automation than another verb does:

@@ -159,7 +159,7 @@ func TestPodDelete_Resolve(t *testing.T) {
 func TestPodDelete_EvictsRatherThanDeletes(t *testing.T) {
 	a, c := podDeleter(ownedPod("api-7d9f8-x2k1", "uid-1"))
 
-	result, err := a.Execute(context.Background(), podTarget, nil)
+	result, err := a.Execute(context.Background(), action.Request{Target: podTarget, Params: nil})
 	if err != nil {
 		t.Fatalf("Execute() error = %v, want nil", err)
 	}
@@ -186,7 +186,7 @@ func TestPodDelete_ADisruptionBudgetRefusal(t *testing.T) {
 	a, c := podDeleter(ownedPod("api-7d9f8-x2k1", "uid-1"))
 	c.evictErr = apierrors.NewTooManyRequests("cannot evict pod as it would violate the budget", 5)
 
-	_, err := a.Execute(context.Background(), podTarget, nil)
+	_, err := a.Execute(context.Background(), action.Request{Target: podTarget, Params: nil})
 	if err == nil {
 		t.Fatal("Execute() error = nil; a refused eviction is not a success")
 	}
@@ -207,8 +207,12 @@ func TestPodDelete_RefusesAPodNothingWouldRecreate(t *testing.T) {
 		name string
 		run  func() (action.Result, error)
 	}{
-		{"Plan", func() (action.Result, error) { return a.Plan(context.Background(), podTarget, nil) }},
-		{"Execute", func() (action.Result, error) { return a.Execute(context.Background(), podTarget, nil) }},
+		{"Plan", func() (action.Result, error) {
+			return a.Plan(context.Background(), action.Request{Target: podTarget, Params: nil})
+		}},
+		{"Execute", func() (action.Result, error) {
+			return a.Execute(context.Background(), action.Request{Target: podTarget, Params: nil})
+		}},
 	} {
 		t.Run(call.name, func(t *testing.T) {
 			_, err := call.run()
@@ -232,7 +236,7 @@ func TestPodDelete_RefusesAPodNothingWouldRecreate(t *testing.T) {
 func TestPodDelete_TheRefusalCanBeOverridden(t *testing.T) {
 	a, c := podDeleter(barePod("standalone"))
 
-	_, err := a.Execute(context.Background(), podTarget, action.Params{RequireOwnerParam: "false"})
+	_, err := a.Execute(context.Background(), action.Request{Target: podTarget, Params: action.Params{RequireOwnerParam: "false"}})
 	if err != nil {
 		t.Fatalf("Execute() error = %v, want nil when the step accepts the risk", err)
 	}
@@ -244,7 +248,7 @@ func TestPodDelete_TheRefusalCanBeOverridden(t *testing.T) {
 func TestPodDelete_GracePeriod(t *testing.T) {
 	a, c := podDeleter(ownedPod("api-7d9f8-x2k1", "uid-1"))
 
-	if _, err := a.Execute(context.Background(), podTarget, action.Params{GracePeriodParam: "5"}); err != nil {
+	if _, err := a.Execute(context.Background(), action.Request{Target: podTarget, Params: action.Params{GracePeriodParam: "5"}}); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
 	if c.lastGrace == nil || *c.lastGrace != 5 {
@@ -252,7 +256,7 @@ func TestPodDelete_GracePeriod(t *testing.T) {
 	}
 
 	a, _ = podDeleter(ownedPod("api-7d9f8-x2k1", "uid-1"))
-	if _, err := a.Execute(context.Background(), podTarget, action.Params{GracePeriodParam: "soon"}); err == nil {
+	if _, err := a.Execute(context.Background(), action.Request{Target: podTarget, Params: action.Params{GracePeriodParam: "soon"}}); err == nil {
 		t.Error("error = nil for an unparseable grace period; it must not silently become the default")
 	}
 }
@@ -266,7 +270,7 @@ func TestPodDelete_VerifyWaitsForThePodToGo(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	result, err := a.Verify(ctx, podTarget, nil, action.Result{Outputs: map[string]string{"uid": "uid-1"}})
+	result, err := a.Verify(ctx, action.Request{Target: podTarget}, action.Result{Outputs: map[string]string{"uid": "uid-1"}})
 	if err != nil {
 		t.Fatalf("Verify() error = %v, want nil", err)
 	}
@@ -286,7 +290,7 @@ func TestPodDelete_VerifyAcceptsAReplacementWithTheSameName(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	result, err := a.Verify(ctx, podTarget, nil, action.Result{Outputs: map[string]string{"uid": "uid-1"}})
+	result, err := a.Verify(ctx, action.Request{Target: podTarget}, action.Result{Outputs: map[string]string{"uid": "uid-1"}})
 	if err != nil {
 		t.Fatalf("Verify() error = %v, want nil", err)
 	}
@@ -308,7 +312,7 @@ func TestPodDelete_VerifyFailsOnAPodStuckTerminating(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
 
-	result, err := a.Verify(ctx, podTarget, nil, action.Result{Outputs: map[string]string{"uid": "uid-1"}})
+	result, err := a.Verify(ctx, action.Request{Target: podTarget}, action.Result{Outputs: map[string]string{"uid": "uid-1"}})
 	if err == nil {
 		t.Fatal("Verify() error = nil; a pod that never went away is not a completed remediation")
 	}
@@ -320,7 +324,7 @@ func TestPodDelete_VerifyFailsOnAPodStuckTerminating(t *testing.T) {
 func TestPodDelete_MissingPod(t *testing.T) {
 	a, _ := podDeleter()
 
-	if _, err := a.Execute(context.Background(), podTarget, nil); err == nil ||
+	if _, err := a.Execute(context.Background(), action.Request{Target: podTarget, Params: nil}); err == nil ||
 		!strings.Contains(err.Error(), "does not exist") {
 		t.Errorf("error = %v, want a not-found error", err)
 	}

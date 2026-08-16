@@ -12,6 +12,8 @@ suit your alerts, and start with the operator in dry-run.
 | [statefulset-stuck.yaml](statefulset-stuck.yaml) | `KubeStatefulSetUpdateNotRolledOut` | Rolling restart of a StatefulSet |
 | [pod-not-ready.yaml](pod-not-ready.yaml) | `KubePodNotReady` | Evicts one pod, honouring PodDisruptionBudgets |
 | [job-failed.yaml](job-failed.yaml) | `KubeJobFailed` | Deletes the Job so its CronJob runs again |
+| [escalate-to-pipeline.yaml](escalate-to-pipeline.yaml) | `KubeNodeNotReady` | Hands the incident to a pipeline outside the cluster |
+| [run-a-runbook.yaml](run-a-runbook.yaml) | `KubePodCrashLooping` | Runs a script from a ConfigMap as a Job |
 
 Every action a recipe uses must be enabled in the chart, because each one is
 a permission: `--set actions.podDelete.enabled=true`. The chart's

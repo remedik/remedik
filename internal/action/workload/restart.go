@@ -178,7 +178,8 @@ func (a *Restart) workload(labels map[string]string, params action.Params) (kind
 // Plan reports what Execute would do, and reads the workload so that dry-run
 // surfaces a missing target instead of reporting success for something that
 // could never work.
-func (a *Restart) Plan(ctx context.Context, target action.Target, _ action.Params) (action.Result, error) {
+func (a *Restart) Plan(ctx context.Context, req action.Request) (action.Result, error) {
+	target := req.Target
 	object, err := a.fetch(ctx, target)
 	if err != nil {
 		return action.Result{}, err
@@ -196,7 +197,8 @@ func (a *Restart) Plan(ctx context.Context, target action.Target, _ action.Param
 }
 
 // Execute triggers the rolling restart.
-func (a *Restart) Execute(ctx context.Context, target action.Target, _ action.Params) (action.Result, error) {
+func (a *Restart) Execute(ctx context.Context, req action.Request) (action.Result, error) {
+	target := req.Target
 	object, err := a.fetch(ctx, target)
 	if err != nil {
 		return action.Result{}, err
@@ -233,8 +235,9 @@ func (a *Restart) Execute(ctx context.Context, target action.Target, _ action.Pa
 // new generation. Reporting success on the patch alone is reporting on the
 // wrong event.
 func (a *Restart) Verify(
-	ctx context.Context, target action.Target, _ action.Params, _ action.Result,
+	ctx context.Context, req action.Request, _ action.Result,
 ) (action.Result, error) {
+	target := req.Target
 	ctx, cancel := action.WithVerifyDeadline(ctx)
 	defer cancel()
 
