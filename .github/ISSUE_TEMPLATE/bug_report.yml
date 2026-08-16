@@ -1,0 +1,55 @@
+name: Bug report
+description: Something remedik did, or did not do, that it should have
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The most useful thing you can attach is the `Remediation` resource:
+        `kubectl get remediation <name> -n remedik -o yaml`. It carries the
+        alert, the plan, every step's outcome and the reason it ended — which
+        is most of the answer already.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did remedik do, and what did you expect instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: remediation
+    attributes:
+      label: The Remediation record
+      description: "`kubectl get remediation <name> -n remedik -o yaml`. Redact anything sensitive in the alert labels."
+      render: yaml
+
+  - type: textarea
+    id: strategy
+    attributes:
+      label: The strategy
+      description: "`kubectl get remediationstrategy <name> -o yaml`"
+      render: yaml
+
+  - type: input
+    id: version
+    attributes:
+      label: remedik version
+      description: From the dashboard footer, `remedik_build_info`, or the image tag.
+    validations:
+      required: true
+
+  - type: input
+    id: kubernetes
+    attributes:
+      label: Kubernetes version and distribution
+      placeholder: "1.31, AKS"
+
+  - type: checkboxes
+    id: posture
+    attributes:
+      label: Posture
+      options:
+        - label: "The operator was in dry-run (`dryRun: true`)"
+        - label: "I have checked `kubectl describe remediationstrategy <name>` for guard rejections"

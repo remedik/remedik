@@ -19,6 +19,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -28,6 +29,8 @@ import (
 
 	"github.com/ratyx/remedik/api/v1alpha1"
 	"github.com/ratyx/remedik/internal/action"
+	"github.com/ratyx/remedik/internal/action/external"
+	"github.com/ratyx/remedik/internal/action/node"
 	"github.com/ratyx/remedik/internal/action/workload"
 	"github.com/ratyx/remedik/internal/dashboard"
 	"github.com/ratyx/remedik/internal/engine"
@@ -50,22 +53,29 @@ const (
 	// in. The chart sets it from the pod's own namespace.
 	namespaceEnvVar = "REMEDIK_NAMESPACE"
 
+	// serviceAccountEnvVar is remedik's own ServiceAccount, which a
+	// remediation Job is refused if it asks to run as. The chart sets it
+	// from the pod's own spec.
+	serviceAccountEnvVar = "REMEDIK_SERVICE_ACCOUNT"
+
 	// historyPruneInterval is how often the in-memory guard history drops
 	// records older than its retention.
 	historyPruneInterval = 5 * time.Minute
 )
 
 type options struct {
-	metricsAddr   string
-	probeAddr     string
-	gatewayAddr   string
-	gatewayPath   string
-	dashboardAddr string
-	namespace     string
-	dryRun        bool
-	historyLimit  int
-	logLevel      string
-	showVersion   bool
+	metricsAddr    string
+	probeAddr      string
+	gatewayAddr    string
+	gatewayPath    string
+	dashboardAddr  string
+	actions        []string
+	serviceAccount string
+	namespace      string
+	dryRun         bool
+	historyLimit   int
+	logLevel       string
+	showVersion    bool
 }
 
 func main() {
@@ -112,8 +122,16 @@ func parseFlags() options {
 	flag.StringVar(&opts.dashboardAddr, "dashboard-bind-address", "",
 		"address the read-only web dashboard binds to; empty disables it (for example "+
 			dashboard.DefaultBindAddress+")")
+	var actions string
+	flag.StringVar(&actions, "actions", "",
+		"comma-separated actions to enable; empty enables every action this build implements. "+
+			"The chart passes exactly the actions it granted RBAC for, so a strategy naming a "+
+			"disabled action is reported as not ready rather than failing mid-incident")
 	flag.StringVar(&opts.namespace, "namespace", os.Getenv(namespaceEnvVar),
 		"namespace Remediation resources are created in")
+	flag.StringVar(&opts.serviceAccount, "service-account", os.Getenv(serviceAccountEnvVar),
+		"remedik's own ServiceAccount. Remediation Jobs are refused if they ask to run as it, "+
+			"so that a strategy author cannot inherit the operator's permissions by writing one word")
 	flag.BoolVar(&opts.dryRun, "dry-run", true,
 		"evaluate and record what would happen without changing anything")
 	flag.IntVar(&opts.historyLimit, "history-limit", engine.DefaultHistoryLimit,
@@ -123,6 +141,7 @@ func parseFlags() options {
 	flag.BoolVar(&opts.showVersion, "version", false, "print version and exit")
 	flag.Parse()
 
+	opts.actions = splitActions(actions)
 	return opts
 }
 
@@ -189,13 +208,37 @@ func run(logger *slog.Logger, opts options) error {
 		return fmt.Errorf("create direct client: %w", err)
 	}
 
-	registry, err := action.NewRegistry(
-		workload.NewDeploymentRestart(directClient, time.Now),
-	)
+	// A clientset alongside the controller-runtime client: pod logs are a
+	// subresource the latter does not model, and the tail of what a
+	// remediation Job printed is most of that action's value.
+	clientset, err := kubernetes.NewForConfig(restConfig)
+	if err != nil {
+		return fmt.Errorf("create clientset: %w", err)
+	}
+
+	registry, err := buildRegistry(registryDeps{
+		client:         directClient,
+		logs:           external.NewPodLogs(clientset),
+		namespace:      opts.namespace,
+		serviceAccount: opts.serviceAccount,
+	}, opts.actions)
 	if err != nil {
 		return fmt.Errorf("build action registry: %w", err)
 	}
 	logger.Info("actions registered", "actions", registry.Names())
+
+	// The posture metrics read through the manager's cache, so a scrape
+	// costs no API call. They are registered here, after the manager exists,
+	// because that is where the cache is.
+	metrics.MustRegisterPosture(metrics.PostureConfig{
+		Version: version.String(),
+		DryRun:  opts.dryRun,
+		Snapshot: postureFrom(&engine.Snapshotter{
+			Reader:    mgr.GetCache(),
+			Namespace: opts.namespace,
+		}),
+		Logger: logger.With("component", "metrics"),
+	})
 
 	history := guards.NewMemoryHistory(0)
 
@@ -206,7 +249,7 @@ func run(logger *slog.Logger, opts options) error {
 		DryRun:       opts.dryRun,
 		HistoryLimit: opts.historyLimit,
 		Metrics:      metrics.Engine{},
-		Events:       mgr.GetEventRecorderFor("remedik"),
+		Events:       mgr.GetEventRecorder("remedik"),
 		Mapper:       mgr.GetRESTMapper(),
 		Logger:       logger.With("component", "reconciler"),
 	}
@@ -236,10 +279,11 @@ func run(logger *slog.Logger, opts options) error {
 		Client:    mgr.GetClient(),
 		Registry:  registry,
 		History:   history,
+		Workloads: &engine.WorkloadHealth{Reader: directClient},
 		Namespace: opts.namespace,
 		DryRun:    opts.dryRun,
 		Metrics:   metrics.Engine{},
-		Events:    mgr.GetEventRecorderFor("remedik"),
+		Events:    mgr.GetEventRecorder("remedik"),
 		Logger:    logger.With("component", "sink"),
 	}
 
@@ -298,6 +342,86 @@ func run(logger *slog.Logger, opts options) error {
 		return fmt.Errorf("run manager: %w", err)
 	}
 	return nil
+}
+
+// postureFrom adapts the engine's snapshot to the metrics package's.
+//
+// The two structs are deliberately identical, so this is a conversion rather
+// than a translation: the engine owns what it can report, and the metrics
+// package owns how it is published, and neither has to import the other.
+func postureFrom(s *engine.Snapshotter) metrics.SnapshotFunc {
+	return func(ctx context.Context) (metrics.Snapshot, error) {
+		posture, err := s.Snapshot(ctx)
+		return metrics.Snapshot(posture), err
+	}
+}
+
+// buildRegistry registers the actions this operator is configured to run.
+//
+// An action absent from the registry is not merely unusable: a strategy
+// naming it is reported as not ready when it is applied, rather than
+// failing during the incident it was written for. That is why the chart
+// passes exactly the actions it granted permissions for — the two lists
+// disagreeing is a misconfiguration worth finding on a Tuesday.
+type registryDeps struct {
+	client         client.Client
+	logs           *external.PodLogs
+	namespace      string
+	serviceAccount string
+}
+
+func buildRegistry(deps registryDeps, enabled []string) (*action.Registry, error) {
+	c := deps.client
+	available := []action.Action{
+		workload.NewDeploymentRestart(c, time.Now),
+		workload.NewWorkloadRestart(c, time.Now),
+		workload.NewPodDelete(c),
+		workload.NewJobDelete(c),
+		workload.NewDeploymentRollback(c),
+		workload.NewDeploymentScale(c),
+		workload.NewHPAScale(c),
+		external.NewWebhookCall(c, deps.namespace),
+		external.NewJobRun(c, deps.logs, deps.serviceAccount, time.Now),
+		external.NewScriptRun(c, deps.logs, deps.serviceAccount, time.Now),
+		node.NewCordon(c),
+		node.NewUncordon(c),
+		node.NewDrain(c),
+		node.NewPVCExpand(c),
+	}
+
+	if len(enabled) == 0 {
+		return action.NewRegistry(available...)
+	}
+
+	byName := make(map[string]action.Action, len(available))
+	names := make([]string, 0, len(available))
+	for _, a := range available {
+		byName[a.Name()] = a
+		names = append(names, a.Name())
+	}
+
+	selected := make([]action.Action, 0, len(enabled))
+	for _, name := range enabled {
+		a, ok := byName[name]
+		if !ok {
+			return nil, fmt.Errorf("--actions names %q, which this build does not implement (available: %s)",
+				name, strings.Join(names, ", "))
+		}
+		selected = append(selected, a)
+	}
+	return action.NewRegistry(selected...)
+}
+
+// splitActions parses the --actions list, ignoring the empty entries a
+// templated flag tends to produce.
+func splitActions(raw string) []string {
+	var out []string
+	for _, name := range strings.Split(raw, ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 func buildScheme() (*runtime.Scheme, error) {

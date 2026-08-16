@@ -100,6 +100,40 @@ type Guards struct {
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	MaxPerHour int32 `json:"maxPerHour,omitempty"`
+
+	// BlastRadius bounds how degraded the workload may already be. The
+	// other two guards ask about time; this one asks about state, and it is
+	// what bounds the actions that remove capacity rather than replacing
+	// it.
+	//
+	// It needs to read the workload behind the target, so the chart must
+	// grant that with `guards.blastRadius.enabled=true`. Without the
+	// permission the guard refuses rather than allows: a guard that permits
+	// an execution when it could not evaluate its own condition is not a
+	// guard.
+	//
+	// +optional
+	BlastRadius *BlastRadius `json:"blastRadius,omitempty"`
+}
+
+// BlastRadius bounds how broken a workload may already be before remedik
+// adds to it. Both limits are opt-in; zero means unenforced.
+type BlastRadius struct {
+	// MinAvailable refuses while the workload has this many available
+	// replicas or fewer — "never touch the last one".
+	//
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	MinAvailable int32 `json:"minAvailable,omitempty"`
+
+	// MaxUnavailablePercent refuses while at least this share of the
+	// workload is already unavailable — "do not add to something that is
+	// already struggling".
+	//
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=100
+	// +optional
+	MaxUnavailablePercent int32 `json:"maxUnavailablePercent,omitempty"`
 }
 
 // Step is one remediation action.

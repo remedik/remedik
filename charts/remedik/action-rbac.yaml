@@ -1,0 +1,239 @@
+# What each action is allowed to do.
+#
+# This is the artefact behind invariant 4: remedik grants a permission only
+# because a named, enabled feature needs it. The chart reads this file and
+# adds an action's rules to the ClusterRole only when `actions.<key>.enabled`
+# is true, so turning an action off removes its permissions with it.
+#
+# It lives here rather than in values.yaml because it is not a value. Nobody
+# should widen an action's permissions to make their strategy work; if an
+# action needs a verb it does not have, that is a change to the action.
+#
+# The `blastRadius` guard has an entry here too, keyed `blastRadius` and
+# toggled by `guards.blastRadius.enabled`. It is not an action, but it is the
+# same kind of thing: a named feature that needs read access to do its job,
+# and holds none when it is off.
+#
+# One key per feature, matching its key under `actions:` (or `guards:`) in
+# values.yaml, and
+# under it either `cluster:` or `namespaced:` — the first goes into the
+# ClusterRole, the second into the Role scoped to the release namespace.
+# Which one an action uses is itself a statement about its reach.
+#
+# Every rule carries a comment saying what needs it, because a reviewer's
+# question is never "which verbs?" but "why these?".
+
+# deployment.restart — patches the pod template annotation, which is what
+# `kubectl rollout restart` does.
+#
+# Two verbs, deliberately: the action reads one Deployment by name and
+# patches it. It needs no list or watch because it uses a direct client
+# rather than a cache, and no delete because it never removes pods.
+deploymentRestart:
+  cluster:
+    - apiGroups: ["apps"]
+      resources: ["deployments"]
+      verbs: ["get", "patch"]
+
+# workload.restart — the same patch, for the three workload kinds. Enabling
+# it grants patch on all three; a cluster that only wants Deployments
+# restarted should enable deployment.restart instead and get only that.
+workloadRestart:
+  cluster:
+    - apiGroups: ["apps"]
+      resources: ["deployments", "statefulsets", "daemonsets"]
+      verbs: ["get", "patch"]
+
+# pod.delete — evicts one pod through the Eviction API.
+#
+# `create` on pods/eviction is the eviction itself; it is a different
+# permission from `delete` on pods, and deliberately so: remedik cannot
+# delete a pod outright, only ask for an eviction that a PodDisruptionBudget
+# is allowed to refuse.
+podDelete:
+  cluster:
+    - apiGroups: [""]
+      resources: ["pods"]
+      verbs: ["get"]
+    - apiGroups: [""]
+      resources: ["pods/eviction"]
+      verbs: ["create"]
+
+# job.delete — removes a failed Job so its CronJob makes a clean one. The
+# pods go with it through the deletion's propagation policy, so no
+# permission on pods is needed here.
+jobDelete:
+  cluster:
+    - apiGroups: ["batch"]
+      resources: ["jobs"]
+      verbs: ["get", "delete"]
+
+# webhook.call — reads one Secret to authenticate the call, from remedik's
+# own namespace only. Namespaced deliberately: reading a credential from the
+# namespace an alert names would let a label decide which token remedik
+# hands to an endpoint.
+webhookCall:
+  namespaced:
+    - apiGroups: [""]
+      resources: ["secrets"]
+      verbs: ["get"]
+
+# job.run — creates a Job in remedik's own namespace and reads its result.
+#
+# Namespaced, so a strategy cannot reach into another team's namespace. The
+# Job's own authority comes from the ServiceAccount the step names, not from
+# these rules: remedik can start the container, and what the container may
+# do is a decision somebody made when they created that ServiceAccount.
+jobRun:
+  namespaced:
+    - apiGroups: ["batch"]
+      resources: ["jobs"]
+      verbs: ["create", "get", "list", "delete"]
+    - apiGroups: [""]
+      resources: ["pods"]
+      verbs: ["get", "list"]
+    - apiGroups: [""]
+      resources: ["pods/log"]
+      verbs: ["get"]
+
+# script.run — job.run, plus reading the ConfigMap holding the script.
+#
+# From remedik's own namespace only. Reading a script from anywhere else
+# would mean anyone with write access to any namespace could get code
+# executed by the operator: a privilege escalation dressed up as a feature.
+scriptRun:
+  namespaced:
+    - apiGroups: ["batch"]
+      resources: ["jobs"]
+      verbs: ["create", "get", "list", "delete"]
+    - apiGroups: [""]
+      resources: ["pods"]
+      verbs: ["get", "list"]
+    - apiGroups: [""]
+      resources: ["pods/log"]
+      verbs: ["get"]
+    - apiGroups: [""]
+      resources: ["configmaps"]
+      verbs: ["get"]
+
+# deployment.rollback — puts the previous revision's pod template back, which
+# is what `kubectl rollout undo` does.
+#
+# `list` on replicasets is the revision history: the Deployment controller
+# records which revision each ReplicaSet holds, and there is no other way to
+# find the one before this. No delete, because a rollback creates nothing and
+# removes nothing — the controller reconciles from the changed template.
+deploymentRollback:
+  cluster:
+    - apiGroups: ["apps"]
+      resources: ["deployments"]
+      verbs: ["get", "patch"]
+    - apiGroups: ["apps"]
+      resources: ["replicasets"]
+      verbs: ["get", "list"]
+
+# deployment.scale — changes the replica count through the scale subresource.
+#
+# The `list` on horizontalpodautoscalers is the safety check, not an
+# oversight: setting replicas on an autoscaled Deployment is reverted on the
+# autoscaler's next interval, so the action refuses when it finds one. That
+# is a read-only permission on a resource holding no secrets, in exchange for
+# preventing a whole class of "the remediation did not stick" incidents.
+deploymentScale:
+  cluster:
+    - apiGroups: ["apps"]
+      resources: ["deployments"]
+      verbs: ["get"]
+    - apiGroups: ["apps"]
+      resources: ["deployments/scale"]
+      verbs: ["patch"]
+    - apiGroups: ["autoscaling"]
+      resources: ["horizontalpodautoscalers"]
+      verbs: ["list"]
+
+# hpa.scale — raises an autoscaler's maxReplicas.
+#
+# It never lowers one: the action refuses a target below the current ceiling,
+# because reducing an autoscaler's headroom during an incident is not a
+# remediation.
+hpaScale:
+  cluster:
+    - apiGroups: ["autoscaling"]
+      resources: ["horizontalpodautoscalers"]
+      verbs: ["get", "patch"]
+
+# node.cordon and node.uncordon — set and clear spec.unschedulable.
+#
+# The safest pair in the catalogue: nothing moves, nothing restarts, and one
+# command undoes either. Two verbs so that a strategy wanting only "stop
+# scheduling here" does not have to be granted the ability to drain.
+nodeCordon:
+  cluster:
+    - apiGroups: [""]
+      resources: ["nodes"]
+      verbs: ["get", "patch"]
+
+nodeUncordon:
+  cluster:
+    - apiGroups: [""]
+      resources: ["nodes"]
+      verbs: ["get", "patch"]
+
+# node.drain — cordon, then evict every eligible pod.
+#
+# This is the widest permission remedik holds, and there is no narrower way
+# to drain a node: `list` on pods across every namespace to find what is
+# there, and `create` on pods/eviction across every namespace to move it.
+#
+# Note what is still absent: no `delete` on pods. A drain asks for evictions,
+# which a PodDisruptionBudget is allowed to refuse, and it cannot force one
+# through however long it waits.
+#
+# Enable this one last, and leave it in dry-run longer than the rest. The
+# dry-run report names every pod that would move, which is the list somebody
+# should read before allowing this to happen unattended.
+nodeDrain:
+  cluster:
+    - apiGroups: [""]
+      resources: ["nodes"]
+      verbs: ["get", "patch"]
+    - apiGroups: [""]
+      resources: ["pods"]
+      verbs: ["list"]
+    - apiGroups: [""]
+      resources: ["pods/eviction"]
+      verbs: ["create"]
+
+# pvc.expand — raises a claim's storage request.
+#
+# `get` on storageclasses is the check that makes the action worth having:
+# where a StorageClass does not allow expansion the API server accepts the
+# patch and nothing happens, so remedik reads the class first and refuses
+# rather than recording a success that did nothing.
+pvcExpand:
+  cluster:
+    - apiGroups: [""]
+      resources: ["persistentvolumeclaims"]
+      verbs: ["get", "patch"]
+    - apiGroups: ["storage.k8s.io"]
+      resources: ["storageclasses"]
+      verbs: ["get"]
+
+# blastRadius — the guard that asks how degraded a workload already is.
+#
+# Reads only, and only what it must: the three workload kinds, the pod named
+# by an alert, and the ReplicaSet in between a pod and its Deployment. No
+# list and no watch, because it reads one object at a time by name through a
+# direct client.
+#
+# Without these the guard refuses rather than allows, which is deliberate: a
+# guard that permits an execution when it could not evaluate its own
+# condition is not a guard.
+blastRadius:
+  cluster:
+    - apiGroups: ["apps"]
+      resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+      verbs: ["get"]
+    - apiGroups: [""]
+      resources: ["pods"]
+      verbs: ["get"]

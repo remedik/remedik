@@ -80,6 +80,36 @@ spec:
               guards:
                 description: Guards bound how often the strategy may act.
                 properties:
+                  blastRadius:
+                    description: |-
+                      BlastRadius bounds how degraded the workload may already be. The
+                      other two guards ask about time; this one asks about state, and it is
+                      what bounds the actions that remove capacity rather than replacing
+                      it.
+
+                      It needs to read the workload behind the target, so the chart must
+                      grant that with `guards.blastRadius.enabled=true`. Without the
+                      permission the guard refuses rather than allows: a guard that permits
+                      an execution when it could not evaluate its own condition is not a
+                      guard.
+                    properties:
+                      maxUnavailablePercent:
+                        description: |-
+                          MaxUnavailablePercent refuses while at least this share of the
+                          workload is already unavailable — "do not add to something that is
+                          already struggling".
+                        format: int32
+                        maximum: 100
+                        minimum: 0
+                        type: integer
+                      minAvailable:
+                        description: |-
+                          MinAvailable refuses while the workload has this many available
+                          replicas or fewer — "never touch the last one".
+                        format: int32
+                        minimum: 0
+                        type: integer
+                    type: object
                   cooldown:
                     description: |-
                       Cooldown is the minimum time between one execution completing on a

@@ -2,6 +2,10 @@
 
 > Predictably boring auto-remediation for Kubernetes alerts.
 
+[![CI](https://github.com/ratyx/remedik/actions/workflows/ci.yml/badge.svg)](https://github.com/ratyx/remedik/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/ratyx/remedik)](https://goreportcard.com/report/github.com/ratyx/remedik)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 remedik turns Alertmanager alerts into safe, auditable remediation.
 Strategies are custom resources you keep in git, every execution is recorded
 as a `Remediation` object, guards bound the blast radius, and an LLM never
@@ -39,18 +43,54 @@ pod-crashloop-x7k2q   pod-crashloop   deployment/payments/api   Succeeded   2m
 pod-crashloop-b91mm   pod-crashloop   deployment/checkout/web   Simulated   1h
 ```
 
+**Thirteen actions ship today**, each a separate permission the chart grants
+only when you enable it, and only `deployment.restart` on by default:
+
+| | Action | What it does |
+| --- | --- | --- |
+| **Workloads** | `deployment.restart` | Rolling restart of a Deployment |
+| | `workload.restart` | The same, for StatefulSets and DaemonSets too |
+| | `pod.delete` | Evicts one pod **through the Eviction API**, so a PodDisruptionBudget can refuse |
+| | `job.delete` | Deletes a failed Job so its CronJob makes a clean run |
+| **Capacity** | `deployment.rollback` | Puts the previous revision back — refuses under Argo CD or Flux |
+| | `deployment.scale` | Sets or increases replicas — refuses when an HPA owns the workload |
+| | `hpa.scale` | Raises an autoscaler's ceiling; never lowers it |
+| **Nodes** | `node.cordon` / `node.uncordon` | Stop and resume scheduling. Reversible, moves nothing |
+| | `node.drain` | Cordon, then evict everything, honouring disruption budgets |
+| | `pvc.expand` | Grows a volume — only where the StorageClass allows it |
+| **Anything else** | `webhook.call` | POSTs the incident to your pipeline |
+| | `job.run` / `script.run` | Runs your container or your runbook script as a Job |
+
+Several of those descriptions say "refuses", and that is the interesting
+part. Deleting a pod ignores disruption budgets entirely; eviction is the
+only call that checks them, so remedik holds `create` on `pods/eviction` and
+never `delete` on `pods` — it *cannot* force a pod out. A rollback in a
+GitOps cluster would be reverted within minutes, so it refuses rather than
+recording a success while the outage continues. A volume whose StorageClass
+forbids expansion accepts the patch and does nothing, so remedik checks
+first. And a remediation Job runs as a ServiceAccount you name, never
+remedik's own, which is refused.
+
+There is also a read-only dashboard, off by default, that answers the same
+questions in a browser — how much a dry-run trial would have done, and why
+nothing happened during an incident.
+
 ## Try it in five minutes
 
 Needs Docker, [kind](https://kind.sigs.k8s.io/), kubectl and helm.
 
 ```bash
-make e2e     # throwaway cluster, real image, five assertions, then cleanup
+make e2e     # throwaway cluster, real image, the whole loop, then cleanup
 ```
 
-That test is the honest demo: it proves an unauthenticated delivery is
-refused, a dry run records a plan without touching anything, turning dry-run
-off actually restarts the Deployment, the cooldown refuses an immediate
-repeat, and an unmatched alert is accepted and ignored.
+That test is the honest demo. On a real cluster it proves: an
+unauthenticated delivery is refused; a dry run records a plan without
+touching anything; turning dry-run off actually restarts the Deployment, and
+the record confirms the rollout rather than the patch; the workload carries
+events explaining the change; the cooldown refuses an immediate repeat and
+survives an operator restart; an unmatched alert is accepted and ignored; a
+StatefulSet is restarted and a pod evicted; a pod nothing owns is refused;
+and every dashboard page renders read-only.
 
 To keep the cluster and poke at it yourself:
 
@@ -60,9 +100,7 @@ make dev-deploy    # build, load and install remedik (dry-run on)
 kubectl -n remedik get remediations -w
 ```
 
-There is also a read-only dashboard, off by default, that answers the same
-questions in a browser — how much a dry-run trial would have done, and why
-nothing happened during an incident:
+The dashboard, enabled:
 
 ```bash
 helm upgrade remedik ... --set dashboard.enabled=true \
@@ -88,7 +126,14 @@ touched the cluster even if an action is buggy.
 **Minimal trust.** One agent per cluster, RBAC generated only for the
 actions you enable, distroless non-root image, no external orchestrator and
 no database. Turning off `deployment.restart` removes its permission to
-patch Deployments.
+patch Deployments — and `make helm-lint` checks that with every action off,
+nothing at all is granted on any workload.
+
+**Guards bound the damage.** `cooldown` and `maxPerHour` ask about time;
+`blastRadius` asks about state — never the last available replica, never a
+workload already too degraded to touch. It **fails closed**: a guard that
+permits an execution when it could not evaluate its own condition is not a
+guard.
 
 **The audit trail is a first-class object.** Every run — including dry-run
 simulations — is a `Remediation` resource carrying the triggering alert, the
@@ -113,11 +158,13 @@ the record still explains the run after the strategy is edited or deleted.
 
 - **v0.1.0 (in progress)** — alert gateway, `RemediationStrategy` and
   `Remediation` CRDs, deterministic engine with guards, dry-run and retries,
-  `deployment.restart`, read-only dashboard, Helm chart, Prometheus metrics,
-  signed releases.
-- **v0.2.0** — Slack bot with approval buttons and manual commands, more
-  built-in actions, custom actions (`job`, `script`), audit sinks (Splunk
-  HEC, Loki, Elasticsearch), namespace health.
+  thirteen actions across workloads, capacity, nodes and escape hatches,
+  three guards including `blastRadius`, a read-only dashboard, a Helm chart
+  whose RBAC follows the features you enable, Prometheus metrics with a
+  Grafana dashboard and alerts, signed releases.
+- **v0.2.0** — per-namespace posture (act here, report there), the Slack bot
+  with approval buttons and manual commands, namespace health, audit sinks
+  (Splunk HEC, Loki, Elasticsearch).
 - **Later** — hub/spoke multi-cluster, cloud packs, `ActionPlugin` CRD, MCP
   server, workload-aware cost recommendations.
 

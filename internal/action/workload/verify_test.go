@@ -33,8 +33,8 @@ func (c *rollingClient) Get(_ context.Context, _ client.ObjectKey, obj client.Ob
 	return nil
 }
 
-// rollout builds one moment in a Deployment's life.
-func rollout(generation, observed int64, want, updated, replicas, available, ready int32) *appsv1.Deployment {
+// deploymentAt builds one moment in a Deployment's life.
+func deploymentAt(generation, observed int64, want, updated, replicas, available, ready int32) *appsv1.Deployment {
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "payments", Name: "api", Generation: generation},
 		Spec:       appsv1.DeploymentSpec{Replicas: &want},
@@ -48,7 +48,7 @@ func rollout(generation, observed int64, want, updated, replicas, available, rea
 	}
 }
 
-func verifier(states ...*appsv1.Deployment) *DeploymentRestart {
+func verifier(states ...*appsv1.Deployment) *Restart {
 	a := NewDeploymentRestart(&rollingClient{states: states}, nil)
 	// Tests must not wait on wall-clock; the polling interval is the only
 	// thing that would make them slow.
@@ -56,7 +56,7 @@ func verifier(states ...*appsv1.Deployment) *DeploymentRestart {
 	return a
 }
 
-func TestRolloutState(t *testing.T) {
+func TestRolloutDescribe(t *testing.T) {
 	tests := []struct {
 		name       string
 		deployment *appsv1.Deployment
@@ -68,27 +68,27 @@ func TestRolloutState(t *testing.T) {
 			// left over from before the patch describes the old rollout,
 			// and would otherwise read as a finished new one.
 			name:       "the controller has not seen the change yet",
-			deployment: rollout(4, 3, 3, 3, 3, 3, 3),
+			deployment: deploymentAt(4, 3, 3, 3, 3, 3, 3),
 			wantSays:   "observe generation 4",
 		},
 		{
 			name:       "new pods are still being created",
-			deployment: rollout(4, 4, 3, 1, 3, 3, 3),
+			deployment: deploymentAt(4, 4, 3, 1, 3, 3, 3),
 			wantSays:   "1/3 replicas updated",
 		},
 		{
 			name:       "old pods are still going away",
-			deployment: rollout(4, 4, 3, 3, 5, 3, 3),
+			deployment: deploymentAt(4, 4, 3, 3, 5, 3, 3),
 			wantSays:   "2 old replicas still terminating",
 		},
 		{
 			name:       "new pods are not available yet",
-			deployment: rollout(4, 4, 3, 3, 3, 1, 1),
+			deployment: deploymentAt(4, 4, 3, 3, 3, 1, 1),
 			wantSays:   "1/3 replicas available",
 		},
 		{
 			name:       "finished",
-			deployment: rollout(4, 4, 3, 3, 3, 3, 3),
+			deployment: deploymentAt(4, 4, 3, 3, 3, 3, 3),
 			wantDone:   true,
 			wantSays:   "3/3 replicas updated, available and ready",
 		},
@@ -96,7 +96,7 @@ func TestRolloutState(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			says, done := rolloutState(tc.deployment)
+			says, done := readRollout(tc.deployment).describe()
 			if done != tc.wantDone {
 				t.Errorf("done = %v, want %v (%q)", done, tc.wantDone, says)
 			}
@@ -109,15 +109,15 @@ func TestRolloutState(t *testing.T) {
 
 func TestDeploymentRestart_VerifyWaitsForTheRollout(t *testing.T) {
 	a := verifier(
-		rollout(4, 3, 3, 3, 3, 3, 3), // not observed yet
-		rollout(4, 4, 3, 1, 3, 1, 1), // half way
-		rollout(4, 4, 3, 3, 3, 3, 3), // done
+		deploymentAt(4, 3, 3, 3, 3, 3, 3), // not observed yet
+		deploymentAt(4, 4, 3, 1, 3, 1, 1), // half way
+		deploymentAt(4, 4, 3, 3, 3, 3, 3), // done
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	result, err := a.Verify(ctx, target, nil)
+	result, err := a.Verify(ctx, action.Request{Target: target, Params: nil}, action.Result{})
 	if err != nil {
 		t.Fatalf("Verify() error = %v, want nil", err)
 	}
@@ -131,12 +131,12 @@ func TestDeploymentRestart_VerifyWaitsForTheRollout(t *testing.T) {
 
 func TestDeploymentRestart_VerifyFailsWhenTheRolloutStalls(t *testing.T) {
 	// A rollout that never progresses: the pods never become available.
-	a := verifier(rollout(4, 4, 3, 3, 3, 1, 1))
+	a := verifier(deploymentAt(4, 4, 3, 3, 3, 1, 1))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
 
-	result, err := a.Verify(ctx, target, nil)
+	result, err := a.Verify(ctx, action.Request{Target: target, Params: nil}, action.Result{})
 	if err == nil {
 		t.Fatal("Verify() error = nil; a rollout that never completes is not a success")
 	}
@@ -155,7 +155,7 @@ func TestDeploymentRestart_ReportsTheEquivalentCommand(t *testing.T) {
 
 	want := "kubectl rollout restart deployment/api -n payments"
 
-	planned, err := a.Plan(context.Background(), target, nil)
+	planned, err := a.Plan(context.Background(), action.Request{Target: target, Params: nil})
 	if err != nil {
 		t.Fatalf("Plan() error = %v", err)
 	}
@@ -163,7 +163,7 @@ func TestDeploymentRestart_ReportsTheEquivalentCommand(t *testing.T) {
 		t.Errorf("Plan kubectl = %q, want %q", planned.Kubectl, want)
 	}
 
-	executed, err := a.Execute(context.Background(), target, nil)
+	executed, err := a.Execute(context.Background(), action.Request{Target: target, Params: nil})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}

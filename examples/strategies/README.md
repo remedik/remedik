@@ -9,6 +9,21 @@ suit your alerts, and start with the operator in dry-run.
 | [pod-crashloop.yaml](pod-crashloop.yaml) | `KubePodCrashLooping` | Rolling restart of the Deployment |
 | [oom-restart.yaml](oom-restart.yaml) | `KubeContainerOOMKilled` | Restart, cautiously and rarely |
 | [scoped-to-one-namespace.yaml](scoped-to-one-namespace.yaml) | `KubePodCrashLooping` in one namespace | Narrower rule that wins over a broad one |
+| [statefulset-stuck.yaml](statefulset-stuck.yaml) | `KubeStatefulSetUpdateNotRolledOut` | Rolling restart of a StatefulSet |
+| [pod-not-ready.yaml](pod-not-ready.yaml) | `KubePodNotReady` | Evicts one pod, honouring PodDisruptionBudgets |
+| [job-failed.yaml](job-failed.yaml) | `KubeJobFailed` | Deletes the Job so its CronJob runs again |
+| [escalate-to-pipeline.yaml](escalate-to-pipeline.yaml) | `KubeNodeNotReady` | Hands the incident to a pipeline outside the cluster |
+| [run-a-runbook.yaml](run-a-runbook.yaml) | `KubePodCrashLooping` | Runs a script from a ConfigMap as a Job |
+| [bounded-eviction.yaml](bounded-eviction.yaml) | `KubePodNotReady` | Evicts a pod, but never the last healthy replica |
+| [rollback-a-bad-deploy.yaml](rollback-a-bad-deploy.yaml) | `KubeDeploymentReplicasMismatch` | Puts the previous revision back; refuses under GitOps |
+| [hpa-maxed-out.yaml](hpa-maxed-out.yaml) | `KubeHpaMaxedOut` | Raises the autoscaler's ceiling |
+| [node-not-ready.yaml](node-not-ready.yaml) | `KubeNodeNotReady` | Cordons the node — reversible, moves nothing |
+| [drain-a-dead-node.yaml](drain-a-dead-node.yaml) | `KubeNodeUnreachable` | Drains it, honouring disruption budgets |
+| [volume-filling-up.yaml](volume-filling-up.yaml) | `KubePersistentVolumeFillingUp` | Expands the claim, where the class allows |
+
+Every action a recipe uses must be enabled in the chart, because each one is
+a permission: `--set actions.podDelete.enabled=true`. The chart's
+`action-rbac.yaml` lists what each is allowed to touch, and why.
 
 ## Choosing guards
 
@@ -16,6 +31,15 @@ suit your alerts, and start with the operator in dry-run.
 target again?". Set it longer than the time it takes to know whether the
 remediation worked — a rollout plus a couple of scrape intervals. Too short
 and a flapping alert becomes a restart loop.
+
+**`blastRadius`** answers "is this workload already too broken to touch?".
+The other two are about time; this one is about state, and it is what bounds
+the actions that remove capacity rather than replacing it. `minAvailable: 1`
+is the rule almost everyone wants and almost nobody writes down.
+
+It reads the workload, so it needs `guards.blastRadius.enabled=true` in the
+chart — and **refuses rather than allows** when it cannot read: a guard that
+permits an execution it could not evaluate is not a guard.
 
 **`maxPerHour`** answers "how bad can an alert storm get?". Think about how
 many of these you would be willing to see happen unattended in an hour. It

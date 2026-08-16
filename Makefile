@@ -25,7 +25,7 @@ HELMDOCS  := $(TOOLS_BIN)/helm-docs
 KIND_CLUSTER := remedik-dev
 
 .PHONY: all build test vet fmt tidy lint yaml-lint yaml-fix helm-lint helm-docs \
-        generate manifests verify verify-codegen tools docker-build e2e \
+        specs generate manifests verify verify-codegen tools docker-build e2e \
         dev-up dev-down dev-info dev-deploy versions clean help
 
 all: verify build
@@ -83,6 +83,18 @@ helm-lint: ## Lint the Helm chart (requires helm)
 		--set dashboard.enabled=true --set dashboard.auth.token=lint >/dev/null
 	helm template remedik charts/remedik --set gateway.auth.token=lint \
 		--set dashboard.enabled=true --set dashboard.auth.disabled=true >/dev/null
+	@# The NetworkPolicy renders with peers, and refuses to render without them.
+	helm template remedik charts/remedik --set gateway.auth.token=lint \
+		--set networkPolicy.enabled=true \
+		--set 'networkPolicy.gatewayFrom[0].namespaceSelector.matchLabels.name=monitoring' >/dev/null
+	@helm template remedik charts/remedik --set gateway.auth.token=lint \
+		--set networkPolicy.enabled=true >/dev/null 2>&1 \
+		&& { echo "the chart rendered a NetworkPolicy that would stop Alertmanager"; exit 1; } \
+		|| echo "chart refuses a NetworkPolicy with no peers, as intended"
+	@# The observability bundle renders on and off.
+	helm template remedik charts/remedik --set gateway.auth.token=lint \
+		--set serviceMonitor.enabled=true --set prometheusRule.enabled=true \
+		--set grafanaDashboard.enabled=true >/dev/null
 	@# Enabling it without a way to authenticate must fail, not render.
 	@helm template remedik charts/remedik --set gateway.auth.token=lint \
 		--set dashboard.enabled=true >/dev/null 2>&1 \
@@ -93,7 +105,10 @@ helm-lint: ## Lint the Helm chart (requires helm)
 helm-docs: $(HELMDOCS) ## Regenerate chart README.md from values.yaml annotations
 	$(HELMDOCS) --chart-search-root charts
 
-verify: fmt vet lint yaml-lint helm-lint test ## Everything CI runs
+verify: fmt vet lint yaml-lint helm-lint specs test ## Everything CI runs
+
+specs: ## Check that the spec-first workflow was followed
+	./hack/openspec-check.sh
 
 verify-codegen: generate manifests ## Fail if generated code or CRDs are stale
 	@git diff --exit-code api/ charts/remedik/crds/ \
@@ -168,6 +183,21 @@ dev-deploy: docker-build ## Build, load and install remedik into the dev cluster
 		--set image.pullPolicy=IfNotPresent \
 		--set gateway.auth.token=dev-token \
 		--set dashboard.enabled=true --set dashboard.auth.token=dev-token \
+		--set actions.workloadRestart.enabled=true \
+		--set actions.podDelete.enabled=true \
+		--set actions.jobDelete.enabled=true \
+		--set actions.deploymentRollback.enabled=true \
+		--set actions.deploymentScale.enabled=true \
+		--set actions.hpaScale.enabled=true \
+		--set actions.nodeCordon.enabled=true \
+		--set actions.nodeUncordon.enabled=true \
+		--set guards.blastRadius.enabled=true \
+		--set serviceMonitor.enabled=true \
+		--set serviceMonitor.additionalLabels.release=monitoring \
+		--set prometheusRule.enabled=true \
+		--set prometheusRule.additionalLabels.release=monitoring \
+		--set grafanaDashboard.enabled=true \
+		--set grafanaDashboard.namespace=monitoring \
 		--wait --timeout 3m
 	@echo ""
 	@echo "remedik is installed in dry-run mode. Watch it with:"
@@ -176,6 +206,9 @@ dev-deploy: docker-build ## Build, load and install remedik into the dev cluster
 	@echo ""
 	@echo "Dashboard (read-only): kubectl -n remedik port-forward svc/remedik-dashboard 8082:8082"
 	@echo "  -> http://127.0.0.1:8082/  (username blank, password: dev-token)"
+	@echo ""
+	@echo "Prometheus now scrapes remedik, and Grafana has the 'remedik' dashboard."
+	@echo "  Grafana: kubectl port-forward -n monitoring svc/monitoring-grafana 3000:80  (admin / remedik-dev)"
 
 dev-down: ## Delete the kind dev cluster
 	kind delete cluster --name $(KIND_CLUSTER)

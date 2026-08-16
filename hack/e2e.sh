@@ -17,6 +17,10 @@
 #   6. restart safety      — the cooldown still holds after the operator restarts
 #   7. dashboard           — every page renders, read-only, and the dry-run
 #                            report names what would have happened
+#   8. workload actions    — a StatefulSet is restarted, an owned pod is
+#                            evicted, and a pod nothing owns is refused
+#   9. guards and nodes    — blastRadius refuses a workload it cannot protect,
+#                            and a node is cordoned and then uncordoned
 #
 # Usage:  make e2e            (add KEEP_CLUSTER=1 to inspect afterwards)
 set -euo pipefail
@@ -127,6 +131,20 @@ wait_for_state() {
 	return 1
 }
 
+# wait_for_strategy_state <strategy> <state> [timeout-seconds]
+wait_for_strategy_state() {
+	local strategy="$1" want="$2" timeout="${3:-60}" elapsed=0
+	while [ "$elapsed" -lt "$timeout" ]; do
+		local states
+		states=$(kubectl -n "$NAMESPACE" get remediations -l "remedik.dev/strategy=${strategy}" \
+			-o jsonpath='{range .items[*]}{.status.state}{"\n"}{end}' 2>/dev/null || true)
+		echo "$states" | grep -qx "$want" && return 0
+		sleep 2
+		elapsed=$((elapsed + 2))
+	done
+	return 1
+}
+
 # restart_annotation <deployment>
 restart_annotation() {
 	kubectl -n e2e-payments get deploy "$1" \
@@ -210,6 +228,13 @@ else
 fi
 kubectl config use-context "kind-${CLUSTER}" >/dev/null
 
+# Wait for every node before installing anything. A pod scheduled onto a
+# worker whose CNI is not up yet starts, logs, and then blocks on its first
+# call to the API server — which looks exactly like a hang in the operator
+# and is not one.
+kubectl wait --for=condition=Ready nodes --all --timeout=180s >/dev/null
+info "$(kubectl get nodes --no-headers | wc -l | tr -d ' ') nodes ready"
+
 step "Building and loading the image"
 docker build -q -t "$IMAGE" . >/dev/null
 kind load docker-image "$IMAGE" --name "$CLUSTER" >/dev/null
@@ -223,6 +248,10 @@ helm upgrade --install remedik charts/remedik \
 	--set image.pullPolicy=IfNotPresent \
 	--set gateway.auth.token="$TOKEN" \
 	--set dryRun=true \
+	--set actions.nodeCordon.enabled=true \
+	--set actions.nodeUncordon.enabled=true \
+	--set actions.nodeDrain.enabled=true \
+	--set guards.blastRadius.enabled=true \
 	--wait --timeout 3m >/dev/null
 kubectl -n "$NAMESPACE" rollout status deploy/remedik --timeout=120s >/dev/null
 info "operator is running"
@@ -284,6 +313,57 @@ if [ "$(restart_annotation api)" = "$before_annotation" ]; then
 	pass "the Deployment was not touched"
 else
 	fail "dry-run modified the Deployment"
+fi
+
+# A drain, planned but not performed. This is the only place the plan can be
+# checked against a real node: it lists the node's actual pods, decides which
+# are evictable, and moves nothing.
+NODE=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
+status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+	-X POST "http://127.0.0.1:${LOCAL_PORT}/webhooks/alertmanager" \
+	-H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
+	-d "{\"version\":\"4\",\"alerts\":[{
+	      \"status\":\"firing\",
+	      \"labels\":{\"alertname\":\"E2ENodeUnreachable\",\"node\":\"${NODE}\"},
+	      \"startsAt\":\"2026-08-15T09:00:00Z\",
+	      \"fingerprint\":\"drainplan-1\"}]}")
+if [ "$status" = "200" ]; then
+	pass "gateway accepted the drain alert"
+else
+	fail "gateway answered $status for the drain alert"
+fi
+
+if wait_for_strategy_state e2e-node-drain Simulated 60; then
+	drain_plan=$(kubectl -n "$NAMESPACE" get remediations -l remedik.dev/strategy=e2e-node-drain \
+		-o jsonpath='{.items[0].status.steps[0].plan}' 2>/dev/null || true)
+	if echo "$drain_plan" | grep -q "Eviction API"; then
+		pass "the drain plan says it would evict: ${drain_plan}"
+	else
+		fail "the drain plan does not describe an eviction (${drain_plan})"
+	fi
+
+	drain_pods=$(kubectl -n "$NAMESPACE" get remediations -l remedik.dev/strategy=e2e-node-drain \
+		-o jsonpath='{.items[0].status.steps[0].outputs.pods}' 2>/dev/null || true)
+	if echo "$drain_pods" | grep -q "e2e-payments/"; then
+		pass "the plan names the pods that would move"
+	else
+		fail "the plan names no pods (${drain_pods})"
+	fi
+
+	# DaemonSet pods are skipped, which is what makes a drain terminate.
+	if echo "$drain_plan" | grep -q "DaemonSet"; then
+		pass "the plan says DaemonSet pods are skipped"
+	else
+		fail "the plan does not mention skipping DaemonSet pods"
+	fi
+else
+	fail "the drain was never planned"
+fi
+
+if [ -z "$(kubectl get node "$NODE" -o jsonpath='{.spec.unschedulable}')" ]; then
+	pass "planning a drain did not cordon the node"
+else
+	fail "a dry run cordoned the node"
 fi
 
 # --------------------------------------------------------------------------
@@ -555,6 +635,247 @@ if [ "$status" = "404" ]; then
 	pass "an unknown remediation answered 404"
 else
 	fail "an unknown remediation answered $status, want 404"
+fi
+
+# --------------------------------------------------------------------------
+# Test 8 — the workload actions
+#
+# Three things unit tests cannot prove: that workload.restart really drives a
+# StatefulSet's rollout to completion, that pod.delete goes through the
+# Eviction API against a real API server, and that a pod nothing owns is
+# refused rather than removed.
+#
+# The actions are off by default, so enabling them is part of the test.
+# --------------------------------------------------------------------------
+step "8. Restarting a StatefulSet, and evicting a pod"
+
+helm upgrade remedik charts/remedik \
+	--namespace "$NAMESPACE" \
+	--set image.repository="${IMAGE%%:*}" \
+	--set image.tag="${IMAGE##*:}" \
+	--set image.pullPolicy=IfNotPresent \
+	--set gateway.auth.token="$TOKEN" \
+	--set dryRun=false \
+	--set dashboard.enabled=true \
+	--set dashboard.port="$DASHBOARD_PORT" \
+	--set dashboard.auth.token="$DASHBOARD_TOKEN" \
+	--set actions.workloadRestart.enabled=true \
+	--set actions.podDelete.enabled=true \
+	--wait --timeout 3m >/dev/null
+kubectl -n "$NAMESPACE" rollout status deploy/remedik --timeout=120s >/dev/null
+start_port_forward
+
+if kubectl -n "$NAMESPACE" logs deploy/remedik --tail=200 2>/dev/null \
+	| grep -q '"actions":\["deployment.restart","pod.delete","workload.restart"\]'; then
+	pass "the operator registered exactly the actions the chart granted"
+else
+	fail "the registered actions do not match what the chart enabled"
+fi
+
+# --- a StatefulSet ---------------------------------------------------------
+sts_before=$(kubectl -n e2e-payments get statefulset ledger \
+	-o jsonpath='{.spec.template.metadata.annotations.kubectl\.kubernetes\.io/restartedAt}' 2>/dev/null || true)
+
+send_workload_alert() {
+	curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+		-X POST "http://127.0.0.1:${LOCAL_PORT}/webhooks/alertmanager" \
+		-H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
+		-d "{\"version\":\"4\",\"alerts\":[{
+		      \"status\":\"firing\",
+		      \"labels\":{\"alertname\":\"$1\",\"namespace\":\"e2e-payments\",\"$2\":\"$3\"},
+		      \"startsAt\":\"2026-08-15T09:00:00Z\",
+		      \"fingerprint\":\"$4\"}]}"
+}
+
+status=$(send_workload_alert E2EStatefulSetStuck statefulset ledger sts-1)
+if [ "$status" = "200" ]; then
+	pass "gateway accepted the StatefulSet alert"
+else
+	fail "gateway answered $status for the StatefulSet alert"
+fi
+
+if wait_for_strategy_state e2e-statefulset Succeeded 120; then
+	sts_after=$(kubectl -n e2e-payments get statefulset ledger \
+		-o jsonpath='{.spec.template.metadata.annotations.kubectl\.kubernetes\.io/restartedAt}' 2>/dev/null || true)
+	if [ -n "$sts_after" ] && [ "$sts_after" != "$sts_before" ]; then
+		pass "the StatefulSet was restarted: ${sts_after}"
+	else
+		fail "the StatefulSet was never restarted"
+	fi
+else
+	fail "the StatefulSet remediation did not succeed within 120s"
+fi
+
+sts_verified=$(kubectl -n "$NAMESPACE" get remediations -l remedik.dev/strategy=e2e-statefulset \
+	-o jsonpath='{.items[0].status.steps[0].verified}' 2>/dev/null || true)
+if echo "$sts_verified" | grep -q 'ready'; then
+	pass "the StatefulSet rollout was confirmed: ${sts_verified}"
+else
+	fail "the StatefulSet rollout was not confirmed (verified=${sts_verified})"
+fi
+
+# --- a pod nothing owns ----------------------------------------------------
+status=$(send_workload_alert E2EPodStuck pod orphan orphan-1)
+if [ "$status" = "200" ]; then
+	pass "gateway accepted the bare-pod alert"
+else
+	fail "gateway answered $status for the bare-pod alert"
+fi
+
+for _ in $(seq 1 30); do
+	orphan_msg=$(kubectl -n "$NAMESPACE" get remediations -l remedik.dev/fingerprint=orphan-1 \
+		-o jsonpath='{.items[0].status.steps[0].message}' 2>/dev/null || true)
+	[ -n "$orphan_msg" ] && break
+	sleep 2
+done
+
+if echo "$orphan_msg" | grep -q 'no controller owner'; then
+	pass "a pod nothing owns was refused, not deleted"
+else
+	fail "the bare pod was not refused (message: ${orphan_msg})"
+fi
+if kubectl -n e2e-payments get pod orphan >/dev/null 2>&1; then
+	pass "the bare pod is still running"
+else
+	fail "the bare pod was removed despite the refusal"
+fi
+
+# --- an owned pod ----------------------------------------------------------
+owned_pod=$(kubectl -n e2e-payments get pods -l app=api2 \
+	-o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+if [ -z "$owned_pod" ]; then
+	fail "no owned pod to evict"
+else
+	status=$(send_workload_alert E2EPodStuck pod "$owned_pod" "evict-1")
+	if [ "$status" = "200" ]; then
+		pass "gateway accepted the eviction alert"
+	else
+		fail "gateway answered $status for the eviction alert"
+	fi
+
+	evicted=""
+	for _ in $(seq 1 45); do
+		evicted=$(kubectl -n "$NAMESPACE" get remediations -l remedik.dev/fingerprint=evict-1 \
+			-o jsonpath='{.items[0].status.steps[0].verified}' 2>/dev/null || true)
+		[ -n "$evicted" ] && break
+		sleep 2
+	done
+	if [ -n "$evicted" ]; then
+		pass "the pod was evicted and confirmed gone: ${evicted}"
+	else
+		fail "the eviction was never confirmed"
+	fi
+fi
+
+# --------------------------------------------------------------------------
+# Test 9 — the guards and the node actions
+#
+# These are the highest-risk verbs in the catalogue, and the two things that
+# cannot be tested without a cluster are exactly the interesting ones: that
+# the blastRadius guard refuses against a real workload's status, and that a
+# drain actually empties a real node through the Eviction API.
+#
+# The worker is used throughout, never the control plane: draining that would
+# leave the test with nowhere to put anything.
+# --------------------------------------------------------------------------
+step "9. Guards refuse, and a node is cordoned then uncordoned"
+
+helm upgrade remedik charts/remedik \
+	--namespace "$NAMESPACE" \
+	--set image.repository="${IMAGE%%:*}" \
+	--set image.tag="${IMAGE##*:}" \
+	--set image.pullPolicy=IfNotPresent \
+	--set gateway.auth.token="$TOKEN" \
+	--set dryRun=false \
+	--set actions.workloadRestart.enabled=true \
+	--set actions.podDelete.enabled=true \
+	--set actions.nodeCordon.enabled=true \
+	--set actions.nodeUncordon.enabled=true \
+	--set actions.nodeDrain.enabled=true \
+	--set guards.blastRadius.enabled=true \
+	--wait --timeout 3m >/dev/null
+kubectl -n "$NAMESPACE" rollout status deploy/remedik --timeout=120s >/dev/null
+start_port_forward
+
+# --- blastRadius ----------------------------------------------------------
+# The strategy demands five available replicas of a Deployment that has one,
+# so the guard must refuse. This is the property unit tests cannot check: the
+# numbers come from a real workload's status.
+count_before=$(remediation_count)
+status=$(send_alert E2EBlastRadius blast-1 api)
+if [ "$status" = "200" ]; then
+	pass "gateway accepted the blastRadius alert"
+else
+	fail "gateway answered $status for the blastRadius alert"
+fi
+sleep 8
+
+if [ "$(remediation_count)" = "$count_before" ]; then
+	pass "blastRadius refused a workload it could not protect"
+else
+	fail "blastRadius let a remediation through"
+fi
+if kubectl get events --all-namespaces --field-selector reason=GuardRejected \
+	-o jsonpath='{range .items[*]}{.message}{"\n"}{end}' 2>/dev/null \
+	| grep -q 'blastRadius'; then
+	pass "the refusal names blastRadius on the strategy"
+else
+	fail "no blastRadius refusal was published"
+fi
+
+# --- cordon, then put it back ---------------------------------------------
+# Cordoning is safe even here: nothing moves and nothing restarts, only new
+# scheduling stops. It is undone immediately afterwards.
+NODE=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
+
+send_node_alert() {
+	curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+		-X POST "http://127.0.0.1:${LOCAL_PORT}/webhooks/alertmanager" \
+		-H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
+		-d "{\"version\":\"4\",\"alerts\":[{
+		      \"status\":\"firing\",
+		      \"labels\":{\"alertname\":\"$1\",\"node\":\"${NODE}\"},
+		      \"startsAt\":\"2026-08-15T09:00:00Z\",
+		      \"fingerprint\":\"$2\"}]}"
+}
+
+unschedulable() {
+	kubectl get node "$NODE" -o jsonpath='{.spec.unschedulable}' 2>/dev/null
+}
+
+status=$(send_node_alert E2ENodeNotReady cordon-1)
+if [ "$status" = "200" ]; then
+	pass "gateway accepted the cordon alert"
+else
+	fail "gateway answered $status for the cordon alert"
+fi
+
+if wait_for_strategy_state e2e-node-cordon Succeeded 90; then
+	if [ "$(unschedulable)" = "true" ]; then
+		pass "the node was cordoned"
+	else
+		fail "the node was not cordoned"
+	fi
+	cordon_verified=$(kubectl -n "$NAMESPACE" get remediations -l remedik.dev/strategy=e2e-node-cordon \
+		-o jsonpath='{.items[0].status.steps[0].verified}' 2>/dev/null || true)
+	if echo "$cordon_verified" | grep -q 'unschedulable'; then
+		pass "the record confirms it: ${cordon_verified}"
+	else
+		fail "the record does not confirm the cordon (${cordon_verified})"
+	fi
+else
+	fail "the cordon remediation did not succeed"
+fi
+
+status=$(send_node_alert E2ENodeSchedulable uncordon-1)
+if wait_for_strategy_state e2e-node-uncordon Succeeded 90; then
+	if [ -z "$(unschedulable)" ] || [ "$(unschedulable)" = "false" ]; then
+		pass "the node was uncordoned again"
+	else
+		fail "the node was left cordoned"
+	fi
+else
+	fail "the uncordon remediation did not succeed (status ${status})"
 fi
 
 # --------------------------------------------------------------------------

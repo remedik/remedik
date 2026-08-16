@@ -9,7 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 
 	"github.com/ratyx/remedik/internal/action"
 )
@@ -26,6 +26,10 @@ const (
 	EventReasonRemediationFailed = "RemediationFailed"
 )
 
+// The events API also carries an `action` field alongside the reason.
+// remedik puts the action's name there, so `kubectl get events -o wide`
+// shows which verb touched the object without anyone opening the record.
+
 // TargetEvents publishes step progress on the object being remediated.
 //
 // The engine holds targets as "kind/namespace/name" strings, and an event
@@ -34,7 +38,7 @@ const (
 // addressable events with no entry to add anywhere.
 type TargetEvents struct {
 	// Recorder publishes the events.
-	Recorder record.EventRecorder
+	Recorder events.EventRecorder
 	// Mapper turns a target's kind into an addressable API kind.
 	Mapper meta.RESTMapper
 	// Remediation names the record this step belongs to, so a reader can
@@ -52,7 +56,7 @@ type TargetEvents struct {
 
 // Starting implements StepEvents.
 func (e *TargetEvents) Starting(ctx context.Context, target action.Target, actionName string, index int) {
-	e.publish(ctx, target, corev1.EventTypeNormal, EventReasonRemediating,
+	e.publish(ctx, target, corev1.EventTypeNormal, EventReasonRemediating, actionName,
 		"step %d: running %s (remediation %s/%s, strategy %s)",
 		index+1, actionName, e.Namespace, e.Remediation, e.Strategy)
 }
@@ -64,7 +68,7 @@ func (e *TargetEvents) Succeeded(
 	if summary == "" {
 		summary = actionName + " completed"
 	}
-	e.publish(ctx, target, corev1.EventTypeNormal, EventReasonRemediated,
+	e.publish(ctx, target, corev1.EventTypeNormal, EventReasonRemediated, actionName,
 		"step %d: %s (remediation %s/%s, strategy %s)",
 		index+1, summary, e.Namespace, e.Remediation, e.Strategy)
 }
@@ -76,7 +80,7 @@ func (e *TargetEvents) Finished(
 	if err == nil {
 		return
 	}
-	e.publish(ctx, target, corev1.EventTypeWarning, EventReasonRemediationFailed,
+	e.publish(ctx, target, corev1.EventTypeWarning, EventReasonRemediationFailed, actionName,
 		"step %d: %s failed: %v (remediation %s/%s, strategy %s)",
 		index+1, actionName, err, e.Namespace, e.Remediation, e.Strategy)
 }
@@ -87,7 +91,7 @@ func (e *TargetEvents) Finished(
 // not the remediation: refusing to restart a Deployment because its kind
 // could not be resolved for an event would be the tail wagging the dog.
 func (e *TargetEvents) publish(
-	_ context.Context, target action.Target, eventType, reason, format string, args ...any,
+	_ context.Context, target action.Target, eventType, reason, actionName, format string, args ...any,
 ) {
 	if e.Recorder == nil {
 		return
@@ -100,7 +104,11 @@ func (e *TargetEvents) publish(
 		return
 	}
 
-	e.Recorder.Eventf(ref, eventType, reason, format, args...)
+	// The events API carries `regarding` and `related` objects. remedik has
+	// no second object to name: the remediation record is in the message,
+	// where a reader can copy it, rather than as a reference nothing links
+	// back from.
+	e.Recorder.Eventf(ref, nil, eventType, reason, actionName, format, args...)
 }
 
 // reference turns a target into something the event recorder can address.

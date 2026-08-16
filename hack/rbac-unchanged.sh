@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 #
-# Proves that enabling the dashboard grants remedik nothing.
+# Checks the chart's central promise about permissions: remedik holds a
+# permission only because a named, enabled feature needs it.
 #
-# The chart's rule is that a permission exists only because a named, enabled
-# feature needs it. The dashboard needs none: it reads Remediation and
-# RemediationStrategy resources through the manager's cache, which the
-# operator already watches in order to reconcile them.
+# Three things are verified, because each can break independently:
 #
-# That is a claim about rendered manifests, so it is checked as one: the
-# Role and ClusterRole must come out byte-identical with the dashboard on
-# and off. A future change that quietly adds a rule behind
-# `if .Values.dashboard.enabled` fails here.
+#   1. With every action disabled, the ClusterRole grants nothing on any
+#      workload. If that ever stops being true, some rule has escaped the
+#      catalogue and is being granted unconditionally.
+#   2. Enabling one action adds rules, and they are that action's rules.
+#   3. The read-only dashboard changes nothing at all.
 #
 # Usage:  hack/rbac-unchanged.sh   (run by `make helm-lint`)
 set -euo pipefail
@@ -26,28 +25,112 @@ command -v helm >/dev/null || {
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
+FAILED=0
+
+fail() {
+	echo "FAIL: $*" >&2
+	FAILED=1
+}
+
+# render <extra helm --set flags...> -> the rendered ClusterRole and Role
 render() {
 	helm template remedik "$CHART" \
 		--namespace remedik \
 		--set gateway.auth.token=rbac-check \
+		--set actions.deploymentRestart.enabled=false \
 		--show-only templates/rbac.yaml \
 		"$@"
 }
 
-render >"$WORK/dashboard-off.yaml"
-render --set dashboard.enabled=true --set dashboard.auth.token=rbac-check >"$WORK/dashboard-on.yaml"
+# --------------------------------------------------------------------------
+# 1. Nothing enabled grants nothing on workloads
+# --------------------------------------------------------------------------
+render >"$WORK/none.yaml"
 
-if diff -u "$WORK/dashboard-off.yaml" "$WORK/dashboard-on.yaml"; then
-	echo "RBAC is identical with the dashboard enabled and disabled"
-	exit 0
+for forbidden in deployments statefulsets daemonsets replicasets pods jobs secrets configmaps \
+	pods/log horizontalpodautoscalers nodes persistentvolumeclaims storageclasses; do
+	if grep -q -- "- $forbidden\$" "$WORK/none.yaml"; then
+		fail "with every action disabled, the ClusterRole still grants '$forbidden'"
+	fi
+done
+
+# --------------------------------------------------------------------------
+# 2. Each action grants its own rules, and only when enabled
+# --------------------------------------------------------------------------
+check_action() {
+	local key="$1" resource="$2"
+	render --set "actions.${key}.enabled=true" >"$WORK/${key}.yaml"
+
+	if diff -q "$WORK/none.yaml" "$WORK/${key}.yaml" >/dev/null; then
+		fail "enabling ${key} granted nothing; its entry in action-rbac.yaml is missing or misnamed"
+		return
+	fi
+	if ! grep -q -- "- ${resource}\$" "$WORK/${key}.yaml"; then
+		fail "enabling ${key} did not grant '${resource}'"
+		return
+	fi
+	echo "  ${key} grants ${resource} only when enabled"
+}
+
+check_action deploymentRestart deployments
+check_action workloadRestart statefulsets
+check_action podDelete pods/eviction
+check_action jobDelete jobs
+check_action deploymentRollback replicasets
+check_action deploymentScale deployments/scale
+check_action hpaScale horizontalpodautoscalers
+check_action nodeCordon nodes
+check_action nodeDrain pods/eviction
+check_action pvcExpand storageclasses
+check_action webhookCall secrets
+check_action jobRun pods/log
+check_action scriptRun configmaps
+
+# The blastRadius guard is not an action, but it is the same kind of thing:
+# a named feature holding a read-only permission only while it is enabled.
+render --set guards.blastRadius.enabled=true >"$WORK/blastRadius.yaml"
+if grep -q -- "- replicasets\$" "$WORK/blastRadius.yaml"; then
+	echo "  blastRadius grants replicasets only when enabled"
+else
+	fail "enabling the blastRadius guard did not grant the reads it needs"
 fi
 
-cat >&2 <<'EOF'
+# --------------------------------------------------------------------------
+# 3. The dashboard changes nothing
+#
+# It reads Remediation and RemediationStrategy resources through the
+# manager's cache, which the reconciler already watches in order to
+# reconcile them. A future change that quietly adds a rule behind
+# `if .Values.dashboard.enabled` fails here.
+# --------------------------------------------------------------------------
+dashboard_off="$WORK/dashboard-off.yaml"
+dashboard_on="$WORK/dashboard-on.yaml"
 
-The dashboard changed the rendered RBAC.
+helm template remedik "$CHART" --namespace remedik \
+	--set gateway.auth.token=rbac-check \
+	--show-only templates/rbac.yaml >"$dashboard_off"
+helm template remedik "$CHART" --namespace remedik \
+	--set gateway.auth.token=rbac-check \
+	--set dashboard.enabled=true --set dashboard.auth.token=rbac-check \
+	--show-only templates/rbac.yaml >"$dashboard_on"
 
-Enabling a read-only page must not widen what remedik may do in a cluster.
-Either the new rule belongs to a feature that is not the dashboard, or the
-dashboard is reading something it should not.
+if diff -u "$dashboard_off" "$dashboard_on"; then
+	echo "  the dashboard grants nothing"
+else
+	fail "enabling the read-only dashboard changed the rendered RBAC"
+fi
+
+# --------------------------------------------------------------------------
+if [ "$FAILED" -ne 0 ]; then
+	cat >&2 <<'EOF'
+
+A permission is granted by something other than the action that needs it.
+
+Every rule in the ClusterRole should come from charts/remedik/action-rbac.yaml
+and appear only when its action is enabled. Either a rule has been added
+outside that table, or an action's key does not match the one in values.yaml.
 EOF
-exit 1
+	exit 1
+fi
+
+echo "RBAC follows the enabled actions, and nothing else"

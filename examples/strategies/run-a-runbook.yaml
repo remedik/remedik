@@ -1,0 +1,45 @@
+# Run the runbook somebody already wrote.
+#
+# `script.run` takes the script from a ConfigMap in remedik's namespace and
+# runs it as a Job. The runbook can be edited with kubectl; no image rebuild,
+# no release.
+#
+#   kubectl -n remedik create configmap runbooks --from-file=collect.sh
+#
+# Two things decide whether this is safe, and neither is remedik:
+#
+#   1. The ServiceAccount. The Job runs as the one named here, never as
+#      remedik — which is refused explicitly. Give it exactly the access the
+#      script needs and nothing else.
+#   2. The image. Everything the script can call has to be in it.
+#
+# The script gets the alert in its environment: REMEDIK_ALERT_<LABEL> for
+# each label, plus REMEDIK_ALERT_LABELS as JSON, and REMEDIK_STRATEGY,
+# REMEDIK_REMEDIATION and REMEDIK_TARGET.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: collect-diagnostics
+spec:
+  enabled: true
+  trigger:
+    match:
+      alertname: KubePodCrashLooping
+  guards:
+    cooldown: 20m
+    maxPerHour: 6
+  steps:
+    - action: script.run
+      with:
+        image: bitnami/kubectl:1.31
+        configMap: runbooks
+        key: collect.sh
+        serviceAccount: diagnostics-collector
+        # How long remedik waits for the Job before failing the step. The
+        # Job itself keeps running; this is how long the remediation is
+        # willing to hold the queue.
+        verifyTimeout: 5m
+        # Keep the finished Job for a day, so its logs outlive the incident.
+        ttlSecondsAfterFinished: "86400"
+  onFailure:
+    retries: 0

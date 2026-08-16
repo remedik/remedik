@@ -1,0 +1,29 @@
+# Stop putting work on a node that is not well.
+#
+# Cordoning is the safest thing remedik can do: nothing moves, nothing
+# restarts, new pods go elsewhere, and `kubectl uncordon` undoes it. It is
+# the right first response to almost every node alert, and it buys a person
+# time to decide whether the node needs draining or just a minute.
+#
+# Deliberately NOT paired with a drain here. Cordon first, look, then drain
+# if it is still bad — that is what an on-call engineer does, and automating
+# the second step is a much bigger decision than automating the first.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: node-not-ready
+spec:
+  enabled: true
+  trigger:
+    match:
+      alertname: KubeNodeNotReady
+  guards:
+    # Per node: one cordon is enough, and the second alert about the same
+    # node is not new information.
+    cooldown: 1h
+    # An alert storm across the fleet must not cordon the whole cluster.
+    maxPerHour: 3
+  steps:
+    - action: node.cordon
+  onFailure:
+    retries: 1

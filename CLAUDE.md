@@ -14,8 +14,9 @@ decide, the engine executes, and the outcome is a `Remediation` resource.
 
 This repository explains itself. Read these before proposing changes:
 
-- **`openspec/specs/`** — the current behaviour contract, five capabilities.
-  This is authoritative; code that disagrees with it is a bug in one of them.
+- **`openspec/specs/`** — the current behaviour contract, eleven
+  capabilities. This is authoritative; code that disagrees with it is a bug
+  in one of them. `make specs` checks the workflow was followed.
 - **`openspec/changes/archive/`** — what was proposed and why, including the
   reasoning that did not make it into the code.
 - **`docs/adr/`** — structural decisions and the arguments behind them.
@@ -45,12 +46,17 @@ This repository explains itself. Read these before proposing changes:
 6. **The gateway answers 200 to anything it understood**, including "no
    strategy matched". Alertmanager retries non-2xx, so a normal outcome must
    not look like a failure.
-7. **The dashboard never writes.** It is built from a `client.Reader` and
+7. **An action's authority is named, never inherited.** A remediation Job
+   runs as the ServiceAccount its step names — never remedik's, which is
+   refused — and Secrets and ConfigMaps are read from remedik's own
+   namespace only. A label on an alert must never decide which credential is
+   used, or whose code runs.
+8. **The dashboard never writes.** It is built from a `client.Reader` and
    allowlists GET and HEAD before routing. Both layers are deliberate: one
    makes a write impossible to call, the other makes it impossible to
    reach. An approve button needs the identity model the Slack change
    introduces, so that the audit trail records *who* asked.
-8. **English everywhere** in the repository: code, comments, docs, commits.
+9. **English everywhere** in the repository: code, comments, docs, commits.
 
 ## Workflow
 
@@ -68,7 +74,8 @@ updated. For anything touching cluster behaviour, `make e2e` too.
 ## Commands
 
 ```bash
-make verify        # gofmt, vet, golangci-lint, yamllint, helm lint, race tests
+make verify        # gofmt, vet, golangci-lint, yamllint, helm lint, specs, race tests
+make specs         # the spec-first workflow was actually followed
 make e2e           # throwaway kind cluster, the whole loop, then cleanup
 make generate manifests   # after changing api/ — CI fails on stale output
 make versions      # pinned versions vs. latest upstream
@@ -87,6 +94,7 @@ internal/action/     The Resolve/Plan/Execute contract + registry
 internal/engine/     Sink (alert → record) and the reconciler
 internal/metrics/    Prometheus adapters behind the Recorder interfaces
 internal/dashboard/  Read-only web UI; templates and CSS embedded in the binary
+internal/action/external/  webhook.call, job.run, script.run — the widest trust surface
 charts/remedik/      Helm chart; RBAC assembled from enabled actions
 hack/e2e.sh          The end-to-end test
 ```
@@ -96,7 +104,47 @@ most are the ones that must be easiest to test. Keep them that way.
 
 ## Open work
 
-Nothing is open. `add-readonly-gui` was implemented and archived on
-2026-08-16; the next things on the roadmap are the Slack bot with approval
-buttons (which brings the identity model), the `job` and `script` actions,
-and audit sinks.
+Nothing is open. Ten changes were implemented and archived on 2026-08-16 —
+the read-only dashboard, the action contract's second version, the workload
+actions, the observability bundle, launch readiness, the escape hatches, the
+`blastRadius` guard, scaling and rollback, and the node actions.
+
+Fourteen actions across four groups, three guards, sixteen capabilities in
+`openspec/specs/`.
+
+### Before this can go online
+
+Neither of these is a code change, and neither can be done from here:
+
+1. **`release.yml` has never run.** Multi-arch image, cosign keyless
+   signing, SBOM attestation and the chart push to OCI all look right and
+   none of them is proven. A `v0.1.0-rc.1` tag is the test.
+2. **There is no GitHub remote.** The CI badges, the chart's `icon:` URL and
+   the security-advisory link in the issue templates all assume
+   `github.com/ratyx/remedik` exists.
+
+### Asked for by the owner, not yet designed
+
+Recorded here so they survive a cold pickup. None has a change written yet.
+
+- **Per-namespace posture.** `dryRun` is global today: one flag on the
+  operator. The owner wants the combination — act in some namespaces, only
+  report in others. This is probably the most valuable item on the list,
+  because it is how people actually adopt a tool that holds write access:
+  live in `staging`, dry-run in `prod`, until the reports earn the change.
+  It needs a decision about where the setting lives — the chart, the
+  strategy, or a `Namespace` label — and each answer has a different failure
+  mode when the setting and the RBAC disagree.
+- **Namespace filtering in the dashboard.** Straightforward; the pages
+  already read everything they would filter.
+- **Cluster filtering in the dashboard.** Implies hub/spoke, which is
+  "Later" on the roadmap: today's operator sees one cluster because it runs
+  in one.
+- **Continuous capability checks with SLI/SLO output.** A workload that
+  continuously exercises what a cluster can do — schedule a Deployment,
+  reach an Ingress, egress, container runtime, etcd and API latency — and
+  turns it into quantifiable service levels. Effectively a second product
+  beside this one, and it deserves its own change and its own argument about
+  what it measures. The nearest existing art is the Kubernetes e2e suite and
+  synthetic monitoring; the interesting part is making the results a service
+  level rather than a pass/fail.

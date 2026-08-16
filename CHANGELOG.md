@@ -14,6 +14,194 @@ rather than a proposal.
 
 ### Added
 
+- **Node actions and volume expansion** (`add-node-actions`), landing last
+  on purpose — after the contract could verify its own work and after a
+  guard existed that could bound them:
+
+  - **`node.cordon`** and **`node.uncordon`** — the safest pair in the
+    catalogue and the right first response to almost every node alert:
+    nothing moves, nothing restarts, and one command undoes either. Two
+    verbs, so a strategy can be granted "stop scheduling here" without being
+    granted the ability to drain. Both are idempotent, because an alert
+    fires repeatedly and a strategy that failed on the second firing would
+    be unusable.
+  - **`node.drain`** — cordons first (draining without it races the
+    scheduler), then evicts every eligible pod through the Eviction API. It
+    is the one place in remedik where a 429 is not an immediate failure: a
+    drain is a loop, and a PodDisruptionBudget saying "not yet" is the
+    normal answer partway through one, so refusals are retried until the
+    step's timeout. **A drain that does not finish fails the step, and the
+    node stays cordoned** — half-drained is the worst state to leave a node
+    in, and reporting it as success would lose capacity no dashboard
+    accounts for. DaemonSet pods, mirror pods and pods with no controller
+    are skipped, with the record saying how many and why. This is the widest
+    permission remedik holds, and the chart says so.
+  - **`pvc.expand`** — grows a claim, but only where the StorageClass sets
+    `allowVolumeExpansion`. Without that check the API server accepts the
+    patch and nothing happens: remedik would record a success that did
+    nothing, which is worse than failing because nobody goes looking. It
+    never shrinks, and it says on the record that expansion is one-way.
+
+- **Scaling and rollback** (`add-scaling-and-rollback`), the *careful* tier
+  the `blastRadius` guard was built to bound:
+
+  - **`deployment.rollback`** — what `kubectl rollout undo` does, and the
+    highest-value action in the catalogue: the usual cause of a crash loop
+    at 3am is the deploy at 2:50. It **refuses a workload Argo CD or Flux
+    manages**, because those controllers revert a rollback within minutes —
+    remedik would record a success while the outage continued, and the
+    incident would spend its time discovering that two systems are fighting.
+    The refusal names the controller and says to revert the commit instead.
+  - **`deployment.scale`** — sets or increases replicas, and **refuses a
+    Deployment a HorizontalPodAutoscaler targets**, because the autoscaler
+    reverts it on its next interval. A relative increase must state a
+    ceiling: "increase by" with no maximum is an alert storm with a credit
+    card, and a default here would be a number invented for somebody else's
+    budget. Verification waits for the replicas to become *available* —
+    replicas that cannot schedule are not capacity.
+  - **`hpa.scale`** — raises an autoscaler's `maxReplicas`, the one
+    mechanical answer to `KubeHpaMaxedOut`. It never lowers one: reducing
+    headroom during an incident is not a remediation.
+
+  There is deliberately no scale-down verb. Every alert that reaches remedik
+  says something is unhealthy, and "run less of it" is not an answer to that.
+
+- **A third guard: `blastRadius`** (`add-blast-radius-guard`). The other two
+  ask about time — how recently, how often. This one asks about state: how
+  broken is this workload already? `minAvailable` refuses while it has that
+  many available replicas or fewer ("never touch the last one");
+  `maxUnavailablePercent` refuses while that share is already unavailable
+  ("do not add to something already struggling").
+
+  It is what bounds the actions that *remove* capacity rather than replacing
+  it, and it lands **before** the node actions rather than after — shipping
+  destructive verbs and bounding them later means every cluster that
+  upgraded in between ran them unbounded.
+
+  It is a second opinion beside a PodDisruptionBudget, not a substitute: the
+  PDB was written by whoever owns the workload, this by whoever decided an
+  automated system may act on it unattended. Most workloads have no PDB at
+  all.
+
+  **The guard fails closed.** If the workload cannot be read — no
+  permission, an API error — it refuses, and the refusal names the missing
+  permission on the strategy's events. A guard that permits an execution
+  when it could not evaluate its own condition is not a guard, it is a
+  comment. "Nothing to measure" is treated as a different answer: a node has
+  no replica count, so the guard allows rather than paralysing the cluster.
+
+- **Three escape hatches** (`add-escape-hatches`), because four built-in
+  verbs will never cover what people need at 3am and "remedik cannot do X"
+  is a reason not to install it at all:
+
+  - **`webhook.call`** — POSTs the alert, the strategy and the plan to a URL,
+    optionally authenticated from a Secret in remedik's own namespace. A
+    response outside 2xx fails the step, with the body on the record: a
+    pipeline that answered 500 did not run, and a Succeeded record beside it
+    would be a lie the audit trail tells for ever. The credential never
+    reaches the record or the recorded command.
+  - **`job.run`** — runs an image as a Job **in remedik's own namespace**,
+    under a ServiceAccount the step names. Never remedik's own, which is
+    refused explicitly; the default is `default`, which can do nothing, so
+    forgetting produces a Job that cannot act rather than one that can do
+    everything the operator can. The command is a JSON array, so no quoting
+    rules are invented. Verification waits for the Job and records its exit
+    code and the tail of its output.
+  - **`script.run`** — the same with the script mounted from a ConfigMap in
+    remedik's namespace, so a runbook can be edited with kubectl. Read from
+    that namespace only: anywhere else and anyone with write access to any
+    namespace could have code executed by the operator.
+
+- **`action.Request`** replaces the widening parameter list on `Plan`,
+  `Execute` and `Verify`. It carries the alert's labels and the identity of
+  the remediation and strategy, which a verb handing the incident to
+  something outside the cluster cannot work without — a gap that was
+  invisible while every action restarted something it had already resolved.
+
+- **The chart ships the NetworkPolicy SECURITY.md promised.** It named
+  NetworkPolicies as a v0.1.0 commitment and the chart created none, which
+  is the kind of gap that costs more credibility than the feature was worth.
+  It is ingress-only and opt-in, naming who may reach the gateway, metrics
+  and the dashboard — and the chart *refuses to render* one with no peers
+  for the gateway, because that policy would stop Alertmanager silently and
+  silence is this project's worst failure mode. Egress is deliberately not
+  restricted: remedik's one outbound call is to the API server, whose
+  address belongs to the cluster rather than to a chart that would be
+  guessing.
+
+- **`priorityClassName`**, because a single-replica operator evicted under
+  node pressure stops remediating and nothing reports that it has.
+
+- **`make specs`** checks that the spec-first workflow was actually
+  followed: every change carries its reasoning, every capability spec states
+  requirements with scenarios and the word SHALL, nothing is archived with
+  unfinished tasks, and every archived change's capability reached
+  `openspec/specs/`. CONTRIBUTING.md made those claims; now something checks
+  them. Dependency-free on purpose — a gate that only runs where somebody
+  installed a tool is not a gate.
+
+- **remedik can now be monitored** (`add-observability-bundle`). The metrics
+  had existed since the MVP and nothing had ever scraped them:
+  kube-prometheus-stack discovers `ServiceMonitor` resources, and the chart
+  only ever created a Service, so a stock install collected exactly zero
+  `remedik_*` series.
+
+  - Four metrics describing the operator's **posture** rather than its
+    throughput: `remedik_build_info`, `remedik_dry_run`,
+    `remedik_strategies` by enabled state and `remedik_remediation_records`
+    by state. Without them a flat remediation rate is unreadable — dry-run,
+    no enabled strategies and a quiet week look identical. The two that
+    depend on cluster state come from a collector reading the manager's
+    cache when Prometheus scrapes, so they cost no API call and cannot go
+    stale; a read that fails reports no series rather than zero, because
+    zero enabled strategies is a real and alarming value.
+  - An optional **`ServiceMonitor`** with configurable labels. The labels
+    are load-bearing: the Prometheus Operator selects on them, and one
+    created without the selector's label is created, ignored, and hard to
+    notice.
+  - An optional **`PrometheusRule`** with six alerts about remedik itself —
+    down, ingest failing, nothing ever matching, most remediations failing,
+    deliveries truncated, repeated unauthenticated attempts. Something
+    holding write access to a cluster should be watched by the same
+    monitoring it consumes.
+  - A **Grafana dashboard**, versioned in the chart and optionally shipped
+    as a ConfigMap. Every series colour is pinned by name, because Grafana
+    assigns palette colours by series order: without pinning, filtering out
+    a series repaints the survivors and "Failed" inherits the colour
+    "Succeeded" had.
+
+- **Three more actions** (`add-workload-actions`), all reversible and scoped
+  to one object:
+
+  - **`workload.restart`** — the rolling restart, for StatefulSets and
+    DaemonSets as well as Deployments. It takes the kind from whichever of
+    the `deployment`, `statefulset` or `daemonset` labels the alert carries,
+    because in the kubernetes-mixin alerts the label naming the object also
+    says what it is. `deployment.restart` stays exactly as it was, so
+    existing strategies keep working and keep their narrower permission.
+  - **`pod.delete`** — evicts one pod **through the Eviction API, never a
+    delete**. Deleting a pod ignores PodDisruptionBudgets entirely; eviction
+    is the only call that checks them, and a 429 is recorded as a refusal
+    naming the budget, with the pod left running. The permission granted
+    says the same thing: `create` on `pods/eviction`, never `delete` on
+    `pods`. It also refuses a pod with no controller owner, because nothing
+    would recreate it — that is deletion, not remediation — unless the step
+    says `requireOwner: "false"`.
+  - **`job.delete`** — removes a failed Job and its pods so the CronJob that
+    owns it produces a clean run.
+
+  All three verify their own work: the rollout completes, the pod is gone or
+  replaced by one with a different UID, the Job no longer exists.
+
+- **The chart's action permissions are now a table.**
+  `charts/remedik/action-rbac.yaml` lists what each action may do and why;
+  the ClusterRole grants an action's rules only when it is enabled. The same
+  values decide which actions the operator registers, so a strategy naming a
+  disabled action is reported as unusable when it is applied rather than
+  failing during the incident it was written for. `make helm-lint` now
+  checks that with every action off, nothing is granted on any workload, and
+  that enabling one grants that one's rules.
+
 - **A step now reports whether the remediation worked, not just that the API
   call was accepted** (`add-action-contract-v2`). Actions may implement an
   optional `Verify`: a read-only post-condition the engine calls after
@@ -151,6 +339,15 @@ rather than a proposal.
 
 ### Changed
 
+- **The chart no longer ships values that do nothing.** `slack`,
+  `escalation.pagerduty`, `audit.sinks`, `ai` and `packs` described features
+  that are designed and not built. A key that quietly does nothing is worse
+  than a missing one, because somebody sets it, believes it, and finds out
+  during an incident. The designs stay in `docs/advanced-setup.md`, which
+  says on its first line that none of it has shipped.
+- Events are published through `k8s.io/client-go/tools/events` rather than
+  the deprecated `record` API, which also gives each event an `action`
+  field naming the verb that ran.
 - Minimum Go version is now 1.26 (matches the Kubernetes ecosystem, which
   controller-runtime requires).
 - Pinned previously floating versions: kube-prometheus-stack 88.3.0, kind

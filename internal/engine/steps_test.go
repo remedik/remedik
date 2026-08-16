@@ -35,7 +35,8 @@ func (a *scriptedAction) Resolve(_ map[string]string, _ action.Params) (action.T
 	return a.target, nil
 }
 
-func (a *scriptedAction) Plan(_ context.Context, t action.Target, _ action.Params) (action.Result, error) {
+func (a *scriptedAction) Plan(_ context.Context, req action.Request) (action.Result, error) {
+	t := req.Target
 	a.planCalls++
 	if a.planErr != nil {
 		return action.Result{}, a.planErr
@@ -46,7 +47,8 @@ func (a *scriptedAction) Plan(_ context.Context, t action.Target, _ action.Param
 	}, nil
 }
 
-func (a *scriptedAction) Execute(_ context.Context, t action.Target, _ action.Params) (action.Result, error) {
+func (a *scriptedAction) Execute(_ context.Context, req action.Request) (action.Result, error) {
+	t := req.Target
 	a.execCalls++
 	if a.execErr != nil {
 		return action.Result{}, a.execErr
@@ -69,7 +71,7 @@ type verifyingAction struct {
 }
 
 func (a *verifyingAction) Verify(
-	ctx context.Context, _ action.Target, _ action.Params,
+	ctx context.Context, _ action.Request, _ action.Result,
 ) (action.Result, error) {
 	a.verifyCalls++
 	says := a.verifySays

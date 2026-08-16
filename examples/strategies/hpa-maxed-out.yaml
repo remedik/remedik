@@ -1,0 +1,35 @@
+# Give an autoscaler more headroom when it has run out.
+#
+# `KubeHpaMaxedOut` means the autoscaler is pinned at its ceiling and still
+# under pressure, so the ceiling is the thing that is wrong. Raising it is
+# the one mechanical answer; whether the autoscaler then uses the headroom is
+# its own decision, and the record says so.
+#
+# `hpa.scale` never lowers a ceiling. Reducing an autoscaler's headroom
+# during an incident is not a remediation.
+#
+# Note what this costs: more replicas is more money. The ceiling below is a
+# real number somebody has to be willing to pay for, which is why `max` is
+# required rather than defaulted.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: hpa-maxed-out
+spec:
+  enabled: true
+  trigger:
+    match:
+      alertname: KubeHpaMaxedOut
+  guards:
+    # Headroom given once an hour, four times a day at most. If it is still
+    # not enough, the answer is a person, not another 20%.
+    cooldown: 1h
+    maxPerHour: 1
+  steps:
+    - action: hpa.scale
+      with:
+        increasePercent: "20"
+        # The number you are willing to pay for.
+        max: "40"
+  onFailure:
+    retries: 0

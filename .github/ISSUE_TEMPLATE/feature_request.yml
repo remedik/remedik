@@ -1,0 +1,37 @@
+name: Feature request
+description: Something remedik should be able to do
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        remedik is developed spec-first: a change is proposed in `openspec/`
+        and approved before it is written. An issue is where that starts, so
+        the most useful thing you can describe is the incident, not the
+        feature — the alert you got at 3am and what you did about it by hand.
+
+  - type: textarea
+    id: incident
+    attributes:
+      label: The alert, and what you do about it by hand
+      description: Which alert fires, and what you type when it does?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like remedik to do
+    validations:
+      required: true
+
+  - type: textarea
+    id: blast-radius
+    attributes:
+      label: What it costs when it is wrong
+      description: >-
+        The question that decides whether something may run unattended. If
+        this ran on the wrong object, or at the wrong moment, what would
+        happen?
+    validations:
+      required: true

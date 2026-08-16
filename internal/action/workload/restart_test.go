@@ -138,7 +138,7 @@ func TestDeploymentRestart_PlanDescribesWithoutMutating(t *testing.T) {
 	c := &stubClient{deployment: deployment("payments", "api", 3)}
 	a := NewDeploymentRestart(c, func() time.Time { return fixedClock })
 
-	plan, err := a.Plan(context.Background(), target, nil)
+	plan, err := a.Plan(context.Background(), action.Request{Target: target, Params: nil})
 	if err != nil {
 		t.Fatalf("Plan() error = %v, want nil", err)
 	}
@@ -156,7 +156,7 @@ func TestDeploymentRestart_Execute(t *testing.T) {
 	c := &stubClient{deployment: deployment("payments", "api", 2)}
 	a := NewDeploymentRestart(c, func() time.Time { return fixedClock })
 
-	got, err := a.Execute(context.Background(), target, nil)
+	got, err := a.Execute(context.Background(), action.Request{Target: target, Params: nil})
 	if err != nil {
 		t.Fatalf("Execute() error = %v, want nil", err)
 	}
@@ -181,8 +181,12 @@ func TestDeploymentRestart_MissingTarget(t *testing.T) {
 		name string
 		call func() (action.Result, error)
 	}{
-		{"Plan", func() (action.Result, error) { return a.Plan(context.Background(), target, nil) }},
-		{"Execute", func() (action.Result, error) { return a.Execute(context.Background(), target, nil) }},
+		{"Plan", func() (action.Result, error) {
+			return a.Plan(context.Background(), action.Request{Target: target, Params: nil})
+		}},
+		{"Execute", func() (action.Result, error) {
+			return a.Execute(context.Background(), action.Request{Target: target, Params: nil})
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := tc.call()
@@ -204,7 +208,7 @@ func TestDeploymentRestart_MissingTarget(t *testing.T) {
 func TestDeploymentRestart_PermissionDenied(t *testing.T) {
 	t.Run("on read", func(t *testing.T) {
 		a := NewDeploymentRestart(&stubClient{getErr: forbidden("api")}, nil)
-		_, err := a.Execute(context.Background(), target, nil)
+		_, err := a.Execute(context.Background(), action.Request{Target: target, Params: nil})
 		if err == nil || !strings.Contains(err.Error(), "not permitted to read") {
 			t.Errorf("error = %v, want a clear permission error", err)
 		}
@@ -213,7 +217,7 @@ func TestDeploymentRestart_PermissionDenied(t *testing.T) {
 	t.Run("on patch", func(t *testing.T) {
 		c := &stubClient{deployment: deployment("payments", "api", 1), patchErr: forbidden("api")}
 		a := NewDeploymentRestart(c, nil)
-		_, err := a.Execute(context.Background(), target, nil)
+		_, err := a.Execute(context.Background(), action.Request{Target: target, Params: nil})
 		if err == nil || !strings.Contains(err.Error(), "not permitted to patch") {
 			t.Errorf("error = %v, want a clear permission error", err)
 		}
@@ -224,7 +228,7 @@ func TestDeploymentRestart_DefaultsReplicasWhenUnset(t *testing.T) {
 	d := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: "payments", Name: "api"}}
 	a := NewDeploymentRestart(&stubClient{deployment: d}, nil)
 
-	plan, err := a.Plan(context.Background(), target, nil)
+	plan, err := a.Plan(context.Background(), action.Request{Target: target, Params: nil})
 	if err != nil {
 		t.Fatalf("Plan() error = %v", err)
 	}

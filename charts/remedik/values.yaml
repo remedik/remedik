@@ -1,7 +1,10 @@
 # remedik chart values.
 #
-# Keys marked "planned for v0.2.0" describe the agreed design of features
-# that are not implemented yet; they are inert in this release.
+# Every key here does something. Settings for features that are designed but
+# not built are deliberately absent: a value that quietly does nothing is
+# worse than a missing one, because somebody sets it, believes it, and finds
+# out during an incident. The designs live in docs/advanced-setup.md, which
+# says on its first line that nothing on it has shipped.
 
 image:
   # -- Container image repository
@@ -65,19 +68,197 @@ metrics:
   # -- Port the Prometheus metrics endpoint listens on
   port: 8080
 
+serviceMonitor:
+  # -- Create a ServiceMonitor so the Prometheus Operator scrapes remedik.
+  # Off by default because not every cluster uses the operator — but without
+  # it, or an equivalent scrape config, remedik is instrumented and
+  # unmonitored: a Service alone is not discovered.
+  enabled: false
+  # -- Namespace for the ServiceMonitor; defaults to the release namespace
+  namespace: ""
+  # -- Labels the ServiceMonitor needs to be selected. kube-prometheus-stack
+  # selects on `release: <its release name>` by default, so this is usually
+  # `{release: monitoring}`. A ServiceMonitor without it is created, ignored,
+  # and hard to notice.
+  additionalLabels: {}
+  # -- How often Prometheus scrapes remedik
+  interval: 30s
+  # -- How long a scrape may take. The posture metrics read the operator's
+  # cache, so a slow scrape means the cache is gone.
+  scrapeTimeout: 10s
+  # -- Relabelings applied before the scrape
+  relabelings: []
+  # -- Relabelings applied to the scraped metrics
+  metricRelabelings: []
+
+prometheusRule:
+  # -- Create a PrometheusRule alerting on remedik itself: down, ingest
+  # failing, nothing matching, remediations failing, deliveries truncated,
+  # unauthenticated attempts. Something that holds write access to a cluster
+  # should be watched by the same monitoring it consumes.
+  enabled: false
+  # -- Namespace for the PrometheusRule; defaults to the release namespace
+  namespace: ""
+  # -- Labels the PrometheusRule needs to be selected, as for the ServiceMonitor
+  additionalLabels: {}
+  severity:
+    # -- Severity label for the rule that fires when remedik is not scraped
+    critical: critical
+    # -- Severity label for the rest
+    warning: warning
+
+grafanaDashboard:
+  # -- Ship the remedik Grafana dashboard as a ConfigMap for the Grafana
+  # sidecar to load. The JSON is versioned in the chart, so the dashboard is
+  # the same in every cluster rather than living in one person's browser.
+  enabled: false
+  # -- Namespace for the ConfigMap; defaults to the release namespace.
+  # The Grafana sidecar usually only watches its own namespace.
+  namespace: ""
+  # -- Label the Grafana sidecar watches for
+  label: grafana_dashboard
+  # -- Value of that label
+  labelValue: "1"
+  # -- Extra annotations, such as the sidecar's folder annotation
+  annotations: {}
+
 probes:
   # -- Port the health and readiness probes listen on
   port: 8081
+
+networkPolicy:
+  # -- Restrict who may reach remedik's ports. Off by default because a
+  # policy naming the wrong peers stops Alertmanager silently, and silence is
+  # this project's worst failure mode. Ingress only: remedik's one outbound
+  # call is to the API server, whose address is specific to your cluster.
+  enabled: false
+  # -- Who may reach the gateway — the port that makes the cluster change
+  # itself. Required when the policy is enabled. A list of NetworkPolicy
+  # peers, for example:
+  #   - namespaceSelector:
+  #       matchLabels:
+  #         kubernetes.io/metadata.name: monitoring
+  gatewayFrom: []
+  # -- Who may scrape metrics. Defaults to whoever may reach the gateway,
+  # which is right when Alertmanager and Prometheus are the same install.
+  metricsFrom: []
+  # -- Who may reach the read-only dashboard. Empty allows nothing, which is
+  # the right default: reach it with `kubectl port-forward`, which the
+  # kubelet proxies and a NetworkPolicy does not govern.
+  dashboardFrom: []
+
+# -- PriorityClass for the operator pod. A single-replica operator evicted
+# under node pressure stops remediating without anyone being told, so on a
+# busy cluster this is worth setting to something like `system-cluster-critical`.
+priorityClassName: ""
 
 history:
   # -- Terminal Remediation records retained per strategy
   keepPerStrategy: 200
 
+# Every action is a permission. What each one is allowed to do is listed,
+# with its reasoning, in the chart's `action-rbac.yaml`: enabling an action
+# adds exactly those rules, and disabling it removes them.
 actions:
   deploymentRestart:
-    # -- Enable the `deployment.restart` action. Disabling it also removes
-    # the RBAC rule that lets remedik patch Deployments.
+    # -- Enable `deployment.restart`: a rolling restart of a Deployment.
+    # Disabling it also removes the RBAC rule that lets remedik patch
+    # Deployments.
     enabled: true
+  workloadRestart:
+    # -- Enable `workload.restart`: the same rolling restart for Deployments,
+    # StatefulSets and DaemonSets. Off by default because it grants patch on
+    # all three; if you only ever restart Deployments, leave this off and use
+    # `deployment.restart`.
+    enabled: false
+  podDelete:
+    # -- Enable `pod.delete`: evicts one pod through the Eviction API, so a
+    # PodDisruptionBudget can refuse it. It cannot delete pods outright — the
+    # permission granted is `create` on `pods/eviction`, not `delete` on
+    # `pods`. Refuses a pod with no controller owner, since nothing would
+    # recreate it.
+    enabled: false
+  jobDelete:
+    # -- Enable `job.delete`: deletes a failed Job, and its pods with it, so
+    # the CronJob that owns it creates a clean run.
+    enabled: false
+  deploymentRollback:
+    # -- Enable `deployment.rollback`: puts the previous revision back, the
+    # way `kubectl rollout undo` does. The highest-value action here — the
+    # usual cause of a 3am crash loop is the deploy ten minutes earlier — and
+    # the one most likely to surprise: it refuses a workload Argo CD or Flux
+    # manages, because they would revert it within minutes while remedik
+    # recorded a success.
+    enabled: false
+  deploymentScale:
+    # -- Enable `deployment.scale`: sets or increases replicas, bounded by a
+    # maximum the strategy must state. Refuses a Deployment a
+    # HorizontalPodAutoscaler owns, since the autoscaler would revert it.
+    enabled: false
+  hpaScale:
+    # -- Enable `hpa.scale`: raises an autoscaler's `maxReplicas`, the one
+    # mechanical answer to `KubeHpaMaxedOut`. It never lowers one.
+    enabled: false
+  nodeCordon:
+    # -- Enable `node.cordon`: stop new work landing on a node. The safest
+    # action here — nothing moves, nothing restarts, one command undoes it —
+    # and the right first response to almost every node alert.
+    enabled: false
+  nodeUncordon:
+    # -- Enable `node.uncordon`: the undo. Separate from the cordon so a
+    # strategy can be granted one without the other.
+    enabled: false
+  nodeDrain:
+    # -- Enable `node.drain`: cordon a node, then evict its pods through the
+    # Eviction API, honouring PodDisruptionBudgets. **This is the widest
+    # permission remedik holds** — `list` on pods and `create` on
+    # `pods/eviction` across every namespace — and there is no narrower way
+    # to drain a node. Enable it last, and leave it in dry-run longer than
+    # the rest: the dry-run report names every pod that would move.
+    enabled: false
+  pvcExpand:
+    # -- Enable `pvc.expand`: grow a PersistentVolumeClaim, but only where
+    # the StorageClass allows expansion. Where it does not, the API accepts
+    # the change and nothing happens, so the action checks first and refuses.
+    # Expansion is one-way: Kubernetes cannot shrink a volume back.
+    enabled: false
+  webhookCall:
+    # -- Enable `webhook.call`: POSTs the alert, the strategy and the plan to
+    # a URL you configure, optionally with a token from a Secret in remedik's
+    # namespace. The cheapest way to reach a pipeline remedik will never
+    # implement, and it moves the blast radius outside the cluster.
+    enabled: false
+  jobRun:
+    # -- Enable `job.run`: runs a container image as a Job in remedik's own
+    # namespace, with the alert's labels as environment variables. The Job
+    # runs under a ServiceAccount your strategy names — never remedik's,
+    # which is refused — so its authority is granted deliberately rather than
+    # inherited. This is the widest action in the catalogue; enable it when
+    # you have decided which ServiceAccount it may use.
+    enabled: false
+  scriptRun:
+    # -- Enable `script.run`: `job.run` with the script taken from a ConfigMap
+    # in remedik's namespace, so a runbook can be edited without rebuilding an
+    # image. The ConfigMap is read from remedik's namespace only: reading one
+    # from anywhere else would let anyone with write access to any namespace
+    # get code executed by the operator.
+    enabled: false
+
+# Guards bound what a strategy may do. Two of them — cooldown and maxPerHour
+# — need nothing from the cluster and are always available. The third reads
+# the workload it is protecting, so it is a permission like any other.
+guards:
+  blastRadius:
+    # -- Allow strategies to use the `blastRadius` guard, which refuses to
+    # remediate a workload that is already too degraded. Enabling it grants
+    # read-only access to workloads, pods and replicasets so the guard can
+    # see how much is available.
+    #
+    # A strategy that sets `blastRadius` in a cluster where this is off will
+    # be **refused, not allowed**: a guard that cannot evaluate its own
+    # condition must not permit the execution. The refusal names the missing
+    # permission on the strategy's events.
+    enabled: false
 
 serviceAccount:
   # -- Create a ServiceAccount for the operator
@@ -108,23 +289,3 @@ affinity: {}
 nameOverride: ""
 # -- Override the fully qualified release name
 fullnameOverride: ""
-
-slack:
-  # -- Socket Mode Slack bot with approval buttons — planned for v0.2.0
-  enabled: false
-
-escalation:
-  pagerduty:
-    # -- PagerDuty escalation — planned for v0.2.0
-    enabled: false
-
-audit:
-  # -- Structured audit export (Splunk HEC, Loki, Elasticsearch, S3) — planned for v0.2.0
-  sinks: []
-
-ai:
-  # -- Read-only bring-your-own-LLM diagnosis — planned for v0.2.0
-  enabled: false
-
-# -- Cloud packs such as `awsNodes` for node replacement — planned for v0.2.0
-packs: {}

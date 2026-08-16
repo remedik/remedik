@@ -2,6 +2,12 @@
 Permissions are assembled from what is actually enabled. remedik never asks
 for cluster-admin: every rule below exists because a named feature needs
 it, and turning that feature off removes the rule.
+
+Action permissions come from action-rbac.yaml, one entry per action. That
+file is the thing to read when reviewing what remedik may do; keeping it
+out of the template means the answer is a table rather than a trail of
+conditionals, which is what makes the invariant checkable rather than
+merely stated.
 */}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -17,23 +23,30 @@ rules:
   - apiGroups: ["remedik.dev"]
     resources: ["remediationstrategies/status"]
     verbs: ["get", "update", "patch"]
-  # Guard rejections are published as events on the strategy. Strategies are
-  # cluster-scoped, and Kubernetes files events for a cluster-scoped object
-  # in the default namespace, so this permission cannot be narrowed to the
-  # release namespace.
+  # Events explain remedik where people look: guard rejections on the
+  # strategy, and each step's progress on the object being remediated. Both
+  # land in namespaces remedik does not own — a strategy is cluster-scoped,
+  # so its events go to `default`, and a remediated workload lives wherever
+  # the alert said — so this cannot be narrowed to the release namespace.
+  #
+  # Two API groups, and it is not redundancy: the events.k8s.io group is the
+  # current API and the core one is what older tooling still reads. remedik
+  # writes through events.k8s.io; the core rule stays because Kubernetes
+  # mirrors between them and dropping it silently loses events for anything
+  # still watching the old group.
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
+    verbs: ["create", "patch"]
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch"]
-{{- if .Values.actions.deploymentRestart.enabled }}
-  # action: deployment.restart — patches the pod template annotation, which
-  # is what `kubectl rollout restart` does.
-  #
-  # Two verbs, deliberately: the action reads one Deployment by name and
-  # patches it. It needs no list or watch because it uses a direct client
-  # rather than a cache, and no delete because it never removes pods.
-  - apiGroups: ["apps"]
-    resources: ["deployments"]
-    verbs: ["get", "patch"]
+{{- $catalogue := .Files.Get "action-rbac.yaml" | fromYaml }}
+{{- range $feature, $scopes := $catalogue }}
+{{- $config := include "remedik.featureConfig" (dict "root" $ "key" $feature) | fromYaml }}
+{{- if and $config.enabled $scopes.cluster }}
+  # feature: {{ $feature }} — see action-rbac.yaml for why these verbs
+  {{- toYaml $scopes.cluster | nindent 2 }}
+{{- end }}
 {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -69,6 +82,14 @@ rules:
   - apiGroups: ["remedik.dev"]
     resources: ["remediations/status"]
     verbs: ["get", "update", "patch"]
+{{- $catalogue := .Files.Get "action-rbac.yaml" | fromYaml }}
+{{- range $feature, $scopes := $catalogue }}
+{{- $config := include "remedik.featureConfig" (dict "root" $ "key" $feature) | fromYaml }}
+{{- if and $config.enabled $scopes.namespaced }}
+  # feature: {{ $feature }} — namespaced deliberately; see action-rbac.yaml
+  {{- toYaml $scopes.namespaced | nindent 2 }}
+{{- end }}
+{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

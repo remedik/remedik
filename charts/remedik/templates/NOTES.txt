@@ -55,7 +55,11 @@ Strategies decide what happens for which alert. A first one:
       onFailure:
         retries: 1
 
-Enabled actions in this release: deployment.restart{{ if not .Values.actions.deploymentRestart.enabled }} (DISABLED){{ end }}
+Actions enabled in this release: {{ include "remedik.enabledActions" . | default "none — every action is disabled, so no strategy can do anything" }}
+
+Each one is a permission: what it may touch, and why, is listed in the
+chart's action-rbac.yaml. Enable more with, for example,
+--set actions.podDelete.enabled=true
 
 3. Watch what it does
 --------------------------------------------------------------------------

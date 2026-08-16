@@ -9,7 +9,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -57,7 +57,7 @@ type RemediationReconciler struct {
 	// Events publishes step progress on the objects being remediated, so
 	// that `kubectl describe` explains a change where the reader is already
 	// looking. Optional: nil publishes nothing.
-	Events record.EventRecorder
+	Events events.EventRecorder
 	// Mapper addresses a step's target for those events. Optional; without
 	// it no event can be addressed and none are published.
 	Mapper meta.RESTMapper
@@ -133,10 +133,13 @@ func (r *RemediationReconciler) runAttempt(
 	}
 
 	runner := &StepRunner{
-		Registry: r.Registry,
-		DryRun:   rem.Spec.DryRun || r.DryRun,
-		Events:   r.stepEvents(rem),
-		Now:      r.Now,
+		Registry:    r.Registry,
+		Remediation: rem.Name,
+		Strategy:    rem.Spec.StrategyName,
+		Namespace:   rem.Namespace,
+		DryRun:      rem.Spec.DryRun || r.DryRun,
+		Events:      r.stepEvents(rem),
+		Now:         r.Now,
 	}
 	result := runner.Run(ctx, rem.Spec.Alert.Labels, rem.Spec.Steps)
 	rem.Status.Steps = result.Steps

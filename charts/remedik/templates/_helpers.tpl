@@ -71,12 +71,71 @@ or the chart creates one from dashboard.auth.token.
 {{- end -}}
 
 {{/*
+Look up a feature's config by the key action-rbac.yaml uses.
+
+Most keys are actions; blastRadius is a guard. Both are named features that
+hold a permission only while they are enabled, so both are looked up the
+same way rather than the template growing a special case.
+*/}}
+{{- define "remedik.featureConfig" -}}
+{{- $root := .root -}}
+{{- $key := .key -}}
+{{- if hasKey $root.Values.actions $key -}}
+{{- index $root.Values.actions $key | toYaml -}}
+{{- else if hasKey $root.Values.guards $key -}}
+{{- index $root.Values.guards $key | toYaml -}}
+{{- else -}}
+{}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The action names this release enables, as remedik spells them.
+
+Kept next to the RBAC table it mirrors: the chart grants an action's
+permissions and registers the action itself from the same decision, so the
+two cannot drift apart into an operator that may do something it cannot be
+asked to do, or vice versa.
+*/}}
+{{- define "remedik.actionNames" -}}
+deploymentRestart: deployment.restart
+workloadRestart: workload.restart
+podDelete: pod.delete
+jobDelete: job.delete
+deploymentRollback: deployment.rollback
+deploymentScale: deployment.scale
+hpaScale: hpa.scale
+nodeCordon: node.cordon
+nodeUncordon: node.uncordon
+nodeDrain: node.drain
+pvcExpand: pvc.expand
+webhookCall: webhook.call
+jobRun: job.run
+scriptRun: script.run
+{{- end -}}
+
+{{- define "remedik.enabledActions" -}}
+{{- $names := include "remedik.actionNames" . | fromYaml -}}
+{{- $enabled := list -}}
+{{- range $key, $verb := $names -}}
+{{- $config := index $.Values.actions $key | default dict -}}
+{{- if $config.enabled -}}
+{{- $enabled = append $enabled $verb -}}
+{{- end -}}
+{{- end -}}
+{{- join "," $enabled -}}
+{{- end -}}
+
+{{/*
 Fail early on a configuration that cannot work, with a message that says
 what to do about it.
 */}}
 {{- define "remedik.validateValues" -}}
 {{- if and (not .Values.gateway.auth.disabled) (not .Values.gateway.auth.token) (not .Values.gateway.auth.existingSecret) -}}
 {{- fail "\nremedik: the gateway needs a bearer token so only Alertmanager can submit alerts.\nSet one of:\n  gateway.auth.token=<value>            (the chart creates the Secret)\n  gateway.auth.existingSecret=<name>    (you manage the Secret; key: token)\nTo run without authentication — local development only — set gateway.auth.disabled=true.\n" -}}
+{{- end -}}
+{{- if and .Values.networkPolicy.enabled (not .Values.networkPolicy.gatewayFrom) -}}
+{{- fail "\nremedik: networkPolicy.enabled is set but networkPolicy.gatewayFrom is empty.\nThat policy would stop Alertmanager reaching the gateway, and nothing would say so:\nremediation would simply stop happening.\nName who may reach it, for example:\n  networkPolicy:\n    gatewayFrom:\n      - namespaceSelector:\n          matchLabels:\n            kubernetes.io/metadata.name: monitoring\n" -}}
 {{- end -}}
 {{- if and .Values.dashboard.enabled (not .Values.dashboard.auth.disabled) (not .Values.dashboard.auth.token) (not .Values.dashboard.auth.existingSecret) -}}
 {{- fail "\nremedik: the dashboard shows alert labels, namespaces and workload names, so it needs a token.\nSet one of:\n  dashboard.auth.token=<value>            (the chart creates the Secret)\n  dashboard.auth.existingSecret=<name>    (you manage the Secret; key: token)\nTo serve it without authentication — local development only — set dashboard.auth.disabled=true.\n" -}}

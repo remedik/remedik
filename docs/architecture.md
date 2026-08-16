@@ -29,7 +29,7 @@ follow-up changes.
 | --- | --- | --- |
 | Gateway | Receives Alertmanager webhooks, authenticates, normalizes grouped alerts into events | shipped |
 | Engine | Matches events to strategies, evaluates guards, runs the per-execution state machine, writes audit | shipped |
-| Actions | `deployment.restart`; later `job`, `script`, `webhook.call`, `ActionPlugin` | shipped (first action) |
+| Actions | `deployment.restart`, `workload.restart`, `pod.delete`, `job.delete`; later scaling, rollback, node actions, `job`/`script`/`webhook.call`, `ActionPlugin` | shipped |
 | Metrics | Prometheus counters and histograms on the manager's metrics endpoint | shipped |
 | Slack bot | Socket Mode; rich notifications, Approve/Deny buttons, manual commands (`@remedik …`) | planned |
 | Escalation | PagerDuty / on-call channel when execution fails or approval times out | planned |
@@ -81,10 +81,38 @@ Concurrency becomes a setting when there is a reason to raise it.
 
 ## Guards
 
-Declarative, per strategy: `cooldown` (per strategy and target) and
-`maxPerHour` (per strategy, trailing hour). Both are opt-in — zero means
-unenforced — because stopping a strategy is `enabled: false`, never an unset
-field. `blastRadius` is planned.
+Declarative, per strategy, and all opt-in — zero means unenforced, because
+stopping a strategy is `enabled: false`, never an unset field.
+
+| Guard | Asks | Scope |
+| --- | --- | --- |
+| `cooldown` | how recently did this run here? | strategy + target |
+| `maxPerHour` | how often has this run? | strategy, trailing hour |
+| `blastRadius` | how broken is this workload already? | the workload behind the target |
+
+The first two are about time and need nothing from the cluster.
+`blastRadius` is about state: `minAvailable` refuses while the workload has
+that many available replicas or fewer, and `maxUnavailablePercent` refuses
+while that share of it is already unavailable. It is what bounds the actions
+that *remove* capacity rather than replacing it, and it is a second opinion
+beside a PodDisruptionBudget rather than a substitute — the PDB was written
+by whoever owns the workload, this by whoever decided an automated system
+may act on it unattended.
+
+Two properties of `blastRadius` are worth stating plainly:
+
+- **It fails closed.** If the workload cannot be read — no permission, an API
+  error — the guard refuses. A guard that permits an execution when it could
+  not evaluate its own condition is not a guard, it is a comment. The
+  refusal names the missing permission on the strategy's events.
+- **"Nothing to measure" is not the same as "could not measure".** A node has
+  no replica count and an action that touches nothing has no workload, so
+  the guard allows. Conflating the two would make failing closed either
+  useless or paralysing.
+
+It reads the cluster, so it is a permission like any other:
+`guards.blastRadius.enabled=true` grants `get` on the three workload kinds,
+on pods, and on replicasets to walk a pod to its Deployment.
 
 Two switches stop remediation without uninstalling anything: `enabled:
 false` on a single strategy, and `dryRun: true` globally, which keeps
@@ -144,6 +172,78 @@ Three places, deliberately, because people look in three places:
 - **On the `Remediation` record**, and therefore on the dashboard: the full
   per-step trail.
 
+## The action catalogue
+
+Each action is a permission. The chart grants an action's rules only when it
+is enabled, and lists them with their reasoning in
+[`charts/remedik/action-rbac.yaml`](../charts/remedik/action-rbac.yaml) —
+one table, rather than a trail of conditionals through a template, because
+its reviewability is what invariant 4 rests on. The same values also decide
+which actions the operator registers, so a strategy naming a disabled action
+is reported as unusable when it is applied rather than failing during the
+incident it was written for.
+
+| Action | Does | Enabled by default | Notes |
+| --- | --- | --- | --- |
+| `deployment.restart` | Rolling restart of a Deployment | yes | Patches the pod template; never deletes pods |
+| `workload.restart` | The same, for Deployments, StatefulSets and DaemonSets | no | Takes its kind from the alert's label |
+| `pod.delete` | Evicts one pod | no | Eviction API, so a PodDisruptionBudget can refuse. Refuses a pod with no controller owner |
+| `job.delete` | Deletes a Job and its pods | no | So the owning CronJob makes a clean run |
+| `deployment.rollback` | Puts the previous revision back | no | Refuses a workload Argo CD or Flux manages: they would revert it |
+| `deployment.scale` | Sets or increases replicas | no | Refuses a Deployment an HPA owns; a relative increase must state a ceiling |
+| `hpa.scale` | Raises an autoscaler's `maxReplicas` | no | Never lowers one |
+| `webhook.call` | POSTs the incident to a URL | no | Credential from a Secret in remedik's namespace only; non-2xx fails the step |
+| `job.run` | Runs an image as a Job | no | In remedik's namespace, under a ServiceAccount the step names — never remedik's |
+| `script.run` | `job.run`, script from a ConfigMap | no | ConfigMap read from remedik's namespace only |
+| `node.cordon` / `node.uncordon` | Stop and resume scheduling on a node | no | The safest pair here: nothing moves, one command undoes it |
+| `node.drain` | Cordon, then evict every eligible pod | no | **The widest permission remedik holds.** A partial drain is a failure |
+| `pvc.expand` | Grow a PersistentVolumeClaim | no | Refuses where the StorageClass forbids expansion; one-way |
+
+**Why eviction rather than deletion.** Deleting a pod ignores
+PodDisruptionBudgets entirely; the Eviction API is the only call that checks
+them, and returns 429 when the removal would breach the budget. remedik
+records that as a refusal naming the budget, and the pod stays up. The
+permission it holds says the same thing: `create` on `pods/eviction`, never
+`delete` on `pods`.
+
+**The escape hatches.** `webhook.call`, `job.run` and `script.run` exist
+because four built-in verbs will never cover what people need at 3am, and
+"remedik cannot do X" is a reason not to install it at all. They are also
+the widest trust surface in the project, so each is bounded deliberately:
+
+- Jobs are created in **remedik's own namespace only**. A namespace
+  parameter would mean holding `create` on jobs cluster-wide permanently, so
+  that a strategy can occasionally start one somewhere. A Job that must act
+  elsewhere does so through its ServiceAccount, which is where that
+  authority belongs.
+- The Job's **ServiceAccount is named by the step**, defaults to `default`
+  — which can do nothing — and may never be remedik's own, which is refused
+  with a message saying why. Forgetting produces a Job that cannot act,
+  rather than one that can do everything the operator can.
+- The **command is a JSON array**. A string would need quoting rules, and
+  quoting rules invented for a YAML field are how a remediation ends up
+  running something nobody wrote.
+- Secrets and ConfigMaps are read from **remedik's own namespace only**.
+  Reading them from a namespace an alert names would let a label decide
+  which credential is used, or let anyone with write access anywhere have
+  code executed by the operator.
+- The alert's labels reach the container **prefixed**, so a label called
+  `PATH` cannot replace the container's.
+
+**What remedik will not do.** Published deliberately, because a list of
+refusals says more about an automation than another verb does:
+
+- Delete a node or resize a node group. That is a cloud API with a different
+  trust model; cluster-api's MachineHealthCheck and the medik8s operators do
+  it properly.
+- Delete a pod nothing owns. Nothing recreates it, so that is deletion, not
+  remediation.
+- Patch resource requests or limits. It restarts every pod in the workload
+  and hides the problem it was called for.
+- Raise a ResourceQuota. A quota is a decision somebody made on purpose.
+- Act on control-plane alerts. Automation against a sick API server is how
+  one bad night becomes a bad quarter.
+
 ## Extensibility ladder
 
 1. Compose YAML from built-in actions (the cookbook). **[shipped]**
@@ -189,6 +289,50 @@ token, presented either as a bearer header or as the password in the
 browser's own prompt — a browser cannot be told to send a bearer header, and
 an authenticated dashboard nobody can open is how you end up with an
 unauthenticated one.
+
+## Observability
+
+remedik is monitored by the same Prometheus that feeds it. The metrics
+endpoint carries two kinds of series, and the difference matters when
+reading a graph:
+
+- **Counters** say what remedik has *done*: alerts received, unmatched and
+  truncated, ingest errors, unauthenticated attempts, guard rejections by
+  guard, remediations started and finished by outcome, and a duration
+  histogram.
+- **Gauges** say what remedik currently *is*: `remedik_build_info`,
+  `remedik_dry_run`, `remedik_strategies` by enabled state and
+  `remedik_remediation_records` by state. Without them, a flat remediation
+  rate is unreadable — dry-run, no enabled strategies and a genuinely quiet
+  week all look identical.
+
+The gauges that depend on cluster state are produced by a Prometheus
+collector reading the manager's cache when a scrape arrives, rather than a
+copy kept up to date on a timer. It cannot go stale, and it costs no API
+call: a scrape that reached the API server would turn Prometheus's polling
+interval into load on the control plane. A read that fails reports *no*
+series rather than zero — zero enabled strategies means remediation cannot
+happen, and emitting that because a read failed would turn a monitoring
+failure into a false incident.
+
+Three optional chart resources, all off by default:
+
+| Value | Creates | Why it is off by default |
+| --- | --- | --- |
+| `serviceMonitor.enabled` | `ServiceMonitor` | Not every cluster runs the Prometheus Operator |
+| `prometheusRule.enabled` | `PrometheusRule`, six alerts about remedik itself | Rules are opinions about somebody else's cluster |
+| `grafanaDashboard.enabled` | ConfigMap the Grafana sidecar loads | The sidecar's label differs per install |
+
+`serviceMonitor.additionalLabels` is load-bearing rather than cosmetic: the
+Prometheus Operator selects ServiceMonitors by label, and one created
+without the selector's label is created, ignored, and hard to notice.
+kube-prometheus-stack defaults to `release: <its release name>`.
+
+The alerts are about the operator and never about the workloads it
+remediates — those already have alerts, and those alerts are remedik's
+input. They cover: not being scraped, ingest failing, alerts arriving that
+never match a strategy, most remediations failing, deliveries truncated
+before arrival, and repeated unauthenticated attempts.
 
 ## Topologies
 
