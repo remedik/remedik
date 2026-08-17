@@ -722,3 +722,53 @@ func (r *recordingReader) List(
 	r.optionsSeen = append(r.optionsSeen, options)
 	return nil
 }
+
+// Paused is on the chrome rather than one page, because it is the answer to
+// "why is nothing happening" and somebody asking that is on whichever page they
+// happened to be looking at.
+func TestPausedIsOnEveryPage(t *testing.T) {
+	h, err := New(Config{
+		Reader:    &fakeReader{remediations: []v1alpha1.Remediation{succeededRemediation("a", 5)}},
+		Namespace: testNamespace,
+		Logger:    quietLogger(),
+		Now:       testNow,
+		Posture:   Posture{DryRun: false},
+		Paused:    func() (bool, string) { return true, "network incident" },
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	for _, path := range []string{"/", "/remediations", "/namespaces", "/strategies"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		body := rec.Body.String()
+
+		if !strings.Contains(body, "Paused") {
+			t.Errorf("GET %s does not say remediation is paused", path)
+		}
+		if !strings.Contains(body, "network incident") {
+			t.Errorf("GET %s does not say why", path)
+		}
+		// It overrides the posture, so the page must not also claim to be live.
+		if strings.Contains(body, ">Live<") {
+			t.Errorf("GET %s claims Live while paused", path)
+		}
+	}
+}
+
+// And with no pause the chrome is unchanged, so the field stays optional.
+func TestNotPausedSaysNothingAboutIt(t *testing.T) {
+	h, _ := newHandler(t, Config{Posture: Posture{DryRun: false}})
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	body := rec.Body.String()
+
+	if strings.Contains(body, "mode-paused") {
+		t.Error("the paused chip is rendered with no pause configured")
+	}
+	if !strings.Contains(body, ">Live<") {
+		t.Error("the posture chip disappeared when nothing was paused")
+	}
+}

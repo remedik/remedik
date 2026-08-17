@@ -284,6 +284,15 @@ func buildNamespaces(
 
 // applyPosture says what remedik may do in this namespace.
 func (r *NamespaceRow) applyPosture(posture Posture, name string) {
+	// The kill switch overrides every namespace's setting, so a row must not
+	// claim Live while nothing anywhere will act.
+	if posture.Paused {
+		r.Posture = "Paused"
+		r.PostureTone = toneWarn
+		r.PostureDetail = "remediation is paused; remedik only reports here"
+		return
+	}
+
 	dryRun := posture.DryRun
 	for _, ns := range posture.Live {
 		if ns == name {

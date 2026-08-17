@@ -50,9 +50,17 @@ func (l *HistoryLoader) Load(ctx context.Context) error {
 		return fmt.Errorf("list remediations: %w", err)
 	}
 
-	var starts, completions int
+	var starts, completions, skipped int
 	for i := range list.Items {
 		rem := &list.Items[i]
+
+		// A give-up record says remedik stopped; it executed nothing. Replaying
+		// it would rebuild guard state from decisions rather than from actions,
+		// and would leave the guard holding itself tripped across a restart.
+		if rem.Labels[v1alpha1.LabelGaveUp] == "true" {
+			skipped++
+			continue
+		}
 
 		if at, ok := startedAt(rem); ok {
 			l.History.RecordStart(rem.Spec.StrategyName, at)
@@ -72,7 +80,8 @@ func (l *HistoryLoader) Load(ctx context.Context) error {
 	l.History.Prune(time.Now())
 
 	l.Logger.Info("guard history rebuilt from existing remediations",
-		"remediations", len(list.Items), "starts", starts, "completions", completions)
+		"remediations", len(list.Items), "starts", starts, "completions", completions,
+		"gave_up_skipped", skipped)
 	return nil
 }
 

@@ -47,6 +47,22 @@ var (
 		Help:      "Deliveries rejected by gateway authentication.",
 	})
 
+	recordsSwept = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace,
+		Name:      "records_swept_total",
+		Help:      "Terminal Remediation records reclaimed by the retention sweep.",
+	})
+
+	// A gauge rather than a counter: the question is how many records the
+	// policy currently wants to delete and cannot, which is a level, not a
+	// rate. A number that stays high means somebody configured a retention
+	// they are not getting because a guard window is longer than it.
+	recordsHeld = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Name:      "records_held_by_guards",
+		Help:      "Records the retention sweep kept because a guard window still covers them.",
+	})
+
 	guardRejections = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace,
 		Name:      "guard_rejections_total",
@@ -99,6 +115,8 @@ func MustRegister() {
 		remediationsFinished,
 		remediationDuration,
 		escalations,
+		recordsSwept,
+		recordsHeld,
 	)
 }
 
@@ -142,4 +160,10 @@ func (Engine) RemediationFinished(strategy, outcome string, seconds float64) {
 // EscalationFinished implements engine.Recorder.
 func (Engine) EscalationFinished(strategy, outcome string) {
 	escalations.WithLabelValues(strategy, outcome).Inc()
+}
+
+// RecordsSwept implements engine.Recorder.
+func (Engine) RecordsSwept(deleted, heldByGuards int) {
+	recordsSwept.Add(float64(deleted))
+	recordsHeld.Set(float64(heldByGuards))
 }

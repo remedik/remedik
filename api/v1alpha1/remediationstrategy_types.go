@@ -114,6 +114,55 @@ type Guards struct {
 	//
 	// +optional
 	BlastRadius *BlastRadius `json:"blastRadius,omitempty"`
+
+	// GiveUpAfter stops remediating a target that keeps needing it, and says
+	// so.
+	//
+	// The other guards pace: not yet, not this many, not safely. None of them
+	// ever concludes anything, so remedik will restart the same Deployment for
+	// ever — and it will do so quietly, because every one of those
+	// remediations succeeded. The rollout completed, the pods came back ready,
+	// and twenty minutes later the alert was back.
+	//
+	// This one concludes. After Count remediations of the same target inside
+	// Within, remedik stops and creates a Remediation recording that it has,
+	// which runs the strategy's onFailure.steps — so the page goes wherever
+	// that strategy's pages already go.
+	//
+	// It is scoped to the target, so one workload that keeps breaking cannot
+	// stop remediation for the others this strategy protects. maxPerHour
+	// cannot do that: it counts across every target.
+	//
+	// Unset disables it. No count and window is right for every workload, and
+	// a tool that stops acting on a default nobody chose is worse than one
+	// that keeps going.
+	//
+	// +optional
+	GiveUpAfter *GiveUpAfter `json:"giveUpAfter,omitempty"`
+}
+
+// GiveUpAfter is how many remediations of one target within what window mean
+// that remediation is not the answer.
+type GiveUpAfter struct {
+	// Count is how many remediations of this target inside Within are enough
+	// to stop.
+	//
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=100
+	Count int32 `json:"count"`
+
+	// Within is the window the count is measured over.
+	//
+	// It exists because remedik cannot see an alert stop firing, so it cannot
+	// observe a streak being broken. A window is the honest form of "five
+	// times in a row": five restarts of one Deployment in two hours means
+	// restarting is not the fix; five over three months is a Tuesday.
+	//
+	// It is also what makes the guard clear itself. Once the target has been
+	// quiet for this long, remediation resumes with nothing to reset — where a
+	// latch somebody has to clear is a latch that stays set, and the tool
+	// silently does nothing long after the application was fixed.
+	Within metav1.Duration `json:"within"`
 }
 
 // BlastRadius bounds how broken a workload may already be before remedik

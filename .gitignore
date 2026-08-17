@@ -10,6 +10,11 @@ coverage.out
 # module-proxy access; they are never committed.
 /vendor/
 
+# Assistant and editor tooling. Useful locally, not part of the product: the
+# workflow these encode is documented in CONTRIBUTING.md and enforced by
+# `make specs`, so nothing is lost by keeping them out of a clone.
+/.claude/
+
 # Editor / IDE
 .idea/
 .vscode/

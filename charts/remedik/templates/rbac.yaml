@@ -89,6 +89,13 @@ rules:
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
     verbs: ["get", "list", "watch", "create", "update", "patch"]
+  # The kill switch. Read-only, on one ConfigMap in this namespace: remedik
+  # never writes it, because the switch belongs to the person stopping
+  # remediation and a tool that can un-stop itself is not a switch.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+    resourceNames: ["{{ .Values.pause.configMapName }}"]
 {{- $catalogue := .Files.Get "action-rbac.yaml" | fromYaml }}
 {{- range $feature, $scopes := $catalogue }}
 {{- $config := include "remedik.featureConfig" (dict "root" $ "key" $feature) | fromYaml }}

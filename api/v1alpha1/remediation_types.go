@@ -48,6 +48,15 @@ const (
 	ReasonStepFailed = "StepFailed"
 	// ReasonGuardRejected means a guard refused the execution.
 	ReasonGuardRejected = "GuardRejected"
+
+	// ReasonGaveUp means remediation ran for this target enough times inside
+	// the strategy's giveUpAfter window without resolving the problem, so
+	// remedik stopped and said so.
+	//
+	// A record carrying it performed nothing: it has no steps, and it is
+	// excluded from every guard, because counting a decision as an action
+	// would extend the window that produced it.
+	ReasonGaveUp = "GaveUp"
 	// ReasonUnknownAction means a step referenced an action the operator
 	// does not implement.
 	ReasonUnknownAction = "UnknownAction"

@@ -4,6 +4,16 @@ remedik's job is to take actions in your cluster, so its own security
 posture *is* the product. The commitments below apply from the first public
 release (v0.1.0); the threat model is maintained alongside the specs.
 
+## The promises
+
+[docs/invariants.md](docs/invariants.md) is the document to read before granting
+remedik write access: what it will never do, and — for each one — whether that
+is enforced structurally or is only a convention. A review that cannot tell
+those apart is not a review, so the page says which is which.
+
+If one of those promises is not actually kept, that is a security issue and not
+a bug, whatever the impact looks like.
+
 ## Reporting a vulnerability
 
 Email **daniel.vechiu1@gmail.com** with details and reproduction steps. You

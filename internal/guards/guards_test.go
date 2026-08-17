@@ -15,6 +15,10 @@ type fakeHistory struct {
 	startsSince    int
 	// sinceSeen records the cutoff StartsSince was called with.
 	sinceSeen time.Time
+	// completionsSince is what the giveUpAfter guard reads, and
+	// completionsCutoff records the window it asked about.
+	completionsSince  int
+	completionsCutoff time.Time
 }
 
 func (f *fakeHistory) LastCompletion(_, _ string) (time.Time, bool) {
@@ -24,6 +28,11 @@ func (f *fakeHistory) LastCompletion(_, _ string) (time.Time, bool) {
 func (f *fakeHistory) StartsSince(_ string, since time.Time) int {
 	f.sinceSeen = since
 	return f.startsSince
+}
+
+func (f *fakeHistory) CompletionsSince(_, _ string, since time.Time) int {
+	f.completionsCutoff = since
+	return f.completionsSince
 }
 
 func TestEvaluate_Cooldown(t *testing.T) {
@@ -196,5 +205,124 @@ func TestDecision_String(t *testing.T) {
 	d := Decision{Guard: GuardCooldown, Reason: "too soon"}
 	if got, want := d.String(), "rejected by cooldown: too soon"; got != want {
 		t.Errorf("String() = %q, want %q", got, want)
+	}
+}
+
+// The guard exists for remediations that SUCCEED. The rollout completes, the
+// pods come back ready, and twenty minutes later the alert is back. Counting
+// failures would miss the case entirely, so this pins that it counts
+// completions whatever they concluded.
+func TestGiveUp_CountsSuccessfulRemediations(t *testing.T) {
+	h := NewMemoryHistory(0)
+	cfg := Config{GiveUpAfter: GiveUp{Count: 5, Within: 2 * time.Hour}}
+
+	// Four successful remediations of one Deployment, spread over the window.
+	for i := 4; i >= 1; i-- {
+		h.RecordCompletion("restart", "deployment/payments/api",
+			base.Add(-time.Duration(i)*20*time.Minute))
+	}
+
+	if d := Evaluate(cfg, h, "restart", "deployment/payments/api", base); !d.Allowed {
+		t.Fatalf("refused after four remediations, want allowed: %s", d.Reason)
+	}
+
+	h.RecordCompletion("restart", "deployment/payments/api", base.Add(-time.Minute))
+
+	d := Evaluate(cfg, h, "restart", "deployment/payments/api", base)
+	if d.Allowed {
+		t.Fatal("allowed a sixth remediation after five in the window")
+	}
+	if d.Guard != GuardGiveUp {
+		t.Errorf("Guard = %q, want %q", d.Guard, GuardGiveUp)
+	}
+	// The reason has to say the true thing, because it becomes the message on
+	// a record somebody reads during an incident.
+	for _, want := range []string{"5 times", "needs a person", "not fixing"} {
+		if !strings.Contains(d.Reason, want) {
+			t.Errorf("Reason = %q, want it to contain %q", d.Reason, want)
+		}
+	}
+}
+
+// One workload that keeps breaking must not stop remediation for the others a
+// strategy protects. That is the defect maxPerHour has, and the reason this
+// guard is scoped to the target.
+func TestGiveUp_IsScopedToTheTarget(t *testing.T) {
+	h := NewMemoryHistory(0)
+	cfg := Config{GiveUpAfter: GiveUp{Count: 3, Within: time.Hour}}
+
+	for i := 3; i >= 1; i-- {
+		h.RecordCompletion("restart", "deployment/payments/api",
+			base.Add(-time.Duration(i)*time.Minute))
+	}
+
+	if d := Evaluate(cfg, h, "restart", "deployment/payments/api", base); d.Allowed {
+		t.Fatal("the tripped target was allowed")
+	}
+	if d := Evaluate(cfg, h, "restart", "deployment/checkout/web", base); !d.Allowed {
+		t.Errorf("a different target was refused because another one keeps "+
+			"breaking: %s", d.Reason)
+	}
+}
+
+// The window slides, so the guard clears itself. A latch a human has to reset
+// is a latch that stays set: somebody fixes the app and remediation never
+// comes back, silently.
+func TestGiveUp_ClearsItself(t *testing.T) {
+	h := NewMemoryHistory(0)
+	cfg := Config{GiveUpAfter: GiveUp{Count: 3, Within: time.Hour}}
+
+	for i := 3; i >= 1; i-- {
+		h.RecordCompletion("restart", "deployment/payments/api",
+			base.Add(-time.Duration(i)*time.Minute))
+	}
+	if d := Evaluate(cfg, h, "restart", "deployment/payments/api", base); d.Allowed {
+		t.Fatal("expected the guard to have tripped")
+	}
+
+	// Two hours later, with nothing new, the window no longer holds them.
+	later := base.Add(2 * time.Hour)
+	if d := Evaluate(cfg, h, "restart", "deployment/payments/api", later); !d.Allowed {
+		t.Errorf("still refusing after the window passed: %s", d.Reason)
+	}
+}
+
+func TestGiveUp_OffUnlessConfigured(t *testing.T) {
+	h := NewMemoryHistory(0)
+	for i := range 50 {
+		h.RecordCompletion("restart", "deployment/payments/api",
+			base.Add(-time.Duration(i)*time.Minute))
+	}
+
+	for name, cfg := range map[string]Config{
+		"no guard at all":        {},
+		"count without a window": {GiveUpAfter: GiveUp{Count: 3}},
+		"window without a count": {GiveUpAfter: GiveUp{Within: time.Hour}},
+	} {
+		if d := Evaluate(cfg, h, "restart", "deployment/payments/api", base); !d.Allowed {
+			t.Errorf("%s refused: %s", name, d.Reason)
+		}
+	}
+}
+
+// The cheaper refusals come first: a cooldown that would have refused anyway
+// must not be reported as remedik giving up, which is a page.
+func TestGiveUp_IsCheckedAfterTheQuietGuards(t *testing.T) {
+	h := NewMemoryHistory(0)
+	cfg := Config{
+		Cooldown:    time.Hour,
+		GiveUpAfter: GiveUp{Count: 2, Within: 24 * time.Hour},
+	}
+
+	h.RecordCompletion("restart", "deployment/payments/api", base.Add(-2*time.Hour))
+	h.RecordCompletion("restart", "deployment/payments/api", base.Add(-time.Minute))
+
+	d := Evaluate(cfg, h, "restart", "deployment/payments/api", base)
+	if d.Allowed {
+		t.Fatal("allowed, want a refusal")
+	}
+	if d.Guard != GuardCooldown {
+		t.Errorf("Guard = %q, want %q: the quiet refusal comes first",
+			d.Guard, GuardCooldown)
 	}
 }

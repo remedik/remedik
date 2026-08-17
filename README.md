@@ -7,7 +7,8 @@
 > Predictably boring auto-remediation for Kubernetes alerts.
 
 [![CI](https://github.com/remedik/remedik/actions/workflows/ci.yml/badge.svg)](https://github.com/remedik/remedik/actions/workflows/ci.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/remedik/remedik)](https://goreportcard.com/report/github.com/remedik/remedik)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/remedik/remedik/badge)](https://scorecard.dev/viewer/?uri=github.com/remedik/remedik)
+[![Go Reference](https://pkg.go.dev/badge/github.com/remedik/remedik.svg)](https://pkg.go.dev/github.com/remedik/remedik)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 **It is 03:00 and `payments-api` is crash-looping again.** Somebody is
@@ -281,6 +282,7 @@ the record still explains the run after the strategy is edited or deleted.
 | Doc | Purpose |
 | --- | --- |
 | [QUICKSTART.md](QUICKSTART.md) | Install it, or work on it |
+| [docs/invariants.md](docs/invariants.md) | **What remedik promises never to do** — read this before granting it write access |
 | [docs/routing.md](docs/routing.md) | Waking on-call only when remediation did not work — the routing, and the safety net that makes it safe to rely on |
 | [docs/architecture.md](docs/architecture.md) | Components, state machine, guards, topologies |
 | [docs/advanced-setup.md](docs/advanced-setup.md) | Hub/spoke, cloud packs, audit sinks, AI diagnosis (planned) |

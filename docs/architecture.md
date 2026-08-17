@@ -122,6 +122,127 @@ is doing its job. The consequence is worth stating: a ready replica is not
 proof that alerts are being accepted, so anything that needs to know should
 ask the gateway, which is what `hack/e2e.sh` does.
 
+## The kill switch
+
+One command stops remediation, on every replica, within seconds and with no
+restart:
+
+```bash
+kubectl -n remedik patch configmap remedik-pause \
+  --type merge -p '{"data":{"paused":"true","reason":"network incident"}}'
+```
+
+**It does not silence remedik — it forces dry-run everywhere.** That distinction
+is the design. Refusing alerts outright would mean the one time an operator most
+wants to know what remediation would have done is the moment they stopped it. So
+every record still appears, marked `Simulated`, carrying the plan and the reason
+given, and unpausing is an informed decision rather than a hopeful one.
+
+Three details, each chosen against an obvious alternative:
+
+- **A ConfigMap, not a chart value.** A value is how you configure a cluster;
+  this is how you stop one at three in the morning. The chart creates the
+  ConfigMap so the command above works without anybody having to author an
+  object during an incident, and marks it `helm.sh/resource-policy: keep` so an
+  uninstall does not take a deliberate stop with it.
+- **remedik only reads it.** Its RBAC is `get, list, watch` on that one name. A
+  switch the tool can flip is not a switch.
+- **Every replica watches it**, not only the leader: the gateway answers on all
+  of them, and a standby that took over believing remediation was enabled would
+  act on the first alert it saw.
+
+A read failure changes nothing and says so. Flipping to paused because the API
+server hiccuped would be a self-inflicted outage of remediation; flipping to
+running would ignore somebody's deliberate stop. The last known answer does
+neither.
+
+The dashboard says `Paused` in its header on every page, and the pause is folded
+into the posture the pages render — so a namespace cannot show `Live` while
+nothing anywhere will act. That contradiction is the same defect as showing
+today's posture beside historical counts, and a test asserts the two agree.
+
+## Retention
+
+Terminal records are reclaimed two ways: a count per strategy, and — when it is
+configured — an age.
+
+The count alone was a leak rather than a policy. Pruning ran inside the
+terminal status write, so it only ever reclaimed records for the strategy that
+had just finished one. A strategy that was disabled, renamed, deleted, or had
+merely gone quiet kept everything it had ever made, for ever, and over the life
+of a cluster strategies are added and removed — each departure leaving a
+permanent deposit nothing would look at again.
+
+So retention is applied by a sweeper on a timer. A timer converges where more
+hooks would not: whatever state the cluster reached and however it got there,
+the next sweep applies the policy. It runs on the leader only, because it is
+the one thing here that deletes without a remediation having happened, and it
+deletes at a bounded rate because deleting in bulk makes watch events in bulk.
+
+The part that would be an incident if it were got wrong is the floor. Guard
+state is rebuilt from existing records at startup, so a record inside a
+strategy's cooldown or `giveUpAfter` window is not history — it is the reason
+remedik will refuse to act again. Delete it and, after the next restart,
+remedik remediates something it had correctly refused. So nothing newer than
+the longest guard window currently configured is ever deleted, whatever the
+age says, and the operator logs when that floor is what is in force:
+`remedik_records_held_by_guards` counts it, because a retention policy that is
+quietly not being applied is worse than one that is refused.
+
+## Giving up
+
+Three guards pace remediation — `cooldown` says not yet, `maxPerHour` says not
+this many, `blastRadius` says not safely. None of them ever concludes anything,
+so remedik will restart the same Deployment for ever.
+
+`giveUpAfter` concludes. After N remediations of the same target inside a
+window, remedik stops and creates a `Remediation` recording that it has, which
+runs the strategy's `onFailure.steps`.
+
+Four decisions in it are worth the paragraph each:
+
+- **It counts remediations, not failures.** The case it exists for is
+  remediations that *succeed*: the rollout completes, the pods come back ready,
+  and twenty minutes later the alert is back. Counting failures would miss it.
+- **It is scoped to `(strategy, target)`.** `maxPerHour` is counted across
+  every target, so one workload that keeps breaking consumes the whole budget
+  and stops a strategy protecting the other thirty-nine. This does not.
+- **Giving up leaves a record.** Every other guard refuses into an event and a
+  metric — defensible for "not yet", indefensible for "I have stopped helping",
+  which would otherwise be the state with the least visibility and the most
+  consequence. The record has no steps; its entire content is the escalation.
+  It is excluded from every guard, on creation and on replay, because counting
+  a decision as an action would extend the window that produced it.
+- **A window, not a streak.** remedik never learns that an alert resolved, so
+  it cannot observe a streak being broken. Five restarts in two hours means
+  restarting is not the fix; five over three months is a Tuesday. The window
+  also makes the guard clear itself, where a latch somebody must reset is a
+  latch that stays set — the application gets fixed and the tool silently keeps
+  not helping.
+
+## Concurrency
+
+Four remediations may execute at once, from `concurrency` in the chart.
+
+It is a blast-radius setting rather than a throughput one, and deliberately a
+fixed number rather than a CPU count: how much remedik changes in a cluster at
+the same moment should not depend on which node the operator was scheduled on.
+
+It exists because one worker meant one remediation at a time, cluster-wide, for
+as long as it took. The values the CRD already permits put that at fifteen
+hours in the worst case, and the ordinary case is worse than it sounds because
+it is ordinary — a `job.run` that hands an incident to a pipeline and waits for
+the verdict, which the cookbook recommends because a pipeline API answers
+"queued" rather than "succeeded". Two retries and that is half an hour during
+which nothing else in the cluster is remediated, which is precisely backwards
+for a tool that exists to absorb a storm.
+
+controller-runtime still reconciles a single object with one worker, so
+`Running` continues to mean the process died and the conflict that refuses a
+stale verdict is untouched. The steps within one remediation stay strictly
+ordered: step two acts on step one's result, and the record is a sequence
+somebody reads during an incident.
+
 ## Posture
 
 `dryRun` is the default and `namespacePosture` overrides it per namespace,

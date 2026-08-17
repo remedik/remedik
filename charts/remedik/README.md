@@ -99,6 +99,7 @@ what the operator already reads.
 | actions.workloadRestart.enabled | bool | `false` | Enable `workload.restart`: the same rolling restart for Deployments, StatefulSets and DaemonSets. Off by default because it grants patch on all three; if you only ever restart Deployments, leave this off and use `deployment.restart`. |
 | affinity | object | `{}` | Affinity for the operator pod |
 | clusterName | string | `""` | A name for this cluster, shown in the dashboard's header and browser tab. Purely a label: remedik watches the cluster it runs in, so this is what tells three port-forwarded dashboards apart, not a filter. |
+| concurrency | int | `4` | How many remediations may be changing the cluster at the same moment.  This is a blast-radius setting, not a throughput one. It is deliberately a fixed number rather than a CPU count: how much remedik changes in your cluster at once should not depend on which node the operator was scheduled on.  It exists because one worker meant one remediation at a time, cluster-wide, for as long as it took -- and a step that waits for a pipeline's verdict takes minutes by design, so an ordinary escalation stalled everything else for half an hour.  Raise it if remediations queue behind each other during a storm. Lower it to 1 to go back to strictly one at a time. Below 1 the operator refuses to start. |
 | dashboard.auth.disabled | bool | `false` | Serve the dashboard without authentication. Anything that can reach the port could then read every alert label, namespace and workload name remedik has recorded. |
 | dashboard.auth.existingSecret | string | `""` | Name of a Secret you manage that holds the dashboard token |
 | dashboard.auth.secretKey | string | `"token"` | Key inside the token Secret |
@@ -120,6 +121,7 @@ what the operator already reads.
 | grafanaDashboard.namespace | string | `""` | Namespace for the ConfigMap; defaults to the release namespace. The Grafana sidecar usually only watches its own namespace. |
 | guards.blastRadius.enabled | bool | `false` | Allow strategies to use the `blastRadius` guard, which refuses to remediate a workload that is already too degraded. Enabling it grants read-only access to workloads, pods and replicasets so the guard can see how much is available.  A strategy that sets `blastRadius` in a cluster where this is off will be **refused, not allowed**: a guard that cannot evaluate its own condition must not permit the execution. The refusal names the missing permission on the strategy's events. |
 | history.keepPerStrategy | int | `200` | Terminal Remediation records retained per strategy |
+| history.maxAge | string | `""` | Delete terminal records older than this, whatever the count allows.  Empty keeps today's behaviour exactly: the count is the only policy. It is empty rather than set to something reasonable because an upgrade must not delete anybody's history on a default nobody chose.  Set it the way your retention is actually expressed -- "30d", "90d" -- and a sweep applies it every half hour, including to strategies that were disabled, renamed or deleted. Those were the leak: pruning ran only when a remediation completed, so a strategy that stopped running kept everything it had ever made.  remedik will never delete a record a guard is still relying on, whatever this says. Guard state is rebuilt from records at startup, so a record inside a cooldown or a giveUpAfter window is the reason remedik refuses to act again -- and the operator logs when that floor overrides this setting. |
 | image.pullPolicy | string | `"IfNotPresent"` | Image pull policy |
 | image.repository | string | `"ghcr.io/remedik/remedik"` | Container image repository |
 | image.tag | string | `""` | Image tag; defaults to the chart appVersion |
@@ -132,6 +134,10 @@ what the operator already reads.
 | networkPolicy.gatewayFrom | list | `[]` | Who may reach the gateway — the port that makes the cluster change itself. Required when the policy is enabled. A list of NetworkPolicy peers, for example:   - namespaceSelector:       matchLabels:         kubernetes.io/metadata.name: monitoring |
 | networkPolicy.metricsFrom | list | `[]` | Who may scrape metrics. Defaults to whoever may reach the gateway, which is right when Alertmanager and Prometheus are the same install. |
 | nodeSelector | object | `{}` | Node selector for the operator pod |
+| pause | object | `{"configMapName":"remedik-pause","create":true,"paused":false}` | it forces dry-run everywhere, whatever each namespace's posture says. That is deliberate: the one time you most want to know what remediation would have done is the moment you stopped it, so every record still appears, marked Simulated, carrying the plan and the reason you gave.  remedik only reads this ConfigMap. It cannot un-pause itself, because a switch the tool can flip is not a switch. |
+| pause.configMapName | string | `"remedik-pause"` | Name of the ConfigMap holding the switch |
+| pause.create | bool | `true` | Create the pause ConfigMap with the chart, so the command above works without anybody having to create an object first at three in the morning |
+| pause.paused | bool | `false` | Start paused. For an install into a cluster mid-incident, or a rehearsal |
 | podAnnotations | object | `{}` | Extra annotations for the operator pod |
 | priorityClassName | string | `""` | PriorityClass for the operator pod. A single-replica operator evicted under node pressure stops remediating without anyone being told, so on a busy cluster this is worth setting to something like `system-cluster-critical`. |
 | probes.port | int | `8081` | Port the health and readiness probes listen on |
@@ -156,6 +162,12 @@ what the operator already reads.
 | serviceMonitor.relabelings | list | `[]` | Relabelings applied before the scrape |
 | serviceMonitor.scrapeTimeout | string | `"10s"` | How long a scrape may take. The posture metrics read the operator's cache, so a slow scrape means the cache is gone. |
 | tolerations | list | `[]` | Tolerations for the operator pod |
+| workloadAlerts.additionalLabels | object | `{}` | Labels the PrometheusRule needs to be selected, as for the ServiceMonitor |
+| workloadAlerts.crashLoopFor | string | `"10m"` | How long a crash loop must hold before it fires. Long enough that a rollout in progress is not mistaken for one, short enough to be worth remediating. |
+| workloadAlerts.enabled | bool | `false` | Ship alerting rules for your workloads that carry a workload label |
+| workloadAlerts.namespace | string | `""` | Namespace for the PrometheusRule; defaults to the release namespace |
+| workloadAlerts.oomFor | string | `"5m"` | How long an OOM kill must hold before it fires |
+| workloadAlerts.severity | string | `"warning"` | Severity label on the rules |
 
 ## Maintainers
 

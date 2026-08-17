@@ -59,6 +59,14 @@ type Sink struct {
 	Logger *slog.Logger
 	// Now supplies timestamps; tests inject a fixed clock.
 	Now func() time.Time
+
+	// Pause forces dry-run everywhere while it is set, without a restart.
+	//
+	// It does not silence remedik. The one time an operator most wants to know
+	// what remediation would have done is the moment they stopped it, so a
+	// paused remedik keeps recording — Simulated, with the plan, and with the
+	// pause named on the record. Optional; nil is never paused.
+	Pause *Pause
 }
 
 // Consume implements gateway.Sink.
@@ -144,6 +152,14 @@ func (s *Sink) consumeOne(
 			"guard", decision.Guard, "reason", decision.Reason,
 			"retry_after", decision.RetryAfter)
 		s.recordRejection(strategy, a, decision)
+
+		// Every other guard refuses into an event and a metric. That is right
+		// for "not yet" and wrong for "I have stopped helping", which is the
+		// state with the least visibility and the most consequence — so this
+		// one leaves a record and pages.
+		if decision.Guard == guards.GuardGiveUp {
+			return s.recordGiveUp(ctx, a, strategy, target, decision, log)
+		}
 		return nil
 	}
 
@@ -241,14 +257,129 @@ func (s *Sink) create(
 			Retries:         strategy.Spec.OnFailure.Retries,
 			EscalationSteps: strategy.Spec.OnFailure.Steps,
 			EscalationMode:  escalationMode(strategy),
-			DryRun:          s.Posture.DryRunFor(target.Namespace),
+			DryRun:          s.Posture.DryRunFor(target.Namespace) || s.Pause.Paused(),
 		},
+	}
+
+	// Why it only simulated, on the record rather than only in a log line: a
+	// run of unexplained simulations a week later is indistinguishable from a
+	// dry-run trial nobody remembers configuring.
+	if s.Pause.Paused() {
+		rem.Labels[v1alpha1.LabelPaused] = "true"
+		if reason := s.Pause.Reason(); reason != "" {
+			if rem.Annotations == nil {
+				rem.Annotations = map[string]string{}
+			}
+			rem.Annotations[v1alpha1.AnnotationPauseReason] = reason
+		}
 	}
 
 	if err := s.Client.Create(ctx, rem); err != nil {
 		return fmt.Errorf("create remediation: %w", err)
 	}
 	return nil
+}
+
+// recordGiveUp creates the record that says remedik has stopped.
+//
+// It has no steps: nothing is remediated. What it does is run the strategy's
+// own onFailure.steps, so the page goes wherever that strategy's pages already
+// go, and leave an entry somebody can find later — on the list, on
+// /namespaces, and in `kubectl get remediations`.
+//
+// One per trip. Alertmanager repeats, and a record and a page for every repeat
+// would turn "stop paging about this" into a source of pages.
+func (s *Sink) recordGiveUp(
+	ctx context.Context,
+	a alert.Alert,
+	strategy *v1alpha1.RemediationStrategy,
+	target action.Target,
+	decision guards.Decision,
+	log *slog.Logger,
+) error {
+	window := time.Duration(0)
+	if g := strategy.Spec.Guards.GiveUpAfter; g != nil {
+		window = g.Within.Duration
+	}
+
+	already, err := s.gaveUpRecently(ctx, strategy.Name, targetString(target), window)
+	if err != nil {
+		return fmt.Errorf("look for an existing give-up record: %w", err)
+	}
+	if already {
+		log.Debug("already gave up on this target inside the window; not paging again")
+		return nil
+	}
+
+	startsAt := metav1.NewTime(a.StartsAt)
+	rem := &v1alpha1.Remediation{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: strategy.Name + "-gaveup-",
+			Namespace:    s.Namespace,
+			Labels: map[string]string{
+				v1alpha1.LabelStrategy:    strategy.Name,
+				v1alpha1.LabelFingerprint: a.Fingerprint,
+				v1alpha1.LabelGaveUp:      "true",
+			},
+			Annotations: map[string]string{
+				v1alpha1.AnnotationGaveUpReason: decision.Reason,
+			},
+		},
+		Spec: v1alpha1.RemediationSpec{
+			StrategyName: strategy.Name,
+			Target:       targetString(target),
+			Alert: v1alpha1.AlertRef{
+				Fingerprint: a.Fingerprint,
+				Name:        a.Name(),
+				Labels:      a.Labels,
+				StartsAt:    &startsAt,
+			},
+			// No Steps and no Retries: nothing is attempted. The escalation is
+			// the entire content of this record.
+			EscalationSteps: strategy.Spec.OnFailure.Steps,
+			EscalationMode:  escalationMode(strategy),
+			// Never a dry run. Giving up is a report, and the escalation is
+			// the one thing that runs for real during a trial anyway.
+			DryRun: false,
+		},
+	}
+
+	if err := s.Client.Create(ctx, rem); err != nil {
+		return fmt.Errorf("create give-up record: %w", err)
+	}
+
+	// Deliberately no RecordStart: remedik started nothing, and counting this
+	// as an execution would extend the window that produced it.
+	log.Warn("giving up on this target; remediation is not resolving it",
+		"target", target.String(), "reason", decision.Reason)
+	return nil
+}
+
+// gaveUpRecently reports whether a give-up record for this target already
+// exists inside the window.
+func (s *Sink) gaveUpRecently(
+	ctx context.Context, strategy, target string, window time.Duration,
+) (bool, error) {
+	var list v1alpha1.RemediationList
+	if err := s.Client.List(ctx, &list,
+		client.InNamespace(s.Namespace),
+		client.MatchingLabels{
+			v1alpha1.LabelStrategy: strategy,
+			v1alpha1.LabelGaveUp:   "true",
+		},
+		client.UnsafeDisableDeepCopy,
+	); err != nil {
+		return false, err
+	}
+
+	cutoff := s.now().Add(-window)
+	for i := range list.Items {
+		rem := &list.Items[i]
+		if rem.Spec.Target == target && !rem.CreationTimestamp.Time.Before(cutoff) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // EventReasonGuardRejected is the reason on the event published when a
@@ -297,6 +428,9 @@ func guardConfig(strategy *v1alpha1.RemediationStrategy) guards.Config {
 	cfg := guards.Config{MaxPerHour: int(strategy.Spec.Guards.MaxPerHour)}
 	if d := strategy.Spec.Guards.Cooldown; d != nil {
 		cfg.Cooldown = d.Duration
+	}
+	if g := strategy.Spec.Guards.GiveUpAfter; g != nil {
+		cfg.GiveUpAfter = guards.GiveUp{Count: int(g.Count), Within: g.Within.Duration}
 	}
 	return cfg
 }

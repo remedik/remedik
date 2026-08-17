@@ -63,18 +63,27 @@ else
 	bad "could not set the organisation defaults"
 fi
 
-# Two-factor is refused while any member is without it, because turning it
-# on would lock them out. That is the right behaviour and a useful check.
-gh api -X PATCH "orgs/${ORG}" -F two_factor_requirement_enabled=true >/dev/null 2>&1
-if [ "$(gh api "orgs/${ORG}" --jq '.two_factor_requirement_enabled')" = "true" ]; then
+# Two-factor cannot be required through the API.
+#
+# The org PATCH endpoint accepts two_factor_requirement_enabled and silently
+# ignores it: the field is documented as a response, not a parameter. Sending
+# it looks like it worked -- the call returns 200 and the org object -- which is
+# worse than a refusal, so this reports the state and names the one place it can
+# be changed instead of pretending.
+required="$(gh api "orgs/${ORG}" --jq '.two_factor_requirement_enabled')"
+if [ "$required" = "true" ]; then
 	ok "two-factor authentication required"
 else
-	without="$(gh api "orgs/${ORG}/members?filter=2fa_disabled" --jq 'map(.login)|join(", ")' 2>/dev/null)"
 	bad "two-factor authentication is NOT required"
+	without="$(gh api "orgs/${ORG}/members?filter=2fa_disabled" --jq 'map(.login)|join(", ")' 2>/dev/null)"
 	if [ -n "$without" ]; then
-		note "these members have no 2FA, and enabling it would lock them out: ${without}"
-		note "each of them: https://github.com/settings/security — then run this again"
+		note "first, these members have no 2FA and turning it on would lock them out: ${without}"
+		note "each of them: https://github.com/settings/security"
+	else
+		note "every member has 2FA, so nobody would be locked out"
 	fi
+	note "then turn it on here — it is a UI-only setting:"
+	note "  https://github.com/organizations/${ORG}/settings/security"
 fi
 
 # --------------------------------------------------------------------------

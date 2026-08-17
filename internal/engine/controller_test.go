@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,11 +26,13 @@ func quietLogger() *slog.Logger {
 
 // countingRecorder captures engine telemetry.
 type countingRecorder struct {
-	unmatched int
-	rejected  map[string]int
-	started   int
-	finished  map[string]int
-	escalated map[string]int
+	swept        int
+	heldByGuards int
+	unmatched    int
+	rejected     map[string]int
+	started      int
+	finished     map[string]int
+	escalated    map[string]int
 }
 
 func newCountingRecorder() *countingRecorder {
@@ -43,6 +46,11 @@ func (r *countingRecorder) GuardRejected(_, guard string)              { r.rejec
 func (r *countingRecorder) RemediationStarted(string)                  { r.started++ }
 func (r *countingRecorder) RemediationFinished(_, o string, _ float64) { r.finished[o]++ }
 func (r *countingRecorder) EscalationFinished(_, o string)             { r.escalated[o]++ }
+
+func (r *countingRecorder) RecordsSwept(deleted, held int) {
+	r.swept += deleted
+	r.heldByGuards = held
+}
 
 // remediation builds a record in the state a freshly created one has.
 func remediation(name string, steps ...v1alpha1.Step) *v1alpha1.Remediation {
@@ -446,5 +454,44 @@ func TestReconcile_PruneNeverDeletesTheRecordJustFinished(t *testing.T) {
 	}
 	if kept != 1 {
 		t.Errorf("kept %d terminal records, want the limit of 1", kept)
+	}
+}
+
+// The defect this exists for: one worker meant one remediation at a time,
+// cluster-wide, for as long as it took. The values the CRD permits put that at
+// fifteen hours in the worst case, and at half an hour in the ordinary one --
+// a job.run waiting for a pipeline's verdict, retried twice -- during which
+// nothing else in the cluster was remediated.
+func TestSetupWithManager_ConcurrencyIsBoundedAndSensible(t *testing.T) {
+	if DefaultConcurrency < 2 {
+		t.Errorf("DefaultConcurrency = %d; a value of one is the serial "+
+			"behaviour this exists to fix", DefaultConcurrency)
+	}
+	// Not a CPU count: this governs how many things remedik changes in
+	// somebody's cluster at once, and deriving that from the machine the
+	// operator happened to be scheduled on would make the blast radius a
+	// property of the node pool.
+	if DefaultConcurrency != 4 {
+		t.Errorf("DefaultConcurrency = %d, want the documented 4", DefaultConcurrency)
+	}
+	if DefaultConcurrency > 8 {
+		t.Errorf("DefaultConcurrency = %d is a lot of simultaneous change to a "+
+			"cluster for a default", DefaultConcurrency)
+	}
+}
+
+// A limit that cannot mean anything is refused rather than corrected, because
+// a setting that silently does something else is worse than one that stops.
+func TestSetupWithManager_RefusesANonsensicalLimit(t *testing.T) {
+	for _, n := range []int{-1, -8} {
+		r := &RemediationReconciler{Concurrency: n, Logger: quietLogger()}
+		err := r.SetupWithManager(nil)
+		if err == nil {
+			t.Errorf("SetupWithManager() with concurrency %d returned nil, want an error", n)
+			continue
+		}
+		if !strings.Contains(err.Error(), "at least 1") {
+			t.Errorf("error for concurrency %d = %q, want it to say what is allowed", n, err)
+		}
 	}
 }

@@ -2328,3 +2328,13 @@ a.stat:hover {
 .filter-select.is-live button {
   display: none;
 }
+
+/* Paused reads as a warning rather than an error: nothing is broken, somebody
+   made a decision. It sits where the posture chip does and replaces it, because
+   it overrides what that chip would have said. */
+.mode-paused {
+  color: var(--warn);
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+  font-weight: 650;
+}

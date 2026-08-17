@@ -1,0 +1,86 @@
+# Stop restarting something that keeps breaking, and tell somebody.
+#
+#   alert → remedik → restart → worked
+#   alert → remedik → restart → worked
+#   alert → remedik → restart → worked
+#   alert → remedik → restart → worked
+#   alert → remedik → restart → worked
+#   alert → remedik → "I have restarted this five times in two hours and it
+#                      keeps coming back. This is not something I can fix."
+#                      → your on-call
+#
+# The thing to notice is that every one of those remediations SUCCEEDED. The
+# rollout completed, the pods came back ready, the record says Succeeded. What
+# is wrong is not the remediation; it is that remediation is not the answer,
+# and remedik is the only thing in the cluster positioned to notice.
+#
+# Without this guard remedik restarts that Deployment for ever. `cooldown`
+# spaces the attempts out and `maxPerHour` caps them, but neither ever
+# concludes anything: after the hour it tries again, quietly, indefinitely.
+#
+# Three things about it are worth knowing before you copy this:
+#
+#   1. It is scoped to one target. `maxPerHour` is counted across every target
+#      a strategy covers, so one workload that keeps breaking eats the whole
+#      budget and stops the strategy protecting everything else. This does not.
+#   2. Giving up creates a Remediation. It has no steps -- nothing is
+#      remediated -- and its entire content is the escalation, so the page goes
+#      wherever this strategy's pages already go. It is on the list, on
+#      /namespaces, and in `kubectl get remediations` with reason GaveUp.
+#   3. It clears itself. Once the target has been quiet for `within`,
+#      remediation resumes with nothing to reset. A latch somebody has to clear
+#      is a latch that stays set: you fix the application, and the tool
+#      silently keeps not helping.
+#
+# It pages once per trip, not once per alert, because Alertmanager repeats.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: restart-until-it-is-clearly-not-working
+spec:
+  enabled: true
+  trigger:
+    match:
+      alertname: KubePodCrashLooping
+  guards:
+    cooldown: 15m
+    maxPerHour: 6
+    blastRadius:
+      minAvailable: 1
+
+    # Five restarts of the same workload inside two hours means restarting is
+    # not the fix.
+    #
+    # Choosing the numbers: `within` should be comfortably longer than
+    # `cooldown` times `count`, or the guard can never trip -- with a 15m
+    # cooldown, five remediations take at least 75 minutes, so a two-hour
+    # window leaves room for them to actually happen.
+    giveUpAfter:
+      count: 5
+      within: 2h
+
+  steps:
+    - action: deployment.restart
+      with:
+        verifyTimeout: 90s
+
+  onFailure:
+    retries: 1
+    steps:
+      # This runs for the ordinary failures AND for giving up, which is the
+      # point: one place to configure who gets told.
+      - action: webhook.call
+        with:
+          url: http://monitoring-kube-prometheus-alertmanager.monitoring.svc:9093/api/v2/alerts
+          format: alertmanager
+---
+# A workload that legitimately needs frequent remediation -- a leak restarted
+# hourly on purpose -- will trip this. That is arguably correct, and the answer
+# is to say so rather than to leave the guard off:
+#
+#   giveUpAfter:
+#     count: 30
+#     within: 24h
+#
+# which still catches the case where something changes and it starts needing a
+# restart every ten minutes.

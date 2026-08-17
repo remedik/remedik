@@ -58,7 +58,14 @@
         {{.Cluster}}
       </span>
       {{end}}
-      {{if .Posture.Mixed}}
+      {{if .Paused}}
+      {{/* First, and loud. This is the answer to "why is nothing happening",
+           and it outranks the posture because it overrides it. */}}
+      <span class="mode mode-paused" title="Remediation is paused: every strategy only reports, whatever its posture says">
+        Paused
+        {{if .PauseReason}}<span class="mode-detail">{{.PauseReason}}</span>{{end}}
+      </span>
+      {{else if .Posture.Mixed}}
       <span class="mode mode-mixed"
             title="{{if .DryRun}}Nothing is changed, except in {{else}}Matching alerts are remediated, except in {{end}}{{.Posture.ExceptionsAll}}">
         Mixed

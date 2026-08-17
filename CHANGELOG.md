@@ -9,6 +9,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **A kill switch.** One command stops remediation on every replica within
+  seconds, with no restart and no rollout:
+
+  ```bash
+  kubectl -n remedik patch configmap remedik-pause \
+    --type merge -p '{"data":{"paused":"true","reason":"network incident"}}'
+  ```
+
+  It does not silence remedik — it forces dry-run everywhere, whatever each
+  namespace's posture says. That is deliberate: the one time you most want to
+  know what remediation would have done is the moment you stopped it, so every
+  record still appears, marked `Simulated`, carrying the plan and your reason.
+
+  The chart creates the ConfigMap, so the command works without anybody
+  authoring an object mid-incident, and keeps it through an uninstall. remedik
+  only reads it — `get, list, watch` on that one name — because a switch the
+  tool can flip is not a switch. Every replica watches it, not only the leader,
+  since a standby that took over believing remediation was enabled would act on
+  the first alert it saw.
+
+  The dashboard says `Paused` on every page, and the pause is folded into the
+  posture the pages render, so no namespace can show `Live` while nothing
+  anywhere will act.
+
+- **Retention is applied on a schedule**, with an optional `history.maxAge`.
+
+  The count per strategy was a leak rather than a policy. Pruning ran inside
+  the terminal status write, so it only ever reclaimed records for the strategy
+  that had just finished one — a strategy that was disabled, renamed, deleted
+  or had merely gone quiet kept everything it had ever made, for ever. Over the
+  life of a cluster, strategies are added and removed, and each departure left
+  a permanent deposit nothing would ever look at again.
+
+  A sweeper now applies the policy every half hour on the leader, at a bounded
+  rate. `history.maxAge` is unset by default, which is today's behaviour
+  exactly: an upgrade must not delete anybody's history on a default nobody
+  chose.
+
+  It never deletes what a guard is relying on. Guard state is rebuilt from
+  records at startup, so a record inside a cooldown or `giveUpAfter` window is
+  the reason remedik refuses to act again — deleting it means the next restart
+  remediates something it had correctly refused. Nothing newer than the longest
+  configured guard window goes, whatever the age says, and
+  `remedik_records_held_by_guards` counts what the floor held back, because a
+  policy that is quietly not being applied is worse than one that is refused.
+
+- **A `giveUpAfter` guard**, which stops remediating a target that keeps
+  needing it and says so.
+
+  remedik would restart the same Deployment for ever. `cooldown` spaces the
+  attempts out, `maxPerHour` caps them, and neither ever concludes anything —
+  so a workload that breaks every twenty minutes was restarted three times an
+  hour, indefinitely, and nobody was told.
+
+  The part that is easy to miss is that those remediations all **succeeded**.
+  The rollout completed, the pods came back ready, the record said `Succeeded`.
+  What was wrong was not the remediation; it was that remediation was not the
+  answer, and remedik was the only thing in the cluster positioned to notice.
+
+  ```yaml
+  guards:
+    giveUpAfter:
+      count: 5
+      within: 2h
+  ```
+
+  It is scoped to `(strategy, target)`, which also fixes something else:
+  `maxPerHour` is counted across every target, so one workload that kept
+  breaking consumed a strategy's whole budget and stopped it protecting all the
+  others.
+
+  Giving up creates a `Remediation` with no steps, `Failed`, reason `GaveUp`,
+  and runs the strategy's `onFailure.steps` — so the page goes wherever that
+  strategy's pages already go, and the decision is in the audit trail rather
+  than in a log line. Every other guard refuses into an event and a metric,
+  which is defensible for "not yet" and not for "I have stopped helping".
+
+  It pages once per trip rather than once per alert, it never counts toward any
+  guard on creation or on replay, and it clears itself once the target has been
+  quiet for the window.
+
 - **Exactly one instance acts.** `replicas: 1` was in the chart and nothing
   enforced it: `kubectl scale deploy/remedik --replicas=2` succeeded, and the
   second instance served the same Service and reconciled the same resources.
@@ -103,6 +184,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   once.
 
 ### Changed
+
+- **Remediations for different resources now run concurrently.** One worker
+  meant one remediation at a time, cluster-wide, for as long as it took — and
+  the values the CRD already permits put that at fifteen hours in the worst
+  case. The ordinary case is worse than it sounds because it is ordinary: a
+  `job.run` that waits for a pipeline's verdict, which the cookbook recommends
+  because a pipeline API answers "queued" rather than "succeeded". Two retries
+  and that is half an hour during which nothing else in the cluster is
+  remediated.
+
+  `concurrency` defaults to 4 and is deliberately not a CPU count: it governs
+  how many things remedik changes in your cluster at the same moment, and
+  deriving that from the node the operator landed on would make the blast
+  radius a property of the node pool. Below 1 the operator refuses to start
+  rather than silently correcting it.
+
+  controller-runtime still reconciles one object at a time, so
+  `Running`-means-interrupted and the conflict that refuses a stale verdict are
+  untouched, and the steps within one remediation stay strictly ordered.
+
+  Proven in the e2e: a fast remediation finishes while a slow one is still
+  `Running`.
 
 - **The read path was measured and cut down.** Every page render and every
   Prometheus scrape read the whole world and threw it away. At ten thousand

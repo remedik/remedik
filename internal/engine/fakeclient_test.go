@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -40,6 +42,17 @@ type fakeClient struct {
 	// Call counters, for asserting what the reconciler actually did.
 	statusUpdates int
 	deletes       int
+
+	// Now stamps creationTimestamp, as the API server does.
+	Now func() time.Time
+}
+
+// now is the clock the fake stamps creations with. Tests that care inject one.
+func (c *fakeClient) now() time.Time {
+	if c.Now != nil {
+		return c.Now()
+	}
+	return testClock
 }
 
 func newFakeClient(objs ...client.Object) *fakeClient {
@@ -132,6 +145,12 @@ func (c *fakeClient) Create(_ context.Context, obj client.Object, _ ...client.Cr
 	if obj.GetName() == "" && obj.GetGenerateName() != "" {
 		c.nextID++
 		obj.SetName(obj.GetGenerateName() + strconv.Itoa(c.nextID))
+	}
+	// The API server stamps this, and code that reads it back — the give-up
+	// guard asks whether it already gave up recently — was silently reading a
+	// zero time from a fake that did not.
+	if created := obj.GetCreationTimestamp(); created.IsZero() {
+		obj.SetCreationTimestamp(metav1.NewTime(c.now()))
 	}
 	key := keyOf(obj)
 	if _, exists := c.objects[key]; exists {

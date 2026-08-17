@@ -30,6 +30,11 @@ const (
 	// GuardCooldown rejected the execution: the same strategy finished on
 	// the same target too recently.
 	GuardCooldown = "cooldown"
+	// GuardGiveUp rejected the execution: remediation has run this many
+	// times for this target inside the window without resolving the problem,
+	// so remedik has stopped and said so.
+	GuardGiveUp = "giveUpAfter"
+
 	// GuardMaxPerHour rejected the execution: the strategy has started too
 	// many executions in the trailing hour.
 	GuardMaxPerHour = "maxPerHour"
@@ -45,7 +50,37 @@ type Config struct {
 	Cooldown time.Duration
 	// MaxPerHour caps executions started by this strategy in the trailing
 	// hour. Zero disables the check.
+	//
+	// It is counted per strategy, across every target, which is deliberate:
+	// it bounds what one strategy may do to a cluster. It is therefore not
+	// the guard for "this one workload keeps breaking" — that is GiveUpAfter,
+	// and without it a single flapping target consumes a strategy's whole
+	// budget and stops it protecting everything else.
 	MaxPerHour int
+
+	// GiveUpAfter stops remediating a target that keeps needing it.
+	//
+	// The other guards pace: not yet, not this many, not safely. None of them
+	// ever concludes anything, so remedik will restart the same Deployment for
+	// ever. This one concludes.
+	//
+	// Zero count disables the check.
+	GiveUpAfter GiveUp
+}
+
+// GiveUp is how many remediations of one target within what window mean that
+// remediation is not the answer.
+type GiveUp struct {
+	// Count is how many remediations of the same (strategy, target) inside
+	// Within are enough to stop. Zero disables the guard.
+	Count int
+	// Within is the window the count is measured over.
+	//
+	// It exists because remedik cannot see an alert stop firing, so it cannot
+	// observe a streak being broken. A window is the honest form of "five
+	// times in a row": five restarts of one Deployment in two hours means
+	// restarting is not the fix; five over three months is a Tuesday.
+	Within time.Duration
 }
 
 // History is the read model guards need. The engine implements it over
@@ -56,6 +91,9 @@ type History interface {
 	LastCompletion(strategy, target string) (time.Time, bool)
 	// StartsSince counts executions of strategy started at or after since.
 	StartsSince(strategy string, since time.Time) int
+	// CompletionsSince counts how many times strategy finished on target at
+	// or after since.
+	CompletionsSince(strategy, target string, since time.Time) int
 }
 
 // Decision is the outcome of evaluating every guard.
@@ -93,7 +131,44 @@ func Evaluate(cfg Config, h History, strategy, target string, now time.Time) Dec
 	if d := evaluateCooldown(cfg, h, strategy, target, now); !d.Allowed {
 		return d
 	}
-	return evaluateRate(cfg, h, strategy, now)
+	if decision := evaluateRate(cfg, h, strategy, now); !decision.Allowed {
+		return decision
+	}
+	return evaluateGiveUp(cfg, h, strategy, target, now)
+}
+
+// evaluateGiveUp asks whether remediation is working for this target.
+//
+// It is checked last because it is the most expensive answer to be wrong
+// about: the others say "not yet", and this one says "not at all, and somebody
+// is about to be paged". A cooldown or a rate limit that would have refused
+// anyway should refuse first, quietly.
+//
+// It counts completions rather than failures, which is the whole point. The
+// case this exists for is remediations that succeed: the rollout finishes, the
+// pods come back ready, and twenty minutes later the alert is back. Counting
+// failures would miss it entirely.
+func evaluateGiveUp(cfg Config, h History, strategy, target string, now time.Time) Decision {
+	if cfg.GiveUpAfter.Count <= 0 || cfg.GiveUpAfter.Within <= 0 || h == nil {
+		return allowed
+	}
+
+	done := h.CompletionsSince(strategy, target, now.Add(-cfg.GiveUpAfter.Within))
+	if done < cfg.GiveUpAfter.Count {
+		return allowed
+	}
+
+	return Decision{
+		Guard: GuardGiveUp,
+		Reason: fmt.Sprintf(
+			"%s has remediated %s %d times in the last %s and the problem keeps "+
+				"coming back; remediation is not fixing this and it needs a person",
+			strategy, target, done, cfg.GiveUpAfter.Within),
+		// No RetryAfter: the wait is until the oldest completion ages out of
+		// the window, and reporting a time would suggest remedik expects to
+		// try again — which is exactly the impression this guard exists to
+		// correct.
+	}
 }
 
 func evaluateCooldown(cfg Config, h History, strategy, target string, now time.Time) Decision {

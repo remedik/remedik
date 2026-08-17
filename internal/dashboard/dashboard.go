@@ -107,6 +107,14 @@ type Config struct {
 	// "nothing was configured".
 	Posture Posture
 
+	// Paused reports whether the kill switch is on, so the pages say so.
+	//
+	// A function rather than a value: it is flipped at runtime, and a dashboard
+	// that had to be restarted to notice would be the one place an operator
+	// checks after stopping remediation and the one place still claiming it is
+	// running. Optional; nil means never paused.
+	Paused func() (bool, string)
+
 	// Cluster names the cluster this operator watches. Optional, and shown
 	// in the header when set.
 	//
@@ -135,6 +143,7 @@ type Handler struct {
 	namespace string
 	token     []byte
 	posture   Posture
+	paused    func() (bool, string)
 	cluster   string
 	version   string
 	logger    *slog.Logger
@@ -159,6 +168,7 @@ func New(cfg Config) (*Handler, error) {
 		namespace: cfg.Namespace,
 		token:     []byte(cfg.Token),
 		posture:   cfg.Posture,
+		paused:    cfg.Paused,
 		cluster:   cfg.Cluster,
 		version:   cfg.Version,
 		logger:    cfg.Logger,
@@ -337,7 +347,7 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	view := buildOverview(remediations, strategies, h.posture, h.now())
+	view := buildOverview(remediations, strategies, h.viewPosture(), h.now())
 	view.Page = h.page("Overview", navOverview)
 	h.render(w, r, overviewTemplate, view)
 }
@@ -404,7 +414,7 @@ func (h *Handler) namespaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	view := buildNamespaces(remediations, h.posture, h.now())
+	view := buildNamespaces(remediations, h.viewPosture(), h.now())
 	view.Page = h.page("Namespaces", navNamespaces)
 	h.render(w, r, namespacesTemplate, view)
 }
@@ -483,17 +493,40 @@ func (h *Handler) listStrategies(ctx context.Context) ([]v1alpha1.RemediationStr
 
 // page builds the fields every page's chrome needs.
 func (h *Handler) page(title, nav string) Page {
+	paused, pauseReason := h.pauseState()
+	posture := h.posture
+	posture.Paused = paused
+
 	return Page{
-		Title:      title,
-		Nav:        nav,
-		DryRun:     h.posture.DryRun,
-		Posture:    h.posture,
-		Namespace:  h.namespace,
-		Cluster:    h.cluster,
-		Version:    h.version,
-		Asset:      assetVersion,
-		RenderedAt: FormatClock(h.now()),
+		Paused:      paused,
+		PauseReason: pauseReason,
+		Title:       title,
+		Nav:         nav,
+		DryRun:      h.posture.DryRun,
+		Posture:     h.posture,
+		Namespace:   h.namespace,
+		Cluster:     h.cluster,
+		Version:     h.version,
+		Asset:       assetVersion,
+		RenderedAt:  FormatClock(h.now()),
 	}
+}
+
+// pauseState reads the kill switch, or reports running when none is wired.
+func (h *Handler) pauseState() (bool, string) {
+	if h.paused == nil {
+		return false, ""
+	}
+	return h.paused()
+}
+
+// viewPosture is the posture the page builders see: the configured one, with
+// the kill switch folded in. Resolved once here so no builder has to remember.
+func (h *Handler) viewPosture() Posture {
+	paused, _ := h.pauseState()
+	posture := h.posture
+	posture.Paused = paused
+	return posture
 }
 
 // render writes a page, buffering it first.

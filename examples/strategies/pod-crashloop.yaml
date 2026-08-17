@@ -7,53 +7,40 @@
 # record appears as Simulated with the exact plan, and nothing is touched.
 #
 # ---------------------------------------------------------------------------
-# READ THIS FIRST: the alert must name the workload
+# It needs an alert that names the workload, and the chart ships one
 # ---------------------------------------------------------------------------
 #
-# kube-prometheus-stack's own KubePodCrashLooping carries `namespace`, `pod`,
-# `container` and `reason` -- and no `deployment`. As written below, remedik
-# will record the remediation as failed with:
+# This matches RemedikWorkloadCrashLooping, not kube-prometheus-stack's own
+# KubePodCrashLooping. The difference is one label and it is the whole story.
+#
+# KubePodCrashLooping carries `namespace`, `pod`, `container` and `reason` --
+# and no workload label. remedik will not guess a Deployment from a pod name,
+# because a guess restarts the wrong workload during an incident, so a strategy
+# matching it records:
 #
 #   no workload: the alert carries none of the "deployment", "statefulset" or
 #   "daemonset" labels, and the step sets no "kind" and "name"
 #
-# That refusal is deliberate. Deriving a Deployment from a pod name is a guess,
-# and a guess here restarts the wrong workload during an incident.
+# The chart's own rule joins the ownership from kube-state-metrics instead of
+# inferring it, and publishes the same condition with a `deployment` label:
 #
-# So one of these has to be true. Pick whichever fits your setup:
+#   helm upgrade remedik ... --set workloadAlerts.enabled=true
 #
-#   1. Your alert already carries a workload label. Many teams' own alerts do,
-#      because they are written against their own labelling. Nothing to do.
+# Then route RemedikWorkloadCrashLooping to remedik and this works as written.
 #
-#   2. Add the label in Prometheus, with a rule that joins kube_state_metrics'
-#      ownership data. This is the right fix, because it is authoritative
-#      rather than inferred:
+# Three alternatives, if that does not suit:
 #
-#        - alert: WorkloadCrashLooping
-#          expr: |
-#            max_over_time(kube_pod_container_status_waiting_reason{
-#              reason="CrashLoopBackOff"}[5m]) >= 1
-#            * on (namespace, pod) group_left (owner_name)
-#              kube_pod_owner{owner_kind="ReplicaSet"}
-#          for: 15m
-#          labels:
-#            severity: warning
-#          annotations:
-#            summary: "{{ $labels.namespace }}/{{ $labels.owner_name }} is crash looping"
+#   1. Your own alerts already carry a workload label -- many teams' do. Match
+#      whichever alertname yours is and change nothing else.
+#   2. Name the workload here, if this strategy is for one known workload.
+#      Uncomment `deployment:` below, and scope the trigger too, or every crash
+#      loop in the cluster restarts that one Deployment.
+#   3. Act on the pod instead. `pod.delete` uses the `pod` label the stock
+#      alert already carries -- see pod-not-ready.yaml. It is a weaker fix for
+#      a crash loop, because the replacement pod usually crashes the same way,
+#      but it needs nothing extra.
 #
-#      then relabel `owner_name` to `deployment` -- note a ReplicaSet's name is
-#      the Deployment's name plus a hash, so strip the suffix.
-#
-#   3. Name the workload in the strategy, if this strategy is for one known
-#      workload. Uncomment `deployment:` in the step below. Scope the trigger
-#      too, or every crash loop in the cluster restarts that one Deployment.
-#
-#   4. Act on the pod instead. `pod.delete` uses the `pod` label the alert
-#      already carries, and needs none of the above -- see pod-not-ready.yaml.
-#      It is a weaker fix for a crash loop, because the replacement pod usually
-#      crashes the same way, but it is honest and it works today.
-#
-# This was found by pointing a real Prometheus at remedik and waiting the
+# This gap was found by pointing a real Prometheus at remedik and waiting the
 # fifteen minutes for the rule to fire. Synthetic alerts in a test carry
 # whatever labels the test author chose, which is why it went unnoticed.
 apiVersion: remedik.dev/v1alpha1
@@ -64,7 +51,9 @@ spec:
   enabled: true
   trigger:
     match:
-      alertname: KubePodCrashLooping
+      # From the chart's workloadAlerts. See the note above for why this is
+      # not KubePodCrashLooping.
+      alertname: RemedikWorkloadCrashLooping
   execution:
     mode: auto
   guards:

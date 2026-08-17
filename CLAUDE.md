@@ -26,6 +26,10 @@ This repository explains itself. Read these before proposing changes:
 
 ## Invariants — do not break these without an ADR
 
+The reader-facing version, with the reasoning and the edges, is
+[docs/invariants.md](docs/invariants.md). Keep the two in step: that one is what
+somebody reads before trusting this with a cluster.
+
 1. **AI never executes.** LLM-backed features read and explain. The
    execution path is deterministic: declared strategies, guards, and (from
    v0.2.0) human approval. See ADR-0003.
@@ -118,47 +122,43 @@ most are the ones that must be easiest to test. Keep them that way.
 
 ## Open work
 
-Nothing is open. `add-leader-election` and `add-namespace-health` were
-implemented and archived on 2026-08-17.
+`openspec/changes/` — anything not under `archive/` is proposed and not built.
+That directory is the answer, so this file cannot go stale about it.
 
-The first one's history is worth two minutes before you touch the reconciler, because
-three separate mistakes hid in it and none was visible without running the
-whole loop:
+## Traps
 
-1. **Never retry the status write on conflict.** `Reconcile` reads through
-   the manager's cache, so a second pass can see `Running` after the first
-   recorded `Succeeded` and, by invariant 3, decide it was interrupted. The
-   conflict on that write is what refuses the stale verdict.
-   `internal/engine/staleread_test.go` guards it.
+Five things cost real debugging and are invisible until they bite. Each has a
+test; each test explains itself.
+
+1. **Never retry the status write on conflict.** `Reconcile` reads through the
+   manager's cache, so a second pass can see `Running` after the first recorded
+   `Succeeded` and, by invariant 3, decide it was interrupted. The conflict on
+   that write is what refuses the stale verdict — it is the check, not a defect
+   to smooth over. `internal/engine/staleread_test.go`.
 2. **`NeedLeaderElection() == false` on every HTTP server is load-bearing.**
-   controller-runtime starts a runnable that says nothing only after the
-   lease is won, so without it a standby has no listener and refuses the
-   connection rather than answering 503.
+   controller-runtime starts a runnable that says nothing only after the lease
+   is won, so without it a standby has no listener and refuses the connection
+   rather than answering 503. `cmd/remedik/main_test.go`.
 3. **Readiness is not leadership.** Gating it made a standby never ready, so
    `helm --wait` never finished with two replicas.
+4. **A Content-Security-Policy violation is invisible to every test that does
+   not run a browser.** This policy has silently broken two features:
+   `style-src` discarded inline styles and four bar charts rendered at full
+   width for months; `form-action 'none'` blocked the filter's form and it was
+   reported broken four times. Correct markup, correct handler, correct server,
+   every test green. `hack/browser-check.mjs` reads the console, which is the
+   only place the browser says so.
+5. **Escalation steps are not a plan.** They are alternative ways to reach a
+   person, so one failing must not skip the rest — the opposite of the rule for
+   a remediation's own steps, which do act on each other's results.
 
 The method is the transferable part: reapply on a branch, instrument, run
-`make e2e`, read the operator log rather than theorising. It is deterministic
-and it found all three.
+`make e2e`, and read the log rather than theorising. It is deterministic, and
+it is what found all of these.
 
-### Proven since
+## Wanted, not yet designed
 
-`release.yml` has run. `v0.1.0-rc.3` produced a multi-arch image, a cosign
-keyless signature, an SBOM attestation and the chart pushed to OCI. The
-repository exists at `github.com/remedik/remedik`, so the badges, the
-chart's `icon:` and the advisory links resolve.
-
-### Asked for by the owner
-
-Recorded here so they survive a cold pickup.
-
-**Delivered.** *Per-namespace posture* is `add-namespace-posture`, archived
-2026-08-16: the posture is resolved once when the record is created and
-written onto `spec.dryRun`, so every `Remediation` says which posture it ran
-under and a later config change cannot rewrite history. *Namespace filtering
-in the dashboard* is `add-dashboard-filters`, and `/namespaces` compares them.
-
-**Still open, no change written:**
+Recorded so they survive a cold pickup.
 
 - **Cluster filtering in the dashboard.** Implies hub/spoke, which is
   "Later" on the roadmap: today's operator sees one cluster because it runs
@@ -171,17 +171,22 @@ in the dashboard* is `add-dashboard-filters`, and `/namespaces` compares them.
   what it measures. The nearest existing art is the Kubernetes e2e suite and
   synthetic monitoring; the interesting part is making the results a service
   level rather than a pass/fail.
+- **`ActionPlugin`.** `job.run` already runs any image as any ServiceAccount,
+  so a custom action needs no code today. What is missing is a *typed* one,
+  with its own parameters, validation and declared RBAC. Worth designing after
+  seeing what people actually ask for, not before: a plugin mechanism inside
+  something holding cluster write access is a trust surface, and guessing at
+  it is how that surface ends up wider than anybody wanted.
 
-### Not a code change, and not doable from here
+## Repository settings, which are not code
 
-1. **2FA on the owner's GitHub account**, which is what blocks requiring it
-   org-wide. `hack/github-setup.sh` reports it on every run.
-2. **The repository's social preview image.** `docs/brand/remedik-banner.png`
-   is 1280x640 and ready; it can only be uploaded through Settings.
-3. **Making the repository public**, which unlocks rulesets, secret
-   scanning, CodeQL, Scorecard and Pages. `hack/github-setup.sh` applies all
-   of them on a re-run.
-4. **A funding destination.** `.github/FUNDING.yml` is committed fully
-   commented out, deliberately: a sponsor button leading nowhere is worse
-   than none on a project asking to be trusted with cluster write access.
-   `docs/funding.md` already says what the money would be for.
+`hack/github-setup.sh` applies what the API allows and reports the rest on
+every run, so the state is checkable rather than remembered. Two things it
+cannot do:
+
+- **Requiring two-factor authentication.** The org endpoint accepts the field
+  and silently ignores it — it is documented as a response, not a parameter —
+  so it is a UI setting at
+  `https://github.com/organizations/remedik/settings/security`.
+- **The social preview image.** `docs/brand/remedik-banner.png` is 1280x640
+  and ready; Settings is the only way to upload one.

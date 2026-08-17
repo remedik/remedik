@@ -1,0 +1,32 @@
+{{- if .Values.pause.create }}
+{{- /*
+  The kill switch, created with the chart so the command that flips it works
+  without anybody having to create an object first.
+
+  That matters more than it sounds. A switch you have to author during an
+  incident is a switch you will get wrong at three in the morning — and the
+  thing being optimised here is how few steps stand between a person and
+  stopping remediation.
+
+  helm.sh/resource-policy: keep, because a `helm uninstall` that took the
+  switch with it would leave a cluster where remediation was deliberately
+  stopped and the record of that decision is gone.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.pause.configMapName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "remedik.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+data:
+  # "true", "yes", "on" or "1" all pause. Anything else runs: a switch that
+  # stopped remediation because of a typo would be worse than one that ignored
+  # it, and the operator logs which state is in force either way.
+  paused: {{ .Values.pause.paused | quote }}
+  # Optional. Ends up on every record made while paused, so somebody reading
+  # the audit trail next week learns why rather than only that.
+  reason: ""
+{{- end }}

@@ -428,3 +428,153 @@ func TestSink_ResolvesThePostureFromTheTargetsNamespace(t *testing.T) {
 		})
 	}
 }
+
+// giveUpStrategy trips after two remediations of the same target in an hour.
+func giveUpStrategy() *v1alpha1.RemediationStrategy {
+	return strategy("restart-api",
+		map[string]string{"alertname": "KubePodCrashLooping"},
+		func(s *v1alpha1.RemediationStrategy) {
+			s.Spec.Guards.GiveUpAfter = &v1alpha1.GiveUpAfter{
+				Count:  2,
+				Within: metav1.Duration{Duration: time.Hour},
+			}
+			s.Spec.OnFailure.Steps = []v1alpha1.Step{{Action: "webhook.call"}}
+		})
+}
+
+// Every other guard refuses into an event and a metric. This one leaves a
+// record, because "I have stopped helping" must not be the state with the
+// least visibility.
+func TestSink_GivingUpCreatesARecordThatEscalates(t *testing.T) {
+	strategy := giveUpStrategy()
+	f := newSink(t, false, strategy)
+
+	// Two remediations of one target already happened and succeeded.
+	for i := 2; i >= 1; i-- {
+		f.history.RecordCompletion(strategy.Name, "deployment/payments/api",
+			testClock.Add(-time.Duration(i)*time.Minute))
+	}
+
+	f.sink.Consume([]alert.Alert{firingAlert()})
+
+	records := f.client.remediations()
+	if len(records) != 1 {
+		t.Fatalf("records = %d, want 1: giving up leaves a record", len(records))
+	}
+	rem := records[0]
+
+	if rem.Labels[v1alpha1.LabelGaveUp] != "true" {
+		t.Errorf("labels = %v, want the give-up marker", rem.Labels)
+	}
+	if len(rem.Spec.Steps) != 0 {
+		t.Errorf("steps = %+v, want none: nothing is remediated", rem.Spec.Steps)
+	}
+	// The escalation is the entire content of the record.
+	if len(rem.Spec.EscalationSteps) != 1 {
+		t.Errorf("escalation steps = %+v, want the strategy's", rem.Spec.EscalationSteps)
+	}
+	if rem.Annotations[v1alpha1.AnnotationGaveUpReason] == "" {
+		t.Error("no reason recorded, so the page would not say why")
+	}
+	if rem.Spec.DryRun {
+		t.Error("DryRun = true; giving up is a report and the page must go out")
+	}
+
+	// And it did not count as an execution.
+	if f.metrics.started != 0 {
+		t.Errorf("RemediationStarted called %d times, want 0", f.metrics.started)
+	}
+	if f.metrics.rejected[guards.GuardGiveUp] != 1 {
+		t.Errorf("guard rejections = %v, want one for %q",
+			f.metrics.rejected, guards.GuardGiveUp)
+	}
+}
+
+// Alertmanager repeats. A record and a page for every repeat would turn "stop
+// paging about this" into a source of pages.
+func TestSink_GivesUpOncePerTrip(t *testing.T) {
+	strategy := giveUpStrategy()
+	f := newSink(t, false, strategy)
+
+	for i := 2; i >= 1; i-- {
+		f.history.RecordCompletion(strategy.Name, "deployment/payments/api",
+			testClock.Add(-time.Duration(i)*time.Minute))
+	}
+
+	for range 5 {
+		f.sink.Consume([]alert.Alert{firingAlert()})
+	}
+
+	if got := len(f.client.remediations()); got != 1 {
+		t.Errorf("records = %d, want 1 for five repeat deliveries", got)
+	}
+}
+
+// One workload that keeps breaking must not stop remediation for the others.
+// That is the defect maxPerHour has -- it counts across every target -- and the
+// reason this guard is scoped to one.
+func TestSink_GivingUpOnOneTargetLeavesTheOthersAlone(t *testing.T) {
+	// Two strategies with two actions, because the shared scripted action
+	// resolves a fixed target whatever the alert's labels say.
+	stuck := strategy("restart-api",
+		map[string]string{"alertname": "KubePodCrashLooping"},
+		func(s *v1alpha1.RemediationStrategy) {
+			s.Spec.Guards.GiveUpAfter = &v1alpha1.GiveUpAfter{
+				Count: 2, Within: metav1.Duration{Duration: time.Hour},
+			}
+		})
+	other := strategy("restart-worker",
+		map[string]string{"alertname": "KubeWorkerStuck"},
+		func(s *v1alpha1.RemediationStrategy) {
+			s.Spec.Steps = []v1alpha1.Step{{Action: "workload.restart"}}
+			s.Spec.Guards.GiveUpAfter = &v1alpha1.GiveUpAfter{
+				Count: 2, Within: metav1.Duration{Duration: time.Hour},
+			}
+		})
+
+	registry, err := action.NewRegistry(
+		&scriptedAction{name: "deployment.restart"},
+		&scriptedAction{
+			name:   "workload.restart",
+			target: action.Target{Kind: "Deployment", Namespace: "payments", Name: "worker"},
+		},
+	)
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+
+	c := newFakeClient(stuck, other)
+	metrics := newCountingRecorder()
+	history := guards.NewMemoryHistory(0)
+	sink := &Sink{
+		Client: c, Registry: registry, History: history,
+		Namespace: testNamespace, Posture: NewPosture(false, nil),
+		Metrics: metrics, Logger: quietLogger(),
+		Now: func() time.Time { return testClock },
+	}
+
+	// The api Deployment has been remediated twice; worker never has.
+	for i := 2; i >= 1; i-- {
+		history.RecordCompletion("restart-api", "deployment/payments/api",
+			testClock.Add(-time.Duration(i)*time.Minute))
+	}
+
+	workerAlert := firingAlert()
+	workerAlert.Fingerprint = "f2"
+	workerAlert.Labels = map[string]string{
+		"alertname": "KubeWorkerStuck", "namespace": "payments", "deployment": "worker",
+	}
+	sink.Consume([]alert.Alert{workerAlert})
+
+	records := c.remediations()
+	if len(records) != 1 {
+		t.Fatalf("records = %d, want 1", len(records))
+	}
+	if records[0].Labels[v1alpha1.LabelGaveUp] == "true" {
+		t.Error("gave up on a target that had never been remediated, because " +
+			"another one keeps breaking")
+	}
+	if metrics.started != 1 {
+		t.Errorf("RemediationStarted = %d, want 1: the other target proceeds", metrics.started)
+	}
+}

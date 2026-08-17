@@ -247,6 +247,15 @@ func tally(remediations []*v1alpha1.Remediation) stateCounts {
 }
 
 func buildPosturePanel(posture Posture) PosturePanel {
+	if posture.Paused {
+		return PosturePanel{
+			Headline: "Remediation is paused",
+			Detail: "Every strategy only reports, whatever its posture says. " +
+				"Records still appear, marked Simulated, so nothing about what " +
+				"would have happened is lost.",
+			Tone: toneWarn,
+		}
+	}
 	panel := PosturePanel{
 		Mixed:     posture.Mixed(),
 		Live:      posture.Live,

@@ -1,6 +1,6 @@
 ## Context
 
-`dryRun` is global. The owner wants the combination — act here, report
+`dryRun` is global. What people actually want is the combination — act here, report
 there — and the interesting part is not the mechanism but where the setting
 lives, because each answer has a different failure mode when the setting and
 the RBAC disagree.

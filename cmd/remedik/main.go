@@ -80,6 +80,9 @@ type options struct {
 	dryRun         bool
 	posture        []string
 	historyLimit   int
+	concurrency    int
+	pauseConfigMap string
+	maxRecordAge   time.Duration
 	logLevel       string
 	showVersion    bool
 }
@@ -153,6 +156,12 @@ func parseFlags() options {
 		})
 	flag.IntVar(&opts.historyLimit, "history-limit", engine.DefaultHistoryLimit,
 		"terminal Remediation resources kept per strategy")
+	flag.StringVar(&opts.pauseConfigMap, "pause-configmap", "remedik-pause",
+		"ConfigMap in the operator's namespace whose `paused` key stops remediation")
+	flag.IntVar(&opts.concurrency, "concurrency", engine.DefaultConcurrency,
+		"how many remediations may be changing the cluster at once")
+	flag.DurationVar(&opts.maxRecordAge, "max-record-age", 0,
+		"delete terminal Remediation records older than this; zero keeps them by count only")
 	flag.StringVar(&opts.logLevel, "log-level", "info",
 		"log level: debug, info, warn or error")
 	flag.BoolVar(&opts.showVersion, "version", false, "print version and exit")
@@ -295,6 +304,7 @@ func run(logger *slog.Logger, opts options) error {
 		Registry:     registry,
 		History:      history,
 		HistoryLimit: opts.historyLimit,
+		Concurrency:  opts.concurrency,
 		Metrics:      metrics.Engine{},
 		Events:       mgr.GetEventRecorder("remedik"),
 		Mapper:       mgr.GetRESTMapper(),
@@ -327,6 +337,25 @@ func run(logger *slog.Logger, opts options) error {
 		return fmt.Errorf("register the guard warmer: %w", err)
 	}
 
+	// The kill switch, read from a ConfigMap every few seconds.
+	//
+	// A chart value is how you configure a cluster; this is how you stop it at
+	// three in the morning, with no restart and no rollout. It does not silence
+	// remedik -- it forces dry-run everywhere, so the record of what would have
+	// happened survives the decision to stop it.
+	pause := &engine.Pause{}
+	if err := mgr.Add(&engine.PauseWatcher{
+		// The uncached reader: the manager's cache is not started until the
+		// manager is, and this has to answer before the first alert.
+		Reader:    mgr.GetAPIReader(),
+		Namespace: opts.namespace,
+		Name:      opts.pauseConfigMap,
+		Pause:     pause,
+		Logger:    logger.With("component", "pause"),
+	}); err != nil {
+		return fmt.Errorf("register the pause watcher: %w", err)
+	}
+
 	sink := &engine.Sink{
 		Client:    mgr.GetClient(),
 		Registry:  registry,
@@ -337,6 +366,7 @@ func run(logger *slog.Logger, opts options) error {
 		Metrics:   metrics.Engine{},
 		Events:    mgr.GetEventRecorder("remedik"),
 		Logger:    logger.With("component", "sink"),
+		Pause:     pause,
 	}
 
 	// The gateway accepts once the guards are warm — which happens only
@@ -392,9 +422,14 @@ func run(logger *slog.Logger, opts options) error {
 			Namespace: opts.namespace,
 			Token:     os.Getenv(dashboardTokenEnvVar),
 			Posture:   dashboardPosture(posture),
-			Cluster:   opts.cluster,
-			Version:   version.String(),
-			Logger:    logger.With("component", "dashboard"),
+			// Read per request, not captured: the switch is flipped at
+			// runtime, and a dashboard that needed a restart to notice would
+			// be the one place an operator checks after stopping remediation
+			// and the one place still claiming it is running.
+			Paused:  func() (bool, string) { return pause.Paused(), pause.Reason() },
+			Cluster: opts.cluster,
+			Version: version.String(),
+			Logger:  logger.With("component", "dashboard"),
 		})
 		if err != nil {
 			return fmt.Errorf("configure dashboard: %w", err)
@@ -406,6 +441,23 @@ func run(logger *slog.Logger, opts options) error {
 
 	if err := mgr.Add(&historyPruner{history: history, every: historyPruneInterval}); err != nil {
 		return fmt.Errorf("register the history pruner: %w", err)
+	}
+
+	// Retention on a schedule, not only when a remediation completes.
+	//
+	// Pruning inside the terminal write only ever reclaimed records for the
+	// strategy that had just finished one, so a strategy that was disabled,
+	// renamed, deleted or had merely gone quiet kept everything it ever made.
+	// Over the life of a cluster that is a leak rather than a policy.
+	if err := mgr.Add(&engine.Sweeper{
+		Client:          mgr.GetClient(),
+		Namespace:       opts.namespace,
+		MaxAge:          opts.maxRecordAge,
+		KeepPerStrategy: opts.historyLimit,
+		Metrics:         metrics.Engine{},
+		Logger:          logger.With("component", "retention"),
+	}); err != nil {
+		return fmt.Errorf("register the retention sweeper: %w", err)
 	}
 
 	if err := mgr.AddHealthzCheck("ping", healthz.Ping); err != nil {

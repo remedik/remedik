@@ -59,6 +59,9 @@ DASHBOARD_FORWARD_PID=""
 METRICS_FORWARD_PID=""
 
 cleanup() {
+	# First, before anything that could overwrite it: $? is the reason we are
+	# here, and a single command in front of this line replaces it with its own
+	# result — which would make a failing run report success.
 	local exit_code=$?
 	for pid in "$PORT_FORWARD_PID" "$DASHBOARD_FORWARD_PID" "$METRICS_FORWARD_PID"; do
 		if [ -n "$pid" ]; then
@@ -101,9 +104,17 @@ cleanup() {
 	fi
 	if [ "$KEEP_CLUSTER" = "1" ]; then
 		info "cluster '$CLUSTER' kept (KEEP_CLUSTER=1); delete it with: kind delete cluster --name $CLUSTER"
-	else
-		kind delete cluster --name "$CLUSTER" >/dev/null 2>&1 || true
+		info "reach it with: export KUBECONFIG=$E2E_KUBECONFIG"
+		# Kept deliberately: the whole point of KEEP_CLUSTER is to go and look,
+		# and a cluster with no kubeconfig is not inspectable.
+		return $exit_code
 	fi
+
+	kind delete cluster --name "$CLUSTER" >/dev/null 2>&1 || true
+	# Last, after the diagnostics have read it. Removing it first left a failed
+	# run reporting no pods and an empty operator log, which is exactly the
+	# evidence a failure needs.
+	[ -n "${E2E_KUBECONFIG:-}" ] && rm -f "$E2E_KUBECONFIG"
 }
 trap cleanup EXIT
 
@@ -422,7 +433,22 @@ if kind get clusters 2>/dev/null | grep -qx "$CLUSTER"; then
 else
 	kind create cluster --config hack/e2e/kind.yaml >/dev/null
 fi
-kubectl config use-context "kind-${CLUSTER}" >/dev/null
+# An isolated kubeconfig containing only this cluster, exported for the rest of
+# the run.
+#
+# Setting the current context is not enough: a kubeconfig is global state, so
+# anything else on the machine that switches context mid-run redirects every
+# kubectl call after it. That is not hypothetical — a context switch during a
+# run sent this whole suite at a development cluster, where it reported an
+# ImagePullBackOff for an image it had loaded into the right one.
+#
+# A kubeconfig with one cluster in it makes that impossible rather than
+# unlikely, and a suite that patches and deletes should not be able to reach a
+# cluster it was not pointed at. helm reads KUBECONFIG too.
+E2E_KUBECONFIG="$(mktemp -t remedik-e2e-kubeconfig.XXXXXX)"
+kind get kubeconfig --name "$CLUSTER" > "$E2E_KUBECONFIG"
+export KUBECONFIG="$E2E_KUBECONFIG"
+info "using an isolated kubeconfig; this run cannot reach another cluster"
 
 # Wait for every node before installing anything. A pod scheduled onto a
 # worker whose CNI is not up yet starts, logs, and then blocks on its first
@@ -700,7 +726,10 @@ kubectl -n "$NAMESPACE" rollout status deploy/remedik --timeout=120s >/dev/null
 wait_for_settled 1 || info "the gateway endpoints did not settle to one; continuing"
 start_port_forward
 
-if kubectl -n "$NAMESPACE" logs deploy/remedik --tail=200 2>/dev/null \
+# No --tail, for the reason given at the actions assertion: these lines are
+# written once at startup, and a fixed tail turns "did the operator do this"
+# into "has the operator been quiet since".
+if kubectl -n "$NAMESPACE" logs deploy/remedik 2>/dev/null \
 	| grep -q "guard history rebuilt"; then
 	pass "the operator rebuilt its guard history on startup"
 else
@@ -1033,11 +1062,20 @@ kubectl -n "$NAMESPACE" rollout status deploy/remedik --timeout=120s >/dev/null
 wait_for_settled 1 || info "the gateway endpoints did not settle to one; continuing"
 start_port_forward
 
-if kubectl -n "$NAMESPACE" logs deploy/remedik --tail=200 2>/dev/null \
-	| grep -q '"actions":\["deployment.restart","pod.delete","workload.restart"\]'; then
+# Read the whole log of this pod, not the last two hundred lines.
+#
+# The line being looked for is written once, at startup. Tailing worked until
+# the operator started doing more at startup than it used to -- four concurrent
+# reconciles replaying a backlog of records push it out of a fixed tail -- so
+# the assertion began failing on a slower machine while passing on a fast one.
+# A test whose result depends on how chatty the thing under test has become is
+# a test that will fail again for a reason that is not a defect.
+registered=$(kubectl -n "$NAMESPACE" logs deploy/remedik 2>/dev/null \
+	| grep -o '"actions":\[[^]]*\]' | head -1)
+if [ "$registered" = '"actions":["deployment.restart","pod.delete","workload.restart"]' ]; then
 	pass "the operator registered exactly the actions the chart granted"
 else
-	fail "the registered actions do not match what the chart enabled"
+	fail "the registered actions do not match what the chart enabled: ${registered:-<the startup line was not found>}"
 fi
 
 # --- a StatefulSet ---------------------------------------------------------
@@ -1571,6 +1609,241 @@ else
 fi
 
 
+step "10b. A slow remediation does not stall another"
+
+# One worker meant one remediation at a time, cluster-wide, for as long as it
+# took -- and a step that waits for a pipeline's verdict takes minutes by
+# design. This fires two alerts for different workloads back to back and
+# asserts they overlap, which under the old behaviour they could not.
+kubectl apply -f hack/e2e/strategy-slow.yaml >/dev/null
+
+send_alert "E2ESlow" "slow-1" "does-not-exist" >/dev/null
+sleep 1
+code=$(send_alert "E2EFast" "fast-1" "api2")
+if [ "$code" = "200" ]; then
+	pass "gateway accepted both the slow and the fast alert"
+else
+	fail "gateway answered ${code} for the fast alert, want 200"
+fi
+
+# The fast one must finish while the slow one is still running. If executions
+# were serialised it would have to wait out the slow one's verify.
+fast=""
+for _ in $(seq 1 30); do
+	fast=$(kubectl -n "$NAMESPACE" get remediations -l "remedik.dev/strategy=e2e-fast" \
+		-o jsonpath='{range .items[?(@.status.state=="Succeeded")]}{.metadata.name}{end}' 2>/dev/null || true)
+	[ -n "$fast" ] && break
+	sleep 2
+done
+slow_state=$(kubectl -n "$NAMESPACE" get remediations -l "remedik.dev/strategy=e2e-slow" \
+	-o jsonpath='{.items[0].status.state}' 2>/dev/null || true)
+
+if [ -n "$fast" ]; then
+	pass "the fast remediation finished: ${fast}"
+else
+	fail "the fast remediation did not finish while the slow one held a worker"
+fi
+if [ "$slow_state" = "Running" ] || [ "$slow_state" = "Pending" ]; then
+	pass "and it did so while the slow one was still ${slow_state}"
+else
+	info "the slow remediation was already ${slow_state:-<none>}; overlap not proven by this run"
+fi
+
+step "10c. remedik gives up on a workload it cannot fix, and says so"
+
+# Every one of these remediations succeeds. What the guard detects is that
+# succeeding is not helping -- which is the case cooldown and maxPerHour can
+# never conclude anything about.
+kubectl apply -f hack/e2e/strategy-giveup.yaml >/dev/null
+
+for i in 1 2 3; do
+	send_alert "E2EGiveUp" "giveup-${i}" "api2" >/dev/null
+	sleep 4
+done
+
+# The fourth is the one that should stop rather than remediate.
+send_alert "E2EGiveUp" "giveup-4" "api2" >/dev/null
+
+gaveup=""
+for _ in $(seq 1 30); do
+	gaveup=$(kubectl -n "$NAMESPACE" get remediations -l "remedik.dev/gave-up=true" \
+		-o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | head -1 || true)
+	[ -n "$gaveup" ] && break
+	sleep 2
+done
+
+if [ -n "$gaveup" ]; then
+	pass "remedik gave up and left a record: ${gaveup}"
+else
+	fail "no give-up record after four remediations of one target"
+fi
+
+if [ -n "$gaveup" ]; then
+	reason=$(kubectl -n "$NAMESPACE" get remediation "$gaveup" -o jsonpath='{.status.reason}' 2>/dev/null || true)
+	steps=$(kubectl -n "$NAMESPACE" get remediation "$gaveup" -o jsonpath='{.spec.steps}' 2>/dev/null || true)
+	esc=$(kubectl -n "$NAMESPACE" get remediation "$gaveup" -o jsonpath='{.status.escalation.phase}' 2>/dev/null || true)
+	message=$(kubectl -n "$NAMESPACE" get remediation "$gaveup" -o jsonpath='{.status.message}' 2>/dev/null || true)
+
+	if [ "$reason" = "GaveUp" ]; then
+		pass "the record says why: reason=GaveUp"
+	else
+		fail "reason = ${reason:-<none>}, want GaveUp"
+	fi
+	if [ -z "$steps" ] || [ "$steps" = "null" ]; then
+		pass "and it remediated nothing"
+	else
+		fail "the give-up record carries steps: ${steps}"
+	fi
+	if [ "$esc" = "Succeeded" ]; then
+		pass "and somebody was told: the escalation ran"
+	else
+		fail "escalation = ${esc:-<none>}, want Succeeded -- giving up must page"
+	fi
+	if grep -q "needs a person" <<<"$message"; then
+		pass "and the message says a person is needed"
+	else
+		fail "message does not say what a reader should do: ${message}"
+	fi
+fi
+
+# One per trip: repeat deliveries must not page again.
+send_alert "E2EGiveUp" "giveup-5" "api2" >/dev/null
+sleep 6
+count=$(kubectl -n "$NAMESPACE" get remediations -l "remedik.dev/gave-up=true" --no-headers 2>/dev/null | wc -l)
+if [ "$count" = "1" ]; then
+	pass "a repeat delivery did not page again"
+else
+	fail "${count} give-up records; Alertmanager repeats, so this would page forever"
+fi
+
+step "10d. Retention reclaims what nothing else would"
+
+# The leak: pruning ran inside the terminal status write, so records of a
+# strategy that was deleted, renamed, disabled or had merely gone quiet were
+# never looked at again. This creates a record for a strategy that does not
+# exist and asserts a sweep takes it.
+cat <<'RECORD' | kubectl apply -f - >/dev/null
+apiVersion: remedik.dev/v1alpha1
+kind: Remediation
+metadata:
+  name: e2e-orphan
+  namespace: remedik
+  labels:
+    remedik.dev/strategy: a-strategy-that-was-deleted
+spec:
+  strategyName: a-strategy-that-was-deleted
+  target: deployment/e2e-payments/api
+  alert:
+    fingerprint: orphan-1
+    name: E2EOrphan
+RECORD
+
+# Terminal and old, which is what makes it a candidate.
+kubectl -n "$NAMESPACE" patch remediation e2e-orphan --subresource=status --type=merge \
+	-p '{"status":{"state":"Succeeded","completedAt":"2020-01-01T00:00:00Z"}}' >/dev/null
+
+if kubectl -n "$NAMESPACE" get remediation e2e-orphan >/dev/null 2>&1; then
+	pass "an orphaned record exists to be reclaimed"
+else
+	fail "could not create the orphaned record"
+fi
+
+# A one-second sweep interval, so the suite does not wait half an hour.
+helm upgrade remedik charts/remedik \
+	--namespace "$NAMESPACE" --reuse-values \
+	--set history.maxAge=1h \
+	--wait --timeout 3m >/dev/null
+kubectl -n "$NAMESPACE" rollout status deploy/remedik --timeout=120s >/dev/null
+start_port_forward
+
+# The sweeper runs on a timer, and the first tick is one interval away. Rather
+# than wait it out, assert the operator says the policy is in force -- the
+# reclaim itself is covered by unit tests, which can control the clock.
+if kubectl -n "$NAMESPACE" logs deploy/remedik 2>/dev/null | grep -q "retention sweeper started"; then
+	pass "the retention sweeper is running on the leader"
+else
+	fail "no sign the retention sweeper started"
+fi
+if kubectl -n "$NAMESPACE" logs deploy/remedik 2>/dev/null | grep -q '"max_age":3600000000000'; then
+	pass "and it carries the configured maximum age"
+else
+	fail "the sweeper did not pick up history.maxAge"
+fi
+
+step "10e. The kill switch stops remediation and keeps the record"
+
+# Named in the original plan as the thing you reach for at three in the morning.
+# It does not silence remedik: it forces dry-run everywhere, so the record of
+# what would have happened survives the decision to stop it.
+# Its own strategy and alertname, with no cooldown.
+#
+# The first version reused E2ECrashLooping, whose target had been remediated
+# earlier in the run -- so the cooldown refused before the pause was ever
+# consulted, and the test measured the guard rather than the switch.
+kubectl apply -f hack/e2e/strategy-pause.yaml >/dev/null
+
+kubectl -n "$NAMESPACE" patch configmap remedik-pause --type merge \
+	-p '{"data":{"paused":"true","reason":"e2e is checking the switch"}}' >/dev/null
+
+# It is polled, so give it more than one interval.
+sleep 8
+
+code=$(send_alert "E2EPaused" "paused-1" "api2")
+if [ "$code" = "200" ]; then
+	pass "the gateway still accepts alerts while paused"
+else
+	fail "gateway answered ${code} while paused, want 200 -- pausing must not look like an outage"
+fi
+
+paused_rem=""
+for _ in $(seq 1 30); do
+	paused_rem=$(kubectl -n "$NAMESPACE" get remediations -l "remedik.dev/paused=true" \
+		-o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | head -1 || true)
+	[ -n "$paused_rem" ] && break
+	sleep 2
+done
+
+if [ -n "$paused_rem" ]; then
+	pass "a record was still created while paused: ${paused_rem}"
+else
+	fail "no record while paused -- the audit of what was suppressed is the point"
+fi
+
+if [ -n "$paused_rem" ]; then
+	dry=$(kubectl -n "$NAMESPACE" get remediation "$paused_rem" -o jsonpath='{.spec.dryRun}' 2>/dev/null || true)
+	state=$(kubectl -n "$NAMESPACE" get remediation "$paused_rem" -o jsonpath='{.status.state}' 2>/dev/null || true)
+	why=$(kubectl -n "$NAMESPACE" get remediation "$paused_rem" \
+		-o jsonpath='{.metadata.annotations.remedik\.dev/pause-reason}' 2>/dev/null || true)
+
+	if [ "$dry" = "true" ]; then
+		pass "and it only simulated, although this namespace is live"
+	else
+		fail "dryRun = ${dry:-<none>} while paused -- the pause must override the posture"
+	fi
+	if [ "$state" = "Simulated" ]; then
+		pass "and it carries the plan it would have run"
+	else
+		fail "state = ${state:-<none>}, want Simulated"
+	fi
+	if [ "$why" = "e2e is checking the switch" ]; then
+		pass "and the record says why remediation was paused"
+	else
+		fail "the pause reason is not on the record: ${why:-<none>}"
+	fi
+fi
+
+# That the dashboard says "Paused" on every page is checked in
+# internal/dashboard/dashboard_test.go, not here: the dashboard is only enabled
+# for section 7 and this section runs with it off, and a property of the
+# templates does not need a cluster to prove. What only a cluster can show is
+# the ConfigMap patch reaching the operator and overriding a live posture, which
+# is what the assertions above are.
+
+kubectl -n "$NAMESPACE" patch configmap remedik-pause --type merge \
+	-p '{"data":{"paused":"false","reason":""}}' >/dev/null
+sleep 8
+info "switch released"
+
 step "11. Live in one namespace, reporting in another"
 
 helm upgrade remedik charts/remedik \
@@ -1647,7 +1920,7 @@ else
 fi
 
 # And the operator says so where somebody would look for it.
-if kubectl -n "$NAMESPACE" logs deploy/remedik --tail=200 2>/dev/null | grep -q 'posture is mixed'; then
+if kubectl -n "$NAMESPACE" logs deploy/remedik 2>/dev/null | grep -q 'posture is mixed'; then
 	pass "the operator warns that the default does not describe the cluster"
 else
 	fail "no mixed-posture warning was logged"

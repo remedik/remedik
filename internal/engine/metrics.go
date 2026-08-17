@@ -21,6 +21,14 @@ type Recorder interface {
 	// "Succeeded" or "Failed". A rising failure count is its own incident:
 	// it means remediations are failing and nobody is being told.
 	EscalationFinished(strategy, outcome string)
+	// RecordsSwept reports one retention sweep: how many records it
+	// reclaimed, and how many it wanted to and could not because the guards
+	// are still relying on them.
+	//
+	// The second number is the interesting one. A retention policy that is
+	// permanently held back is one somebody configured and is not getting, and
+	// the only way to notice is to count it.
+	RecordsSwept(deleted, heldByGuards int)
 }
 
 // NopRecorder discards engine telemetry.
@@ -40,3 +48,6 @@ func (NopRecorder) RemediationFinished(string, string, float64) {}
 
 // EscalationFinished implements Recorder.
 func (NopRecorder) EscalationFinished(string, string) {}
+
+// RecordsSwept implements Recorder.
+func (NopRecorder) RecordsSwept(int, int) {}

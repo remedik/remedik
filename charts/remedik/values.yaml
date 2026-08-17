@@ -133,6 +133,61 @@ serviceMonitor:
   # -- Relabelings applied to the scraped metrics
   metricRelabelings: []
 
+# The kill switch: stop remediation in one command, with no restart.
+#
+#   kubectl -n remedik patch configmap remedik-pause \
+#     --type merge -p '{"data":{"paused":"true","reason":"network incident"}}'
+#
+# It takes effect within seconds, on every replica. It does NOT silence remedik
+# -- it forces dry-run everywhere, whatever each namespace's posture says. That
+# is deliberate: the one time you most want to know what remediation would have
+# done is the moment you stopped it, so every record still appears, marked
+# Simulated, carrying the plan and the reason you gave.
+#
+# remedik only reads this ConfigMap. It cannot un-pause itself, because a switch
+# the tool can flip is not a switch.
+pause:
+  # -- Create the pause ConfigMap with the chart, so the command above works
+  # without anybody having to create an object first at three in the morning
+  create: true
+  # -- Name of the ConfigMap holding the switch
+  configMapName: remedik-pause
+  # -- Start paused. For an install into a cluster mid-incident, or a rehearsal
+  paused: false
+
+# Alerts about YOUR workloads, carrying the label remedik needs to act on them.
+#
+# This exists because of a gap that catches every new user on their first day:
+# kube-prometheus-stack's own KubePodCrashLooping carries `namespace`, `pod`,
+# `container` and `reason` -- and no workload label. remedik will not guess a
+# Deployment from a pod name, because a guess restarts the wrong workload during
+# an incident, so the obvious first strategy records a failure and the obvious
+# conclusion is that the tool is broken.
+#
+# These rules join the ownership from kube-state-metrics instead of guessing,
+# and publish RemedikWorkloadCrashLooping, RemedikStatefulSetCrashLooping and
+# RemedikWorkloadOOMKilling with a `deployment` or `statefulset` label. The
+# cookbook's recipes match them.
+#
+# Off by default: they create alerts in your Prometheus, which is not something
+# to do uninvited, and a cluster whose own alerts already carry workload labels
+# does not need them. Needs the Prometheus Operator, as `prometheusRule` does.
+workloadAlerts:
+  # -- Ship alerting rules for your workloads that carry a workload label
+  enabled: false
+  # -- Namespace for the PrometheusRule; defaults to the release namespace
+  namespace: ""
+  # -- Labels the PrometheusRule needs to be selected, as for the ServiceMonitor
+  additionalLabels: {}
+  # -- Severity label on the rules
+  severity: warning
+  # -- How long a crash loop must hold before it fires. Long enough that a
+  # rollout in progress is not mistaken for one, short enough to be worth
+  # remediating.
+  crashLoopFor: 10m
+  # -- How long an OOM kill must hold before it fires
+  oomFor: 5m
+
 prometheusRule:
   # -- Create a PrometheusRule alerting on remedik itself: down, ingest
   # failing, nothing matching, remediations failing, a guard that keeps
@@ -204,6 +259,41 @@ priorityClassName: ""
 history:
   # -- Terminal Remediation records retained per strategy
   keepPerStrategy: 200
+
+  # -- Delete terminal records older than this, whatever the count allows.
+  #
+  # Empty keeps today's behaviour exactly: the count is the only policy. It is
+  # empty rather than set to something reasonable because an upgrade must not
+  # delete anybody's history on a default nobody chose.
+  #
+  # Set it the way your retention is actually expressed -- "30d", "90d" -- and
+  # a sweep applies it every half hour, including to strategies that were
+  # disabled, renamed or deleted. Those were the leak: pruning ran only when a
+  # remediation completed, so a strategy that stopped running kept everything
+  # it had ever made.
+  #
+  # remedik will never delete a record a guard is still relying on, whatever
+  # this says. Guard state is rebuilt from records at startup, so a record
+  # inside a cooldown or a giveUpAfter window is the reason remedik refuses to
+  # act again -- and the operator logs when that floor overrides this setting.
+  maxAge: ""
+
+# -- How many remediations may be changing the cluster at the same moment.
+#
+# This is a blast-radius setting, not a throughput one. It is deliberately a
+# fixed number rather than a CPU count: how much remedik changes in your
+# cluster at once should not depend on which node the operator was scheduled
+# on.
+#
+# It exists because one worker meant one remediation at a time, cluster-wide,
+# for as long as it took -- and a step that waits for a pipeline's verdict
+# takes minutes by design, so an ordinary escalation stalled everything else
+# for half an hour.
+#
+# Raise it if remediations queue behind each other during a storm. Lower it to
+# 1 to go back to strictly one at a time. Below 1 the operator refuses to
+# start.
+concurrency: 4
 
 # Every action is a permission. What each one is allowed to do is listed,
 # with its reasoning, in the chart's `action-rbac.yaml`: enabling an action

@@ -56,6 +56,10 @@ spec:
             - --metrics-bind-address=:{{ .Values.metrics.port }}
             - --probe-bind-address=:{{ .Values.probes.port }}
             - --history-limit={{ .Values.history.keepPerStrategy }}
+            {{- with .Values.history.maxAge }}
+            - --max-record-age={{ . }}
+            {{- end }}
+            - --concurrency={{ .Values.concurrency | default 4 }}
             - --log-level={{ .Values.logLevel }}
             {{- /* Exactly the actions this release granted permissions for.
                    A strategy naming anything else is reported as not ready

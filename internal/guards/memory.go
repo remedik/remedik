@@ -24,9 +24,20 @@ const DefaultRetention = 24 * time.Hour
 // (the engine does so on a ticker); without it, memory grows with the
 // number of distinct targets and executions.
 type MemoryHistory struct {
-	mu          sync.RWMutex
-	retention   time.Duration
-	completions map[completionKey]time.Time
+	mu        sync.RWMutex
+	retention time.Duration
+	// completions holds every completion per (strategy, target) inside the
+	// retention, ascending.
+	//
+	// Only the last one was kept until the giveUpAfter guard needed to ask
+	// "how many times have we remediated this same thing lately" — which is
+	// a different question from "when did we last", and the one that
+	// distinguishes a workload remedik is fixing from one it is merely
+	// restarting on a schedule.
+	//
+	// Bounded the same way starts are: by the retention and by how many
+	// distinct targets a cluster has.
+	completions map[completionKey][]time.Time
 	starts      map[string][]time.Time
 }
 
@@ -43,7 +54,7 @@ func NewMemoryHistory(retention time.Duration) *MemoryHistory {
 	}
 	return &MemoryHistory{
 		retention:   retention,
-		completions: make(map[completionKey]time.Time),
+		completions: make(map[completionKey][]time.Time),
 		starts:      make(map[string][]time.Time),
 	}
 }
@@ -63,16 +74,21 @@ func (h *MemoryHistory) RecordStart(strategy string, t time.Time) {
 	}
 }
 
-// RecordCompletion notes that strategy finished on target at t. Only the
-// most recent completion per (strategy, target) is kept, since that is all
-// the cooldown check needs.
+// RecordCompletion notes that strategy finished on target at t.
 func (h *MemoryHistory) RecordCompletion(strategy, target string, t time.Time) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	key := completionKey{strategy: strategy, target: target}
-	if existing, ok := h.completions[key]; !ok || t.After(existing) {
-		h.completions[key] = t
+	h.completions[key] = append(h.completions[key], t)
+
+	// Kept sorted for the same reason starts are: replays and out-of-order
+	// deliveries are normal, and a sorted slice can be searched.
+	completions := h.completions[key]
+	if len(completions) > 1 && t.Before(completions[len(completions)-2]) {
+		sort.Slice(completions, func(i, j int) bool {
+			return completions[i].Before(completions[j])
+		})
 	}
 }
 
@@ -81,8 +97,23 @@ func (h *MemoryHistory) LastCompletion(strategy, target string) (time.Time, bool
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	t, ok := h.completions[completionKey{strategy: strategy, target: target}]
-	return t, ok
+	completions := h.completions[completionKey{strategy: strategy, target: target}]
+	if len(completions) == 0 {
+		return time.Time{}, false
+	}
+	return completions[len(completions)-1], true
+}
+
+// CompletionsSince implements History.
+func (h *MemoryHistory) CompletionsSince(strategy, target string, since time.Time) int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	completions := h.completions[completionKey{strategy: strategy, target: target}]
+	i := sort.Search(len(completions), func(i int) bool {
+		return !completions[i].Before(since)
+	})
+	return len(completions) - i
 }
 
 // StartsSince implements History.
@@ -113,7 +144,10 @@ func (h *MemoryHistory) Len() (starts, completions int) {
 	for _, s := range h.starts {
 		starts += len(s)
 	}
-	return starts, len(h.completions)
+	for _, c := range h.completions {
+		completions += len(c)
+	}
+	return starts, completions
 }
 
 // pruneLocked drops expired records. The caller must hold the write lock.
@@ -134,9 +168,17 @@ func (h *MemoryHistory) pruneLocked(now time.Time) {
 		}
 	}
 
-	for key, t := range h.completions {
-		if t.Before(cutoff) {
+	for key, completions := range h.completions {
+		i := sort.Search(len(completions), func(i int) bool {
+			return !completions[i].Before(cutoff)
+		})
+		switch {
+		case i == len(completions):
 			delete(h.completions, key)
+		case i > 0:
+			kept := make([]time.Time, len(completions)-i)
+			copy(kept, completions[i:])
+			h.completions[key] = kept
 		}
 	}
 }

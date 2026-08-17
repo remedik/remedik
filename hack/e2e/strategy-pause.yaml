@@ -1,0 +1,21 @@
+# A strategy for the kill-switch assertion, with no guard that could refuse
+# first.
+#
+# It exists because the first version of that test reused an alertname whose
+# target had already been remediated in the same run, so the cooldown refused
+# before the pause was consulted and the test measured the guard.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: e2e-paused
+spec:
+  enabled: true
+  trigger:
+    match:
+      alertname: E2EPaused
+  guards:
+    maxPerHour: 20
+  steps:
+    - action: deployment.restart
+      with:
+        verifyTimeout: 60s

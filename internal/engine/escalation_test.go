@@ -3,7 +3,9 @@ package engine
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/remedik/remedik/api/v1alpha1"
 	"github.com/remedik/remedik/internal/action"
@@ -422,5 +424,79 @@ func TestEscalation_TheRemediationPlanStillStopsAtAFailure(t *testing.T) {
 	stored := f.client.stored(testNamespace, "rem-1")
 	if stored.Status.Steps[2].Phase != v1alpha1.StepPhaseSkipped {
 		t.Errorf("step 2 phase = %q, want Skipped", stored.Status.Steps[2].Phase)
+	}
+}
+
+// The give-up record's entire content is its escalation: nothing is
+// remediated, and the page is the point.
+func TestGaveUp_EscalatesAndRemediatesNothing(t *testing.T) {
+	restart := &scriptedAction{name: "deployment.restart"}
+	page := &scriptedAction{name: "webhook.call"}
+
+	rem := remediation("rem-1")
+	rem.Labels[v1alpha1.LabelGaveUp] = "true"
+	rem.Annotations = map[string]string{
+		v1alpha1.AnnotationGaveUpReason: "restart-api has remediated this 5 times " +
+			"in the last 2h and the problem keeps coming back",
+	}
+	rem.Spec.Steps = nil
+	rem.Spec.EscalationSteps = []v1alpha1.Step{{Action: "webhook.call"}}
+
+	f := newReconciler(t, false, []action.Action{restart, page}, rem)
+
+	if _, err := f.reconciler.Reconcile(context.Background(), request("rem-1")); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+
+	stored := f.client.stored(testNamespace, "rem-1")
+
+	if restart.execCalls != 0 {
+		t.Errorf("a remediation step ran %d times; giving up remediates nothing",
+			restart.execCalls)
+	}
+	if page.execCalls != 1 {
+		t.Fatalf("the escalation ran %d times, want 1", page.execCalls)
+	}
+	if stored.Status.State != v1alpha1.RemediationStateFailed {
+		t.Errorf("State = %q, want Failed", stored.Status.State)
+	}
+	if stored.Status.Reason != v1alpha1.ReasonGaveUp {
+		t.Errorf("Reason = %q, want %q", stored.Status.Reason, v1alpha1.ReasonGaveUp)
+	}
+	if !strings.Contains(stored.Status.Message, "keeps coming back") {
+		t.Errorf("Message = %q, want the guard's explanation", stored.Status.Message)
+	}
+	if stored.Status.Escalation == nil || stored.Status.Escalation.Phase != v1alpha1.StepPhaseSucceeded {
+		t.Errorf("escalation = %+v, want a recorded success", stored.Status.Escalation)
+	}
+}
+
+// A give-up record is a decision, not an execution. Counting it would extend
+// the very window that produced it, so the guard would hold itself tripped.
+func TestGaveUp_DoesNotFeedTheGuards(t *testing.T) {
+	page := &scriptedAction{name: "webhook.call"}
+
+	rem := remediation("rem-1")
+	rem.Labels[v1alpha1.LabelGaveUp] = "true"
+	rem.Spec.Steps = nil
+	rem.Spec.EscalationSteps = []v1alpha1.Step{{Action: "webhook.call"}}
+
+	f := newReconciler(t, false, []action.Action{page}, rem)
+
+	before := f.history.CompletionsSince(rem.Spec.StrategyName, rem.Spec.Target,
+		testClock.Add(-time.Hour))
+
+	if _, err := f.reconciler.Reconcile(context.Background(), request("rem-1")); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+
+	after := f.history.CompletionsSince(rem.Spec.StrategyName, rem.Spec.Target,
+		testClock.Add(-time.Hour))
+	if after != before {
+		t.Errorf("completions went from %d to %d; a give-up record counted as a "+
+			"remediation and extended the window that produced it", before, after)
+	}
+	if _, ok := f.history.LastCompletion(rem.Spec.StrategyName, rem.Spec.Target); ok {
+		t.Error("a give-up record set a cooldown, so it would delay a real remediation")
 	}
 }

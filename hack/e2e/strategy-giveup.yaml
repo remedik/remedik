@@ -1,0 +1,38 @@
+# Trips after three successful remediations of one target inside an hour.
+#
+# Three rather than five so the suite does not spend five minutes proving it;
+# the number is the guard's, not the design's.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: e2e-giveup
+spec:
+  enabled: true
+  trigger:
+    match:
+      alertname: E2EGiveUp
+  guards:
+    # No cooldown, so the suite can drive four remediations in a few seconds.
+    # In a real strategy the cooldown is what spaces them out and the window
+    # has to be longer than cooldown x count, or the guard can never trip.
+    maxPerHour: 20
+    giveUpAfter:
+      count: 3
+      within: 1h
+  steps:
+    # This succeeds every time, which is the case the guard exists for: the
+    # remediation works and the problem is not fixed.
+    - action: deployment.restart
+      with:
+        verifyTimeout: 60s
+  onFailure:
+    retries: 0
+    steps:
+      - action: webhook.call
+        with:
+          url: http://remedik-gateway.remedik.svc.cluster.local:8090/webhooks/alertmanager
+          secretRef: remedik-gateway-token
+          secretKey: token
+          header: Authorization
+          headerPrefix: "Bearer "
+          timeout: 20s

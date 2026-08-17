@@ -12,11 +12,24 @@ import (
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 
 	"github.com/remedik/remedik/api/v1alpha1"
 	"github.com/remedik/remedik/internal/action"
 	"github.com/remedik/remedik/internal/guards"
 )
+
+// DefaultConcurrency is how many Remediations may be executing at once.
+//
+// Not runtime.NumCPU(). This number does not govern how much work remedik
+// does; it governs how many things remedik is changing in somebody's cluster
+// at the same moment, and deriving that from the machine the operator happened
+// to be scheduled on would make the blast radius a property of the node pool.
+//
+// Four is enough that one slow pipeline handover does not stall an incident,
+// and small enough that a misconfigured strategy during an alert storm is four
+// concurrent restarts rather than thirty-two.
+const DefaultConcurrency = 4
 
 // DefaultHistoryLimit is how many terminal Remediation resources are kept
 // per strategy before the oldest are pruned.
@@ -50,6 +63,15 @@ type RemediationReconciler struct {
 	History *guards.MemoryHistory
 	// HistoryLimit caps terminal records kept per strategy.
 	HistoryLimit int
+	// Concurrency is how many Remediations may execute at once. Zero means
+	// DefaultConcurrency.
+	//
+	// controller-runtime reconciles one object at a time whatever this is, so
+	// "Running means the process died" and the conflict that refuses a stale
+	// verdict are untouched. What it changes is that a remediation waiting on
+	// a ten-minute check no longer holds every other remediation in the
+	// cluster behind it.
+	Concurrency int
 	// Metrics receives telemetry; defaults to NopRecorder.
 	Metrics Recorder
 	// Events publishes step progress on the objects being remediated, so
@@ -85,6 +107,9 @@ func (r *RemediationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	case rem.Status.State == v1alpha1.RemediationStateRunning:
 		return ctrl.Result{}, r.markInterrupted(ctx, &rem, log)
 
+	case rem.Labels[v1alpha1.LabelGaveUp] == "true":
+		return ctrl.Result{}, r.markGaveUp(ctx, &rem, log)
+
 	default:
 		return r.runAttempt(ctx, &rem, log)
 	}
@@ -108,6 +133,26 @@ func (r *RemediationReconciler) markInterrupted(
 	return r.finish(ctx, rem, v1alpha1.RemediationStateFailed,
 		v1alpha1.ReasonInterrupted,
 		"the operator restarted while this remediation was running", log)
+}
+
+// markGaveUp finishes a record that says remedik stopped.
+//
+// It has no steps and nothing is attempted. What runs is the strategy's own
+// escalation, which is the whole point: every other guard refuses into an
+// event nobody reads, and this is the refusal that most needs a person.
+func (r *RemediationReconciler) markGaveUp(
+	ctx context.Context, rem *v1alpha1.Remediation, log *slog.Logger,
+) error {
+	message := rem.Annotations[v1alpha1.AnnotationGaveUpReason]
+	if message == "" {
+		message = "repeated remediation has not resolved this; it needs a person"
+	}
+
+	log.Warn("remediation is not resolving this target; escalating instead", "reason", message)
+
+	rem.Status.Escalation = r.escalate(ctx, rem, 0, v1alpha1.ReasonGaveUp, message, log)
+
+	return r.finish(ctx, rem, v1alpha1.RemediationStateFailed, v1alpha1.ReasonGaveUp, message, log)
 }
 
 // runAttempt executes every step once and records the outcome.
@@ -202,7 +247,12 @@ func (r *RemediationReconciler) finish(
 	// immediately by the next alert is exactly the loop cooldown exists to
 	// prevent.
 	if rem.Spec.Target != "" {
-		r.History.RecordCompletion(rem.Spec.StrategyName, rem.Spec.Target, completed.Time)
+		// A give-up record is a decision, not an execution. Counting it would
+		// extend the very window that produced it, and would make the guard
+		// keep itself tripped.
+		if reason != v1alpha1.ReasonGaveUp {
+			r.History.RecordCompletion(rem.Spec.StrategyName, rem.Spec.Target, completed.Time)
+		}
 	}
 
 	seconds := 0.0
@@ -277,9 +327,21 @@ func (r *RemediationReconciler) prune(ctx context.Context, namespace, strategy, 
 
 // SetupWithManager registers the reconciler.
 func (r *RemediationReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	concurrency := r.Concurrency
+	if concurrency == 0 {
+		concurrency = DefaultConcurrency
+	}
+	if concurrency < 1 {
+		// Refused rather than corrected: a limit that does not do what it says
+		// is worse than one that is rejected, and this is a setting somebody
+		// chose while reasoning about how much remedik may change at once.
+		return fmt.Errorf("concurrency must be at least 1, got %d", concurrency)
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.Remediation{}).
 		Named("remediation").
+		WithOptions(controller.Options{MaxConcurrentReconciles: concurrency}).
 		Complete(r)
 }
 

@@ -59,6 +59,24 @@ type Posture struct {
 	// sorted.
 	Live       []string
 	DryRunOnly []string
+	// Paused reports the kill switch being on, which overrides everything
+	// above.
+	//
+	// It lives here rather than only on the page chrome because "what may
+	// remedik do here" is the question this type answers, and while paused the
+	// answer is "nothing, anywhere". A per-namespace chip reading Live beside a
+	// header saying Paused is the page contradicting itself — which is the same
+	// defect as showing today's posture next to historical counts, and it was
+	// found by a test asserting the two agree.
+	Paused bool
+}
+
+// ActsAnywhere reports whether any namespace would be acted on.
+func (p Posture) ActsAnywhere() bool {
+	if p.Paused {
+		return false
+	}
+	return !p.DryRun || len(p.Live) > 0
 }
 
 // Mixed reports whether any namespace differs from the default.
@@ -106,6 +124,14 @@ type Page struct {
 	Nav string
 	// DryRun reports the operator's default posture.
 	DryRun bool
+	// Paused reports the kill switch being on, which overrides every posture.
+	//
+	// It is on the chrome rather than one page because it is the answer to
+	// "why is nothing happening", and somebody asking that is on whichever page
+	// they happened to be looking at.
+	Paused bool
+	// PauseReason is the note left with it, if any.
+	PauseReason string
 	// Posture is the whole picture, including the namespaces that differ.
 	Posture Posture
 	// Namespace is where the records being shown live.
