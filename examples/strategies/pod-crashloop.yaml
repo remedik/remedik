@@ -5,6 +5,57 @@
 #
 # Try it with the operator in dry-run (the install default): the Remediation
 # record appears as Simulated with the exact plan, and nothing is touched.
+#
+# ---------------------------------------------------------------------------
+# READ THIS FIRST: the alert must name the workload
+# ---------------------------------------------------------------------------
+#
+# kube-prometheus-stack's own KubePodCrashLooping carries `namespace`, `pod`,
+# `container` and `reason` -- and no `deployment`. As written below, remedik
+# will record the remediation as failed with:
+#
+#   no workload: the alert carries none of the "deployment", "statefulset" or
+#   "daemonset" labels, and the step sets no "kind" and "name"
+#
+# That refusal is deliberate. Deriving a Deployment from a pod name is a guess,
+# and a guess here restarts the wrong workload during an incident.
+#
+# So one of these has to be true. Pick whichever fits your setup:
+#
+#   1. Your alert already carries a workload label. Many teams' own alerts do,
+#      because they are written against their own labelling. Nothing to do.
+#
+#   2. Add the label in Prometheus, with a rule that joins kube_state_metrics'
+#      ownership data. This is the right fix, because it is authoritative
+#      rather than inferred:
+#
+#        - alert: WorkloadCrashLooping
+#          expr: |
+#            max_over_time(kube_pod_container_status_waiting_reason{
+#              reason="CrashLoopBackOff"}[5m]) >= 1
+#            * on (namespace, pod) group_left (owner_name)
+#              kube_pod_owner{owner_kind="ReplicaSet"}
+#          for: 15m
+#          labels:
+#            severity: warning
+#          annotations:
+#            summary: "{{ $labels.namespace }}/{{ $labels.owner_name }} is crash looping"
+#
+#      then relabel `owner_name` to `deployment` -- note a ReplicaSet's name is
+#      the Deployment's name plus a hash, so strip the suffix.
+#
+#   3. Name the workload in the strategy, if this strategy is for one known
+#      workload. Uncomment `deployment:` in the step below. Scope the trigger
+#      too, or every crash loop in the cluster restarts that one Deployment.
+#
+#   4. Act on the pod instead. `pod.delete` uses the `pod` label the alert
+#      already carries, and needs none of the above -- see pod-not-ready.yaml.
+#      It is a weaker fix for a crash loop, because the replacement pod usually
+#      crashes the same way, but it is honest and it works today.
+#
+# This was found by pointing a real Prometheus at remedik and waiting the
+# fifteen minutes for the rule to fire. Synthetic alerts in a test carry
+# whatever labels the test author chose, which is why it went unnoticed.
 apiVersion: remedik.dev/v1alpha1
 kind: RemediationStrategy
 metadata:
@@ -25,6 +76,8 @@ spec:
   steps:
     - action: deployment.restart
       with:
+        # Option 3 above: name the workload when the alert cannot.
+        # deployment: api
         # How long to wait for the rollout to actually finish before calling
         # the step failed. Optional; 60s by default, 10m at most.
         #

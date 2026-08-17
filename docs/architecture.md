@@ -175,7 +175,32 @@ that hands the incident to a pipeline. There is no notification subsystem,
 so there is nothing to configure separately, nothing that bypasses RBAC, and
 nothing that escapes the audit trail.
 
-Four properties, each chosen against an obvious alternative:
+The escalation worth reaching for first is back into Alertmanager, with
+`webhook.call` and `format: alertmanager`. It raises `RemediationFailed` with
+every label the triggering alert carried, which means the routing tree that
+delivered the symptom to a team delivers the failure to the same team — and
+the silences, the inhibition rules and the on-call schedule all apply, because
+they were already there. Paging PagerDuty directly works and is sometimes
+right, but it is a second copy of that configuration with its own credentials
+to keep in step.
+
+`format` is a closed set of named body shapes rather than a template. A
+strategy is read during an incident by somebody who did not write it, and a Go
+template inside one is a second language to debug at the worst moment; it also
+means the action can state what it sends, which is the question asked before
+granting anything webhook access.
+
+Five properties, each chosen against an obvious alternative:
+
+- **Every channel is tried.** A failed escalation step does not skip the ones
+  after it, which is the opposite of the rule for a remediation plan and
+  deliberate: the steps there are a sequence where each acts on the last one's
+  result, and the steps here are alternative ways to reach a person. Stopping
+  at the first failure made a configured fallback a single point of failure,
+  and an invisible one — every channel succeeds when the path is tested. The
+  escalation is `Succeeded` when one channel got through, because the question
+  the record answers is whether anybody was told; `onFailure.mode:
+  firstSuccess` is for an ordered fallback that should not page twice.
 
 - **It cannot change the outcome.** A remediation that escalated is still a
   remediation that did not work. A record turning green because somebody was
@@ -412,8 +437,24 @@ attention" panel orders by how much silence each entry represents: a failed
 escalation, which means nobody was told, outranks a failure somebody has
 already seen.
 
-`/namespaces` applies that same ordering across namespaces, and is careful
-about one thing: it is not a health page. remedik knows the remediations it
+`/namespaces` applies that same ordering across namespaces. Two things about
+it are decisions rather than details.
+
+The first is scale. The worst dozen namespaces get a card; everything else is
+a compact table that still carries its failure counts, and the page says how
+many it held back. Paging was considered and rejected: page two of a list
+ordered by severity is by construction the part that does not need attention.
+The bound exists because the unbounded version put 81 of 150 namespaces above
+the fold on a seeded cluster, at which point the heading was meaningless.
+
+The second is honesty about time. The posture chip is today's configuration
+and the counts are history, and they can legitimately disagree — a record
+carries the posture it ran under, and a later config change cannot rewrite
+it. So a namespace marked `Reporting` may hold executions that changed
+something, and the row says so rather than letting the chip contradict the
+numbers beside it.
+
+It is also careful about one more thing: it is not a health page. remedik knows the remediations it
 ran, not whether the workloads in a namespace are well, and a page implying
 otherwise would be the dashboard being authoritative about something it
 never measured. So every column is remedik's own record — executions, how

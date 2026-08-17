@@ -60,10 +60,10 @@
       {{end}}
       {{if .Posture.Mixed}}
       <span class="mode mode-mixed"
-            title="{{if .DryRun}}Nothing is changed, except in {{else}}Matching alerts are remediated, except in {{end}}{{range $i, $ns := .Posture.Exceptions}}{{if $i}}, {{end}}{{$ns}}{{end}}">
+            title="{{if .DryRun}}Nothing is changed, except in {{else}}Matching alerts are remediated, except in {{end}}{{.Posture.ExceptionsAll}}">
         Mixed
         <span class="mode-detail">{{if .DryRun}}live in{{else}}reporting in{{end}}
-          {{range $i, $ns := .Posture.Exceptions}}{{if $i}}, {{end}}{{$ns}}{{end}}</span>
+          {{.Posture.ExceptionsBrief}}</span>
       </span>
       {{else if .DryRun}}
       <span class="mode mode-dry" title="Alerts are matched and recorded; nothing is changed">Dry-run</span>

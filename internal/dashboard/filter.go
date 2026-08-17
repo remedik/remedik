@@ -99,12 +99,29 @@ func (f Filter) Query() string {
 // so is an empty one, which is what a target that could not be resolved
 // leaves behind. Both answer "", and the filter simply never matches them,
 // which is the honest result: they are not in any namespace.
+// It allocates nothing, which matters more than it looks. Every page asks
+// this of every record several times over — the filter, the filter's option
+// counts across three dimensions, the "where" breakdown, and the namespaces
+// page — so the previous strings.Split allocated a slice per call and around
+// seventy thousand of them per render at ten thousand records, all to return
+// a substring that was already in memory.
 func TargetNamespace(target string) string {
-	parts := strings.Split(target, "/")
-	if len(parts) != 3 {
+	first := strings.IndexByte(target, '/')
+	if first < 0 {
 		return ""
 	}
-	return parts[1]
+	rest := target[first+1:]
+	second := strings.IndexByte(rest, '/')
+	if second < 0 {
+		// Two parts: cluster-scoped, so no namespace.
+		return ""
+	}
+	// A fourth part is not a target this understands, and the old
+	// Split-and-count refused it; keep refusing it.
+	if strings.IndexByte(rest[second+1:], '/') >= 0 {
+		return ""
+	}
+	return rest[:second]
 }
 
 // FilterOption is one choice, as the link that applies or removes it.
@@ -175,7 +192,7 @@ type FilterOptions struct {
 }
 
 // BuildFilterOptions collects the distinct values present in the records.
-func BuildFilterOptions(remediations []v1alpha1.Remediation) FilterOptions {
+func BuildFilterOptions(remediations []*v1alpha1.Remediation) FilterOptions {
 	namespaces := map[string]bool{}
 	strategies := map[string]bool{}
 	states := map[string]bool{}
@@ -232,7 +249,7 @@ const quickPickLimit = 4
 // The counts ignore the row's own clause, so the namespace row always shows
 // every namespace's total under the *other* filters — which is what makes it
 // usable for switching rather than only for narrowing.
-func (o FilterOptions) Groups(active Filter, remediations []v1alpha1.Remediation) []FilterGroup {
+func (o FilterOptions) Groups(active Filter, remediations []*v1alpha1.Remediation) []FilterGroup {
 	specs := []struct {
 		label  string
 		param  string
@@ -312,13 +329,12 @@ func (o FilterOptions) Groups(active Filter, remediations []v1alpha1.Remediation
 // million comparisons to draw one page. It read as correct and benchmarked
 // at 50ms. This is the same arithmetic without the product.
 func countByValue(
-	remediations []v1alpha1.Remediation,
+	remediations []*v1alpha1.Remediation,
 	rest Filter,
 	key func(*v1alpha1.Remediation) string,
 ) map[string]int {
 	counts := make(map[string]int)
-	for i := range remediations {
-		rem := &remediations[i]
+	for _, rem := range remediations {
 		// Against the other clauses only: this dimension is the one being
 		// chosen, so its own clause must not narrow its own counts.
 		if !rest.Matches(rem) {

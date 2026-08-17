@@ -167,7 +167,7 @@ func TestBuildFilterOptions(t *testing.T) {
 		},
 	}
 
-	got := BuildFilterOptions(remediations)
+	got := BuildFilterOptions(ptrs(remediations))
 
 	if want := []string{"checkout", "payments"}; !reflect.DeepEqual(got.Namespaces, want) {
 		t.Errorf("Namespaces = %v, want %v", got.Namespaces, want)
@@ -185,7 +185,7 @@ func TestBuildFilterOptions(t *testing.T) {
 
 // With one namespace and one strategy, a filter row is furniture.
 func TestFilterOptions_AnyIsFalseWhenThereIsNothingToChooseBetween(t *testing.T) {
-	options := BuildFilterOptions([]v1alpha1.Remediation{
+	options := BuildFilterOptions(ptrs([]v1alpha1.Remediation{
 		{
 			Spec:   v1alpha1.RemediationSpec{Target: "deployment/payments/api", StrategyName: "restart-api"},
 			Status: v1alpha1.RemediationStatus{State: v1alpha1.RemediationStateSucceeded},
@@ -194,7 +194,7 @@ func TestFilterOptions_AnyIsFalseWhenThereIsNothingToChooseBetween(t *testing.T)
 			Spec:   v1alpha1.RemediationSpec{Target: "deployment/payments/api", StrategyName: "restart-api"},
 			Status: v1alpha1.RemediationStatus{State: v1alpha1.RemediationStateSucceeded},
 		},
-	})
+	}))
 
 	if options.Any() {
 		t.Error("Any() = true although every record shares one namespace, strategy and state")
@@ -317,4 +317,37 @@ func groupNamed(t *testing.T, groups []FilterGroup, label string) FilterGroup {
 	}
 	t.Fatalf("no %q filter group in %+v", label, groups)
 	return FilterGroup{}
+}
+
+// TargetNamespace is on the hottest path in the package: every page asks it of
+// every record several times over. It was rewritten to allocate nothing, so
+// this pins the behaviour it had when it did.
+func TestTargetNamespace_EveryShape(t *testing.T) {
+	for target, want := range map[string]string{
+		"deployment/payments/api":     "payments",
+		"statefulset/data/ledger":     "data",
+		"pod/kube-system/coredns-abc": "kube-system",
+		// Cluster-scoped: two parts, so no namespace.
+		"node/worker-3": "",
+		// Not a target this understands.
+		"a/b/c/d": "",
+		"a/b/c/":  "",
+		"/b/c":    "b",
+		"a//c":    "",
+		// Nothing at all.
+		"":            "",
+		"deployment":  "",
+		"deployment/": "",
+	} {
+		if got := TargetNamespace(target); got != want {
+			t.Errorf("TargetNamespace(%q) = %q, want %q", target, got, want)
+		}
+	}
+}
+
+func BenchmarkTargetNamespace(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = TargetNamespace("deployment/payments/api")
+	}
 }

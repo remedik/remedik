@@ -48,13 +48,19 @@ type Snapshotter struct {
 
 // Snapshot reads the current counts.
 func (s *Snapshotter) Snapshot(ctx context.Context) (Snapshot, error) {
+	// Counting only, and Prometheus scrapes this every fifteen seconds — so
+	// the manager's cache does not need to copy every record to answer it. At
+	// ten thousand records the copy was the whole cost of a scrape.
+	//
+	// Nothing below writes to a listed object, which is what makes this safe.
 	var strategies v1alpha1.RemediationStrategyList
-	if err := s.Reader.List(ctx, &strategies); err != nil {
+	if err := s.Reader.List(ctx, &strategies, client.UnsafeDisableDeepCopy); err != nil {
 		return Snapshot{}, fmt.Errorf("list strategies: %w", err)
 	}
 
 	var remediations v1alpha1.RemediationList
-	if err := s.Reader.List(ctx, &remediations, client.InNamespace(s.Namespace)); err != nil {
+	if err := s.Reader.List(ctx, &remediations,
+		client.InNamespace(s.Namespace), client.UnsafeDisableDeepCopy); err != nil {
 		return Snapshot{}, fmt.Errorf("list remediations: %w", err)
 	}
 

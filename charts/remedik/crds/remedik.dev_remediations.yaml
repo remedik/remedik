@@ -109,6 +109,17 @@ spec:
                   on its next status update, which is an upgrade breaking on a field
                   added for clarity.
                 type: boolean
+              escalationMode:
+                default: all
+                description: |-
+                  EscalationMode is how those steps are run, copied from the strategy at
+                  creation time for the same reason DryRun is: an escalation must run
+                  under the policy that was in force when the remediation started, not
+                  whichever one a later edit installed, and the record has to say which.
+                enum:
+                - all
+                - firstSuccess
+                type: string
               escalationSteps:
                 description: "EscalationSteps is the plan to run once this remediation
                   has failed\nfor good, copied from the strategy at creation time

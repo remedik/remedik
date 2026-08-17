@@ -74,25 +74,78 @@ func (r *RemediationReconciler) escalate(
 		Now:    r.Now,
 	}
 
-	result := runner.Run(ctx, escalationLabels(rem, attempts, reason, message, dryRun),
-		rem.Spec.EscalationSteps)
+	labels := escalationLabels(rem, attempts, reason, message, dryRun)
+	steps, delivered, lastErr := runChannels(ctx, runner, labels,
+		rem.Spec.EscalationSteps, rem.Spec.EscalationMode)
 
 	completed := metav1.NewTime(r.now())
 	status := &v1alpha1.EscalationStatus{
 		Phase:       v1alpha1.StepPhaseSucceeded,
-		Steps:       result.Steps,
+		Steps:       steps,
 		CompletedAt: &completed,
 	}
-	if result.Err != nil {
+	switch {
+	case !delivered:
 		status.Phase = v1alpha1.StepPhaseFailed
-		status.Message = result.Err.Error()
-		log.Error("escalation failed: nobody may have been told", "err", result.Err)
-	} else {
+		status.Message = lastErr.Error()
+		log.Error("escalation failed on every channel: nobody was told", "err", lastErr)
+	case lastErr != nil:
+		// Somebody was told, and a channel is broken. Both facts matter, and
+		// only one of them is an emergency.
+		log.Warn("escalation delivered, but a channel failed", "err", lastErr)
+	default:
 		log.Info("escalation sent")
 	}
 
 	r.metrics().EscalationFinished(rem.Spec.StrategyName, string(status.Phase))
 	return status
+}
+
+// runChannels runs the escalation's steps.
+//
+// It deliberately does not use StepRunner.Run, which stops at the first
+// failure. That rule is right for a remediation plan — step two of "scale up,
+// then restart" must not act on a scale that did not happen — and inverted
+// here, where the steps are alternative ways to reach a person. A fallback
+// that stops at the first failure is a single point of failure, and an
+// invisible one: every channel succeeds when the path is tested.
+//
+// The ten lines of duplication are the point. Somebody reading this file sees
+// that every channel is tried without having to hold the runner's semantics
+// in their head, and the two rules cannot drift into each other.
+func runChannels(
+	ctx context.Context,
+	runner *StepRunner,
+	labels map[string]string,
+	plan []v1alpha1.Step,
+	mode v1alpha1.EscalationMode,
+) (steps []v1alpha1.StepStatus, delivered bool, lastErr error) {
+	steps = make([]v1alpha1.StepStatus, 0, len(plan))
+
+	for i, step := range plan {
+		// firstSuccess is an ordered fallback: once a channel has got
+		// through, calling the rest would page the same person twice, which
+		// is how people come to remove their fallback.
+		if delivered && mode == v1alpha1.EscalationModeFirstSuccess {
+			steps = append(steps, v1alpha1.StepStatus{
+				Index:   int32(i), //nolint:gosec // bounded by the CRD at 8
+				Action:  step.Action,
+				Phase:   v1alpha1.StepPhaseSkipped,
+				Message: "an earlier channel already reached somebody",
+			})
+			continue
+		}
+
+		status, err := runner.Step(ctx, i, labels, step)
+		steps = append(steps, status)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		delivered = true
+	}
+
+	return steps, delivered, lastErr
 }
 
 // escalationLabels describes the failed remediation to the escalation steps.

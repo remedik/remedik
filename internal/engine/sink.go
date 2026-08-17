@@ -69,15 +69,38 @@ func (s *Sink) Consume(alerts []alert.Alert) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	// The strategies are read once for the whole delivery, not once per alert.
+	//
+	// Alertmanager groups: a single POST carries what accumulated during
+	// group_wait, which during the storm remedik exists to absorb is hundreds
+	// of alerts. Reading inside the loop listed every strategy hundreds of
+	// times — measured at 17MB and 41,000 allocations for one delivery of two
+	// hundred, against 88kB for one alert.
+	//
+	// It is also more correct. A delivery is one decision made against one
+	// view of the strategies; reading per alert meant the first and the two
+	// hundredth could see different sets, so the same batch could be handled
+	// under two different configurations with nothing recording that it had.
+	rules, byName, err := s.rules(ctx)
+	if err != nil {
+		s.Logger.Error("could not list strategies; the delivery is dropped", "err", err)
+		return
+	}
+
 	for _, a := range alerts {
-		if err := s.consumeOne(ctx, a); err != nil {
+		if err := s.consumeOne(ctx, a, rules, byName); err != nil {
 			s.Logger.Error("could not process alert",
 				"alert", a.String(), "err", err)
 		}
 	}
 }
 
-func (s *Sink) consumeOne(ctx context.Context, a alert.Alert) error {
+func (s *Sink) consumeOne(
+	ctx context.Context,
+	a alert.Alert,
+	rules []matching.Rule,
+	byName map[string]*v1alpha1.RemediationStrategy,
+) error {
 	log := s.Logger.With("alert", a.String())
 
 	// Resolved alerts close an incident; they are not a request to act.
@@ -86,11 +109,6 @@ func (s *Sink) consumeOne(ctx context.Context, a alert.Alert) error {
 	if !a.IsFiring() {
 		log.Debug("ignoring resolved alert")
 		return nil
-	}
-
-	rules, byName, err := s.rules(ctx)
-	if err != nil {
-		return fmt.Errorf("list strategies: %w", err)
 	}
 
 	rule, ok := matching.Select(a, rules)
@@ -142,8 +160,12 @@ func (s *Sink) consumeOne(ctx context.Context, a alert.Alert) error {
 // rules lists the enabled strategies as matcher rules, keeping the source
 // resources indexed by name.
 func (s *Sink) rules(ctx context.Context) ([]matching.Rule, map[string]*v1alpha1.RemediationStrategy, error) {
+	// Read-only: the rules are built from the strategies and the resources are
+	// only ever read, never written, so the manager's cache does not need to
+	// copy them. It keeps a pointer into the cache, which is why nothing below
+	// may modify a strategy.
 	var list v1alpha1.RemediationStrategyList
-	if err := s.Client.List(ctx, &list); err != nil {
+	if err := s.Client.List(ctx, &list, client.UnsafeDisableDeepCopy); err != nil {
 		return nil, nil, err
 	}
 
@@ -218,6 +240,7 @@ func (s *Sink) create(
 			Steps:           strategy.Spec.Steps,
 			Retries:         strategy.Spec.OnFailure.Retries,
 			EscalationSteps: strategy.Spec.OnFailure.Steps,
+			EscalationMode:  escalationMode(strategy),
 			DryRun:          s.Posture.DryRunFor(target.Namespace),
 		},
 	}
@@ -289,4 +312,15 @@ func blastRadiusConfig(strategy *v1alpha1.RemediationStrategy) guards.BlastRadiu
 		MinAvailable:          int(b.MinAvailable),
 		MaxUnavailablePercent: int(b.MaxUnavailablePercent),
 	}
+}
+
+// escalationMode reads the strategy's mode, defaulting for a resource created
+// before the field existed. The CRD default covers new objects; this covers
+// the ones already in etcd, and a zero value here would mean "no mode" rather
+// than "every channel", which is the wrong way for this to fail.
+func escalationMode(strategy *v1alpha1.RemediationStrategy) v1alpha1.EscalationMode {
+	if strategy.Spec.OnFailure.Mode == v1alpha1.EscalationModeFirstSuccess {
+		return v1alpha1.EscalationModeFirstSuccess
+	}
+	return v1alpha1.EscalationModeAll
 }

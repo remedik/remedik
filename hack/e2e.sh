@@ -77,6 +77,13 @@ cleanup() {
 			-o custom-columns='NAME:.metadata.name,STATE:.status.state,REASON:.status.reason,MESSAGE:.status.message' \
 			--no-headers 2>/dev/null | grep -vE '[[:space:]](Succeeded|Simulated)[[:space:]]' || true
 
+		# Whether anybody was told, per channel. Without this an escalation
+		# failure is a phase with no explanation, which is exactly the thing
+		# that needed a second run to diagnose once already.
+		info "--- escalations, per channel ---"
+		kubectl -n "$NAMESPACE" get remediations -o json 2>/dev/null \
+			| kubectl_jq_escalations || true
+
 		info "--- pods, and whether any container restarted ---"
 		kubectl -n "$NAMESPACE" get pods \
 			-o custom-columns='NAME:.metadata.name,READY:.status.containerStatuses[0].ready,RESTARTS:.status.containerStatuses[0].restartCount,REASON:.status.containerStatuses[0].lastState.terminated.reason' \
@@ -125,7 +132,7 @@ send_alert() {
 		      \"labels\":{\"alertname\":\"${alertname}\",\"namespace\":\"e2e-payments\",\"deployment\":\"${deployment}\"},
 		      \"annotations\":{\"summary\":\"e2e\"},
 		      \"startsAt\":\"2026-08-15T09:00:00Z\",
-		      \"fingerprint\":\"${fingerprint}\"}]}"
+		      \"fingerprint\":\"${fingerprint}\"}]}" || true
 }
 
 # send_labeled_alert <alertname> <fingerprint> <labels-json> -> HTTP status
@@ -146,6 +153,28 @@ send_labeled_alert() {
 		      \"labels\":{\"alertname\":\"${alertname}\",${labels}},
 		      \"startsAt\":\"2026-08-15T09:00:00Z\",
 		      \"fingerprint\":\"${fingerprint}\"}]}"
+}
+
+# kubectl_jq_escalations prints one line per escalation step, without needing
+# jq installed: the suite already depends on kubectl and python3 is what the
+# repo's other scripts use.
+kubectl_jq_escalations() {
+	python3 -c '
+import json, sys
+try:
+    doc = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for item in doc.get("items", []):
+    esc = (item.get("status") or {}).get("escalation")
+    if not esc:
+        continue
+    name = item["metadata"]["name"]
+    print(f"    {name}  escalation={esc.get(\"phase\", \"?\")}  {esc.get(\"message\", \"\")}")
+    for step in esc.get("steps", []):
+        print(f"      channel {step.get(\"index\")} {step.get(\"action\")}: "
+              f"{step.get(\"phase\")}  {step.get(\"message\") or step.get(\"plan\") or \"\"}")
+'
 }
 
 # wait_for_event <reason> <substring> [timeout-seconds]
@@ -353,6 +382,14 @@ wait_for_dashboard_body() {
 		elapsed=$((elapsed + 2))
 	done
 	return 1
+}
+
+# dashboard_headers <path> -> the response headers
+dashboard_headers() {
+	local path="$1"
+	curl -s -D - -o /dev/null --max-time 10 \
+		-H "Authorization: Bearer ${DASHBOARD_TOKEN}" \
+		"http://127.0.0.1:${DASHBOARD_PORT}${path}" 2>/dev/null || true
 }
 
 # dashboard_body <path> -> the rendered page
@@ -881,6 +918,28 @@ else
 	fail "a filtered page does not say what it is hiding"
 fi
 
+# The policy has to permit the one thing the page submits. `form-action` was
+# 'none', which blocked the filter's select entirely -- the browser said so in
+# the console and nowhere else, so the control looked merely unresponsive and
+# was reported broken four times. A header assertion is cheap and always runs.
+headers=$(dashboard_headers /remediations)
+if grep -qi "form-action 'self'" <<<"$headers"; then
+	pass "the policy lets the page submit its filter back to itself"
+else
+	fail "form-action does not permit 'self', so the filter select is blocked"
+fi
+if grep -qiE "form-action '?(none)'?" <<<"$headers"; then
+	fail "form-action is 'none', which blocks every form on the page"
+else
+	pass "and does not forbid forms outright"
+fi
+
+# The filter select's no-JavaScript fallback is checked in
+# internal/dashboard/assets_test.go, not here. This cluster has few enough
+# namespaces that the control is drawn as pills rather than a select, so an
+# assertion here would only run if that threshold were crossed by accident --
+# and a gate that runs by accident is not a gate.
+
 # The shell reloads itself when the operator changes, which is the defect
 # that made two correct filter fixes invisible in an already-open tab.
 if grep -q '<meta name="remedik-asset"' <<<"$overview"; then
@@ -898,7 +957,7 @@ if grep -q 'e2e-payments' <<<"$namespaces"; then
 else
 	fail "the namespaces page does not list e2e-payments"
 fi
-if grep -q 'Nobody told' <<<"$namespaces"; then
+if grep -q 'Unheard' <<<"$namespaces"; then
 	pass "and counts the failures nobody was told about"
 else
 	fail "the namespaces page does not report unheard failures"
@@ -1461,6 +1520,57 @@ fi
 # not "the flag was misread" — it is the posture and the record disagreeing,
 # which needs a real resource to disagree on.
 # --------------------------------------------------------------------------
+# A fallback page has to land when the first channel is down. This was a real
+# defect: the escalation stopped at its first failed step, so a configured
+# fallback was a single point of failure -- and invisible, because every
+# channel succeeds when the path is tested.
+info "escalation falls back to a second channel"
+kubectl apply -f hack/e2e/strategy-fallback.yaml >/dev/null
+code=$(send_alert "E2EFallback" "fallback-1" "does-not-exist")
+if [ "$code" = "200" ]; then
+	pass "gateway accepted the fallback alert"
+else
+	fail "gateway answered ${code} for the fallback alert, want 200"
+fi
+
+fallback=""
+for _ in $(seq 1 45); do
+	fallback=$(kubectl -n "$NAMESPACE" get remediations \
+		-l "remedik.dev/strategy=e2e-fallback" \
+		-o jsonpath='{range .items[?(@.status.state=="Failed")]}{.metadata.name}{end}' 2>/dev/null || true)
+	[ -n "$fallback" ] && break
+	sleep 2
+done
+if [ -n "$fallback" ]; then
+	pass "the fallback remediation failed as intended: ${fallback}"
+else
+	fail "no failed remediation was recorded for the fallback strategy"
+fi
+
+phase=$(kubectl -n "$NAMESPACE" get remediation "$fallback" \
+	-o jsonpath='{.status.escalation.phase}' 2>/dev/null || true)
+if [ "$phase" = "Succeeded" ]; then
+	pass "the escalation succeeded although its first channel was down"
+else
+	fail "escalation phase = ${phase:-<none>}, want Succeeded: one channel got through"
+fi
+
+first=$(kubectl -n "$NAMESPACE" get remediation "$fallback" \
+	-o jsonpath='{.status.escalation.steps[0].phase}' 2>/dev/null || true)
+second=$(kubectl -n "$NAMESPACE" get remediation "$fallback" \
+	-o jsonpath='{.status.escalation.steps[1].phase}' 2>/dev/null || true)
+if [ "$first" = "Failed" ]; then
+	pass "the broken channel is recorded as failed rather than hidden"
+else
+	fail "escalation step 0 = ${first:-<none>}, want Failed"
+fi
+if [ "$second" = "Succeeded" ]; then
+	pass "and the channel after it ran"
+else
+	fail "escalation step 1 = ${second:-<none>}, want Succeeded -- a failed channel must not silence the next"
+fi
+
+
 step "11. Live in one namespace, reporting in another"
 
 helm upgrade remedik charts/remedik \

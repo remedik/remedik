@@ -337,6 +337,9 @@ code {
   color: var(--text-3);
   font-family: var(--mono);
   font-size: 0.78rem;
+  /* A hyphenated cluster name would otherwise break across two lines when the
+     posture chip beside it is wide, which pushes the whole header taller. */
+  white-space: nowrap;
 }
 
 .cluster {
@@ -2113,110 +2116,181 @@ a.stat:hover {
   }
 }
 
-/* Namespaces — one row per namespace remedik has touched.
-   The left border carries the row's tone, so the page can be skimmed by
-   colour and still read by anybody who cannot: every row also names its
-   posture and says in words what its note means. */
+/* The "Where" panel counts activity; /namespaces judges it. The link says
+   which question the other page answers, rather than repeating the word. */
+.panel-subtitle-link {
+  float: right;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-3);
+}
+
+.panel-subtitle-link:hover {
+  color: var(--accent);
+}
+
+
+/* Namespaces.
+   A table, not a card each: with a dozen namespaces carrying six numbers
+   apiece the question is always "which of these is worse", and that is a
+   comparison down a column. Twelve cards laid the same six numbers out twelve
+   times and the chrome outweighed the content. */
 .ns-hint {
-  margin: 0 0 16px;
-  max-width: 72ch;
+  margin: 0 0 14px;
+  max-width: 78ch;
 }
 
-.ns-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.ns-table-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
 }
 
-.ns-row {
-  border-left: 3px solid var(--muted-border);
+.ns-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
 }
 
-.ns-ok {
-  border-left-color: var(--ok);
+.ns-table caption {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
-.ns-failed {
-  border-left-color: var(--failed);
+.ns-table th,
+.ns-table td {
+  padding: 7px 12px;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
 }
 
-.ns-warn {
-  border-left-color: var(--warn);
-}
-
-.ns-dryrun {
-  border-left-color: var(--dryrun);
-}
-
-.ns-muted {
-  border-left-color: var(--muted-border);
-}
-
-.ns-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px 16px;
-  margin-bottom: 14px;
-}
-
-.ns-badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.ns-body {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px 32px;
-}
-
-.ns-counts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 28px;
-  margin: 0;
-}
-
-.ns-count dt {
-  font-size: 0.7rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.ns-count dd {
-  margin: 2px 0 0;
-}
-
-.ns-number {
-  font-size: 1.25rem;
+.ns-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  font-size: 0.68rem;
   font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  background: var(--surface-2);
+}
+
+/* A group header inside the table rather than a second heading above a second
+   table: one grid means one set of column positions to scan down. */
+.ns-group th {
+  padding: 12px 12px 6px;
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  color: var(--text);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border-strong);
+}
+
+.ns-group-note {
+  margin-left: 8px;
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--text-3);
+  white-space: normal;
+}
+
+.ns-tr:last-child td {
+  border-bottom: 0;
+}
+
+.ns-tr:hover {
+  background: var(--surface-2);
+}
+
+/* The tone rides on a left edge rather than a coloured row: a whole row in a
+   status colour is a row whose numbers are harder to read, which is the
+   opposite of the point. */
+.ns-tr-failed td:first-child {
+  box-shadow: inset 3px 0 0 var(--failed);
+}
+
+.ns-tr-warn td:first-child {
+  box-shadow: inset 3px 0 0 var(--warn);
+}
+
+.ns-tr-ok td:first-child {
+  box-shadow: inset 3px 0 0 var(--ok);
+}
+
+.ns-tr-dryrun td:first-child {
+  box-shadow: inset 3px 0 0 var(--dryrun);
+}
+
+.ns-tr-muted td:first-child {
+  box-shadow: inset 3px 0 0 var(--border-strong);
+}
+
+.ns-col-name {
+  max-width: 30ch;
+}
+
+.ns-name {
+  font-size: 0.84rem;
+}
+
+/* The posture note qualifies the posture, so it lives under the chip rather
+   than under the name. Terse on purpose: the long form repeated on every row
+   of a cluster whose posture had moved, and the pattern is stated once in the
+   summary instead. */
+.ns-sub {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--warn);
+  white-space: nowrap;
+}
+
+.ns-num {
+  text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
-.ns-number-ok {
+.ns-num-ok {
   color: var(--ok);
+  font-weight: 600;
 }
 
-.ns-number-failed {
+.ns-num-bad {
   color: var(--failed);
+  font-weight: 600;
 }
 
-.ns-rate {
-  flex: 1 1 200px;
-  min-width: 180px;
-  max-width: 280px;
+/* A zero is context, not information. Recessing it lets the eye land on the
+   numbers that are not zero, which is the whole job of this page. */
+.ns-zero {
+  color: var(--text-3);
+  opacity: 0.55;
+}
+
+.ns-col-rate {
+  width: 150px;
+  white-space: nowrap;
 }
 
 .ns-bar {
-  height: 6px;
+  display: inline-block;
+  width: 72px;
+  height: 5px;
+  vertical-align: middle;
   border-radius: 3px;
-  background: var(--muted-bg);
+  background: var(--surface-2);
   overflow: hidden;
 }
 
@@ -2228,22 +2302,29 @@ a.stat:hover {
   width: var(--pct, 0%);
 }
 
-.ns-rate-label {
-  margin: 6px 0 0;
+.ns-rate-num {
+  margin-left: 8px;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+
+.ns-rate-none {
   font-size: 0.78rem;
 }
 
-/* The "Where" panel counts activity; /namespaces judges it. The link says
-   which question the other page answers, rather than repeating the word. */
-.panel-subtitle-link {
-  float: right;
-  font-size: 0.72rem;
-  font-weight: 500;
-  letter-spacing: 0;
-  text-transform: none;
-  color: var(--text-muted);
+.ns-col-last {
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
 }
 
-.panel-subtitle-link:hover {
-  color: var(--accent);
+/* The select applies on change once the script has run, so its submit button
+   is redundant -- but it is the whole control with JavaScript off, so it is
+   hidden here rather than left out of the markup.
+
+   This is the fix for a real report: "the buttons work, the dropdown does
+   nothing". It did work; it needed a second gesture that nothing else on that
+   row needed, which is indistinguishable from broken. */
+.filter-select.is-live button {
+  display: none;
 }

@@ -85,18 +85,18 @@ func TestAttentionPanel(t *testing.T) {
 	lost := &v1alpha1.EscalationStatus{Phase: v1alpha1.StepPhaseFailed}
 
 	t.Run("nothing failed", func(t *testing.T) {
-		panel := buildAttention([]v1alpha1.Remediation{succeededRemediation("ok-1", 5)})
+		panel := buildAttention(ptrs([]v1alpha1.Remediation{succeededRemediation("ok-1", 5)}))
 		if panel.Any() {
 			t.Errorf("Any() = true with nothing failed: %+v", panel.Items)
 		}
 	})
 
 	t.Run("a page nobody received leads", func(t *testing.T) {
-		panel := buildAttention([]v1alpha1.Remediation{
+		panel := buildAttention(ptrs([]v1alpha1.Remediation{
 			failed("bad-1", sent, ""),
 			failed("bad-2", lost, ""),
 			failed("bad-3", nil, ""),
-		})
+		}))
 
 		if len(panel.Items) < 2 {
 			t.Fatalf("items = %+v, want the failed escalation and the un-escalated failure", panel.Items)
@@ -120,7 +120,7 @@ func TestAttentionPanel(t *testing.T) {
 	})
 
 	t.Run("failures that were all reported still say so", func(t *testing.T) {
-		panel := buildAttention([]v1alpha1.Remediation{failed("bad-1", sent, "")})
+		panel := buildAttention(ptrs([]v1alpha1.Remediation{failed("bad-1", sent, "")}))
 
 		if len(panel.Items) != 1 {
 			t.Fatalf("items = %+v, want one", panel.Items)
@@ -131,9 +131,9 @@ func TestAttentionPanel(t *testing.T) {
 	})
 
 	t.Run("an interrupted execution is called out", func(t *testing.T) {
-		panel := buildAttention([]v1alpha1.Remediation{
+		panel := buildAttention(ptrs([]v1alpha1.Remediation{
 			failed("bad-1", sent, v1alpha1.ReasonInterrupted),
-		})
+		}))
 
 		var found bool
 		for _, item := range panel.Items {
@@ -157,7 +157,7 @@ func TestActivityPanel(t *testing.T) {
 		simulatedRemediation("sim", "deployment/payments/api", 90),
 	}
 
-	panel := buildActivity(records, now)
+	panel := buildActivity(ptrs(records), now)
 
 	if len(panel.Bars) != activityHours {
 		t.Fatalf("bars = %d, want %d", len(panel.Bars), activityHours)
@@ -215,7 +215,7 @@ func TestBreakdown(t *testing.T) {
 	records[1].Spec.Target = "deployment/payments/api"
 	records[2].Spec.Target = "deployment/checkout/web"
 
-	rows := buildBreakdown(records, targetNamespaceOf, byNamespace)
+	rows := buildBreakdown(ptrs(records), targetNamespaceOf, byNamespace)
 
 	if len(rows) != 2 {
 		t.Fatalf("rows = %+v, want two namespaces", rows)
@@ -243,10 +243,10 @@ func TestBreakdown_SkipsRecordsWithoutTheKey(t *testing.T) {
 	records := []v1alpha1.Remediation{succeededRemediation("drain-1", 10)}
 	records[0].Spec.Target = "node/worker-1"
 
-	if rows := buildBreakdown(records, targetNamespaceOf, byNamespace); len(rows) != 0 {
+	if rows := buildBreakdown(ptrs(records), targetNamespaceOf, byNamespace); len(rows) != 0 {
 		t.Errorf("namespace rows = %+v, want none", rows)
 	}
-	if rows := buildBreakdown(records, strategyOf, byStrategy); len(rows) != 1 {
+	if rows := buildBreakdown(ptrs(records), strategyOf, byStrategy); len(rows) != 1 {
 		t.Errorf("strategy rows = %+v, want one", rows)
 	}
 }
@@ -260,7 +260,7 @@ func TestBreakdown_OrderIsStableForEqualCounts(t *testing.T) {
 	records[0].Spec.Target = "deployment/zulu/api"
 	records[1].Spec.Target = "deployment/alpha/api"
 
-	rows := buildBreakdown(records, targetNamespaceOf, byNamespace)
+	rows := buildBreakdown(ptrs(records), targetNamespaceOf, byNamespace)
 	if len(rows) != 2 || rows[0].Name != "alpha" || rows[1].Name != "zulu" {
 		t.Errorf("rows = %+v, want alphabetical when the counts tie", rows)
 	}

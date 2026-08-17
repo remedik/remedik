@@ -26,9 +26,9 @@ GOVULN    := $(TOOLS_BIN)/govulncheck
 
 KIND_CLUSTER := remedik-dev
 
-.PHONY: all build test vet fmt tidy lint yaml-lint yaml-fix helm-lint helm-docs \
+.PHONY: all build test vet fmt tidy lint yaml-lint yaml-fix helm-lint helm-docs js-test \
         specs generate manifests verify verify-codegen tools docker-build e2e \
-        dev-up dev-down dev-info dev-deploy versions clean help
+        dev-up dev-down dev-info dev-deploy dev-seed versions clean help
 
 all: verify build
 
@@ -107,7 +107,7 @@ helm-lint: ## Lint the Helm chart (requires helm)
 helm-docs: $(HELMDOCS) ## Regenerate chart README.md from values.yaml annotations
 	$(HELMDOCS) --chart-search-root charts
 
-verify: fmt vet lint yaml-lint helm-lint verify-docs specs vuln test ## Everything CI runs
+verify: fmt vet lint yaml-lint helm-lint verify-docs specs vuln js-test test ## Everything CI runs
 
 # Advisories against the toolchain go.mod pins, which is what CI installs.
 # It was CI-only, so the eleven standard-library advisories in go1.26.0 were
@@ -116,6 +116,16 @@ verify: fmt vet lint yaml-lint helm-lint verify-docs specs vuln test ## Everythi
 # is only worth saying if it is true.
 vuln: $(GOVULN) ## Check for known vulnerabilities
 	$(GOVULN) ./...
+
+js-test: ## Test the dashboard's JavaScript
+	@# The dashboard's script had no tests, and the filter has now looked
+	@# broken to its owner four times. The last cause was in that file: the
+	@# handler meant to submit on Enter cancelled the pending submit and never
+	@# made one, so choosing a namespace with the keyboard did nothing. Every
+	@# static check passed, because the interaction had none.
+	@command -v node >/dev/null || { echo "node not found — needed for the dashboard's JS tests: https://nodejs.org"; exit 1; }
+	node --check internal/dashboard/assets/app.js
+	node hack/js-test.mjs
 
 specs: ## Check that the spec-first workflow was followed
 	./hack/openspec-check.sh
@@ -197,9 +207,15 @@ dev-up: ## Create the kind dev cluster and install the monitoring stack
 		-f hack/dev/monitoring-values.yaml --wait --timeout 10m
 	@$(MAKE) --no-print-directory dev-info
 
+dev-seed: ## Fill the dev cluster with a cluster's worth of history (NS=150)
+	@# Nine records in three namespaces is not a test of a dashboard that
+	@# claims to work at any cluster size. This makes the claim checkable.
+	./hack/dev-seed.sh --reset --namespaces $(or $(NS),150)
+
 dev-info: ## Show how to reach the dev cluster UIs
 	@echo ""
 	@echo "Dev cluster '$(KIND_CLUSTER)' — UIs (each port-forward in its own terminal):"
+	@echo "  Alertmanager routes to remedik: check receivers at http://localhost:9093/#/status"
 	@echo "  Grafana:      kubectl port-forward -n monitoring svc/monitoring-grafana 3000:80                          -> http://localhost:3000 (admin / remedik-dev)"
 	@echo "  Prometheus:   kubectl port-forward -n monitoring svc/monitoring-kube-prometheus-prometheus 9090:9090     -> http://localhost:9090"
 	@echo "  Alertmanager: kubectl port-forward -n monitoring svc/monitoring-kube-prometheus-alertmanager 9093:9093   -> http://localhost:9093"
@@ -223,6 +239,10 @@ dev-deploy: docker-build ## Build, load and install remedik into the dev cluster
 	@# --force-conflicts because the initial `helm install` recorded itself as
 	@# the field manager, and taking that over is exactly the intent.
 	kubectl apply --server-side --force-conflicts -f charts/remedik/crds/
+	@# The namespacePosture entries below name namespaces `make dev-seed`
+	@# creates, so a seeded cluster shows a mixed posture rather than one that
+	@# only ever reported -- which is the case the pages are built to make
+	@# readable and therefore the one worth looking at.
 	helm upgrade --install remedik charts/remedik \
 		--namespace remedik --create-namespace \
 		--set image.repository=$(IMAGE_REPO) --set image.tag=$(IMAGE_TAG) \
@@ -230,6 +250,10 @@ dev-deploy: docker-build ## Build, load and install remedik into the dev cluster
 		--set gateway.auth.token=dev-token \
 		--set clusterName=dev-kind \
 		--set namespacePosture.payments=live \
+		--set namespacePosture.payments-eu-prod=live \
+		--set namespacePosture.checkout-eu-prod=live \
+		--set namespacePosture.catalog-eu-prod=live \
+		--set namespacePosture.search-eu-prod=live \
 		--set dashboard.enabled=true --set dashboard.auth.token=dev-token \
 		--set actions.workloadRestart.enabled=true \
 		--set actions.podDelete.enabled=true \

@@ -59,6 +59,14 @@ routing. It answers the two questions that are painful through kubectl:
   <img src="docs/screenshots/overview.png" alt="The overview: posture, what needs attention, activity over the last day, and where remediation is happening" width="820">
 </p>
 
+With fifty namespaces, "what happened" is the wrong question. `/namespaces`
+answers where it is going badly, putting the failures nobody was told about
+at the top:
+
+<p align="center">
+  <img src="docs/screenshots/namespaces.png" alt="The namespaces page: one row per namespace, with its posture, outcomes, and the failures nobody was told about" width="820">
+</p>
+
 Every failure has a page that explains itself — the plan, the error, and
 whether anybody was told:
 
@@ -199,8 +207,14 @@ To keep the cluster and poke at it yourself:
 ```bash
 make dev-up        # kind + Prometheus, Alertmanager and Grafana
 make dev-deploy    # build, load and install remedik (dry-run on)
+make dev-seed      # 150 namespaces of history, so the pages have something to say
 kubectl -n remedik get remediations -w
 ```
+
+`make dev-up` points Alertmanager at the gateway, so the path a real cluster
+uses is the path the dev cluster uses: a Prometheus rule fires, Alertmanager
+groups it, and it arrives as a webhook. That is remedik's only input — it does
+not poll Prometheus and has no other way in.
 
 The dashboard, enabled:
 
@@ -267,6 +281,7 @@ the record still explains the run after the strategy is edited or deleted.
 | Doc | Purpose |
 | --- | --- |
 | [QUICKSTART.md](QUICKSTART.md) | Install it, or work on it |
+| [docs/routing.md](docs/routing.md) | Waking on-call only when remediation did not work — the routing, and the safety net that makes it safe to rely on |
 | [docs/architecture.md](docs/architecture.md) | Components, state machine, guards, topologies |
 | [docs/advanced-setup.md](docs/advanced-setup.md) | Hub/spoke, cloud packs, audit sinks, AI diagnosis (planned) |
 | [charts/remedik/README.md](charts/remedik/README.md) | Every chart value |

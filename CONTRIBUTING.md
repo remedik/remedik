@@ -59,6 +59,28 @@ RBAC named the old API group. Nothing short of a cluster finds that.
   for the eviction loop, the 429 retry and the partial-drain failure. The
   reasoning is in `hack/e2e/kind.yaml`; please read it before adding a node.
 
+**`hack/browser-check.mjs`** drives a real Chrome through the DevTools Protocol
+and reads its console. It is not in `make verify` — it needs a cluster and a
+browser — and it is what to reach for when a page looks correct and behaves
+otherwise, because that is the shape a Content-Security-Policy violation has.
+The policy has silently broken two features that way; both times every other
+test passed.
+
+**`make js-test`**, which `make verify` runs, exercises the dashboard's script
+against a stub DOM and a controlled clock. The script had no tests until the
+filter's control was reported broken for the fourth time.
+
+**`make dev-seed`** fills the dev cluster with 150 namespaces and around 1900
+records, reproducible from a fixed seed. It is not a test — nothing asserts —
+but it is where the dashboard's claims about scale get checked by eye, and it
+is worth running before changing a page. It found four defects the first time
+it ran, including a page that rendered 151kB and a heading that said 81 of
+150 namespaces needed attention.
+
+One limitation is deliberately not hidden: the API server sets
+`creationTimestamp`, so every seeded record is as old as the run. The volume,
+the spread and the outcomes are real; the ages are not.
+
 **`hack/rbac-unchanged.sh`**, run by `make verify`, proves the chart grants
 nothing with every action disabled, that each action grants only its own
 rules, and that the dashboard grants nothing at all. It is the mechanical

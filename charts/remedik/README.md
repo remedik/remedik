@@ -136,7 +136,8 @@ what the operator already reads.
 | priorityClassName | string | `""` | PriorityClass for the operator pod. A single-replica operator evicted under node pressure stops remediating without anyone being told, so on a busy cluster this is worth setting to something like `system-cluster-critical`. |
 | probes.port | int | `8081` | Port the health and readiness probes listen on |
 | prometheusRule.additionalLabels | object | `{}` | Labels the PrometheusRule needs to be selected, as for the ServiceMonitor |
-| prometheusRule.enabled | bool | `false` | Create a PrometheusRule alerting on remedik itself: down, ingest failing, nothing matching, remediations failing, deliveries truncated, unauthenticated attempts. Something that holds write access to a cluster should be watched by the same monitoring it consumes. |
+| prometheusRule.enabled | bool | `false` | Create a PrometheusRule alerting on remedik itself: down, ingest failing, nothing matching, remediations failing, a guard that keeps refusing, deliveries truncated, unauthenticated attempts. Something that holds write access to a cluster should be watched by the same monitoring it consumes. |
+| prometheusRule.guardRefusalsPerHour | int | `6` | How many refusals of one strategy by one guard in an hour count as remedik having given up. A refusal on its own is remedik working correctly; this many means the alert keeps arriving and remediation is not resolving it, and a refusal creates no record and runs no escalation, so nobody has been told. |
 | prometheusRule.namespace | string | `""` | Namespace for the PrometheusRule; defaults to the release namespace |
 | prometheusRule.severity.critical | string | `"critical"` | Severity label for the rule that fires when remedik is not scraped |
 | prometheusRule.severity.warning | string | `"warning"` | Severity label for the rest |

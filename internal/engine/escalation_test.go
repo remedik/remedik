@@ -251,3 +251,176 @@ func TestEscalation_UnknownActionFailsOnlyTheEscalation(t *testing.T) {
 		t.Errorf("escalation = %+v, want a recorded failure", stored.Status.Escalation)
 	}
 }
+
+// twoChannels escalates through two endpoints: a primary and a fallback.
+func twoChannels(mode v1alpha1.EscalationMode) *v1alpha1.Remediation {
+	rem := remediation("rem-1", v1alpha1.Step{Action: "deployment.restart"})
+	rem.Spec.EscalationSteps = []v1alpha1.Step{
+		{Action: "webhook.call"},
+		{Action: "job.run"},
+	}
+	rem.Spec.EscalationMode = mode
+	return rem
+}
+
+// The defect this exists for: the escalation stopped at its first failed step,
+// so a configured fallback was a single point of failure — and an invisible
+// one, because every channel succeeds when the path is tested.
+func TestEscalation_AFallbackChannelRunsWhenTheFirstIsDown(t *testing.T) {
+	broken := &scriptedAction{name: "deployment.restart", execErr: errors.New("still broken")}
+	primary := &scriptedAction{name: "webhook.call", execErr: errors.New("connection refused")}
+	fallback := &scriptedAction{name: "job.run"}
+
+	f := newReconciler(t, false, []action.Action{broken, primary, fallback},
+		twoChannels(v1alpha1.EscalationModeAll))
+
+	if _, err := f.reconciler.Reconcile(context.Background(), request("rem-1")); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+
+	if fallback.execCalls != 1 {
+		t.Fatalf("the fallback channel ran %d times, want 1. A failed first "+
+			"channel must not silence the ones after it: escalation steps are "+
+			"alternative ways to reach a person, not a sequence.", fallback.execCalls)
+	}
+
+	rem := f.client.stored(testNamespace, "rem-1")
+	esc := rem.Status.Escalation
+	if esc == nil {
+		t.Fatal("the record does not say whether anybody was told")
+	}
+	// Somebody was told, so the answer to the record's question is yes — even
+	// though a channel is broken, which is visible as its own step.
+	if esc.Phase != v1alpha1.StepPhaseSucceeded {
+		t.Errorf("escalation phase = %q, want Succeeded: one channel got through",
+			esc.Phase)
+	}
+	if len(esc.Steps) != 2 {
+		t.Fatalf("escalation steps = %d, want 2", len(esc.Steps))
+	}
+	if esc.Steps[0].Phase != v1alpha1.StepPhaseFailed {
+		t.Errorf("step 0 phase = %q, want Failed", esc.Steps[0].Phase)
+	}
+	if esc.Steps[0].Message == "" {
+		t.Error("the broken channel does not say why it failed")
+	}
+	if esc.Steps[1].Phase != v1alpha1.StepPhaseSucceeded {
+		t.Errorf("step 1 phase = %q, want Succeeded", esc.Steps[1].Phase)
+	}
+	if f.metrics.escalated["Succeeded"] != 1 {
+		t.Errorf("escalation metrics = %v, want one Succeeded", f.metrics.escalated)
+	}
+}
+
+// Every channel down is the alarm, and it must still be the alarm.
+func TestEscalation_EveryChannelDownIsAFailedEscalation(t *testing.T) {
+	broken := &scriptedAction{name: "deployment.restart", execErr: errors.New("still broken")}
+	primary := &scriptedAction{name: "webhook.call", execErr: errors.New("connection refused")}
+	fallback := &scriptedAction{name: "job.run", execErr: errors.New("no such image")}
+
+	f := newReconciler(t, false, []action.Action{broken, primary, fallback},
+		twoChannels(v1alpha1.EscalationModeAll))
+
+	if _, err := f.reconciler.Reconcile(context.Background(), request("rem-1")); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+
+	// Both were tried, and neither got through.
+	if primary.execCalls != 1 || fallback.execCalls != 1 {
+		t.Errorf("channels ran %d and %d times, want 1 each",
+			primary.execCalls, fallback.execCalls)
+	}
+
+	esc := f.client.stored(testNamespace, "rem-1").Status.Escalation
+	if esc.Phase != v1alpha1.StepPhaseFailed {
+		t.Errorf("escalation phase = %q, want Failed: nobody was told", esc.Phase)
+	}
+	if esc.Message == "" {
+		t.Error("a failed escalation does not say why")
+	}
+	if f.metrics.escalated["Failed"] != 1 {
+		t.Errorf("escalation metrics = %v, want one Failed", f.metrics.escalated)
+	}
+}
+
+// An ordered fallback must not page twice when both channels work, because
+// people who are paged twice remove the fallback.
+func TestEscalation_FirstSuccessDoesNotPageTwice(t *testing.T) {
+	broken := &scriptedAction{name: "deployment.restart", execErr: errors.New("still broken")}
+	primary := &scriptedAction{name: "webhook.call"}
+	fallback := &scriptedAction{name: "job.run"}
+
+	f := newReconciler(t, false, []action.Action{broken, primary, fallback},
+		twoChannels(v1alpha1.EscalationModeFirstSuccess))
+
+	if _, err := f.reconciler.Reconcile(context.Background(), request("rem-1")); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+
+	if primary.execCalls != 1 {
+		t.Errorf("the primary channel ran %d times, want 1", primary.execCalls)
+	}
+	if fallback.execCalls != 0 {
+		t.Errorf("the fallback ran %d times, want 0: the primary already "+
+			"reached somebody", fallback.execCalls)
+	}
+
+	esc := f.client.stored(testNamespace, "rem-1").Status.Escalation
+	if esc.Steps[1].Phase != v1alpha1.StepPhaseSkipped {
+		t.Errorf("step 1 phase = %q, want Skipped", esc.Steps[1].Phase)
+	}
+	if esc.Steps[1].Message == "" {
+		t.Error("a skipped channel does not say why it was skipped")
+	}
+}
+
+// firstSuccess still falls back: it stops at the first success, not the first
+// attempt.
+func TestEscalation_FirstSuccessStillFallsBack(t *testing.T) {
+	broken := &scriptedAction{name: "deployment.restart", execErr: errors.New("still broken")}
+	primary := &scriptedAction{name: "webhook.call", execErr: errors.New("connection refused")}
+	fallback := &scriptedAction{name: "job.run"}
+
+	f := newReconciler(t, false, []action.Action{broken, primary, fallback},
+		twoChannels(v1alpha1.EscalationModeFirstSuccess))
+
+	if _, err := f.reconciler.Reconcile(context.Background(), request("rem-1")); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+
+	if fallback.execCalls != 1 {
+		t.Fatalf("the fallback ran %d times, want 1", fallback.execCalls)
+	}
+	if esc := f.client.stored(testNamespace, "rem-1").Status.Escalation; esc.Phase != v1alpha1.StepPhaseSucceeded {
+		t.Errorf("escalation phase = %q, want Succeeded", esc.Phase)
+	}
+}
+
+// The remediation's own plan keeps stopping at its first failure. That rule is
+// correct there — step two of "scale up, then restart" must not act on a scale
+// that did not happen — and this change must not have leaked into it.
+func TestEscalation_TheRemediationPlanStillStopsAtAFailure(t *testing.T) {
+	first := &scriptedAction{name: "deployment.scale"}
+	second := &scriptedAction{name: "deployment.restart", execErr: errors.New("rejected")}
+	third := &scriptedAction{name: "pod.delete"}
+
+	rem := remediation("rem-1",
+		v1alpha1.Step{Action: "deployment.scale"},
+		v1alpha1.Step{Action: "deployment.restart"},
+		v1alpha1.Step{Action: "pod.delete"},
+	)
+	f := newReconciler(t, false, []action.Action{first, second, third}, rem)
+
+	if _, err := f.reconciler.Reconcile(context.Background(), request("rem-1")); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+
+	if third.execCalls != 0 {
+		t.Errorf("the third step ran %d times, want 0: a remediation plan stops "+
+			"at its first failure", third.execCalls)
+	}
+	stored := f.client.stored(testNamespace, "rem-1")
+	if stored.Status.Steps[2].Phase != v1alpha1.StepPhaseSkipped {
+		t.Errorf("step 2 phase = %q, want Skipped", stored.Status.Steps[2].Phase)
+	}
+}

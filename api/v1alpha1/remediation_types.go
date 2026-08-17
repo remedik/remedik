@@ -112,6 +112,16 @@ type RemediationSpec struct {
 	// +optional
 	EscalationSteps []Step `json:"escalationSteps,omitempty"`
 
+	// EscalationMode is how those steps are run, copied from the strategy at
+	// creation time for the same reason DryRun is: an escalation must run
+	// under the policy that was in force when the remediation started, not
+	// whichever one a later edit installed, and the record has to say which.
+	//
+	// +kubebuilder:default=all
+	// +kubebuilder:validation:Enum=all;firstSuccess
+	// +optional
+	EscalationMode EscalationMode `json:"escalationMode,omitempty"`
+
 	// DryRun records the posture this execution ran under, resolved from
 	// the target's namespace when the record was created.
 	//

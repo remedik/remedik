@@ -138,8 +138,8 @@ func TestDryRunReportExistsForATrialThatHasProducedNothing(t *testing.T) {
 
 // Turning dry-run off must not erase the report the decision was based on.
 func TestDryRunReportSurvivesDryRunBeingTurnedOff(t *testing.T) {
-	report := buildDryRunReport(
-		[]v1alpha1.Remediation{simulatedRemediation("sim-1", "deployment/payments/api", 60)},
+	report := buildDryRunReport(ptrs(
+		[]v1alpha1.Remediation{simulatedRemediation("sim-1", "deployment/payments/api", 60)}),
 		false, testNow(),
 	)
 
@@ -435,9 +435,8 @@ func TestPluralHandlesIrregularUnits(t *testing.T) {
 // Helpers
 // --------------------------------------------------------------------------
 
-func sorted(remediations []v1alpha1.Remediation) []v1alpha1.Remediation {
-	sortNewestFirst(remediations)
-	return remediations
+func sorted(remediations []v1alpha1.Remediation) []*v1alpha1.Remediation {
+	return newestFirst(remediations)
 }
 
 func TestBuildRemediation_EscalationIsSeparateFromTheSteps(t *testing.T) {

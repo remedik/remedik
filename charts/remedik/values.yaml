@@ -135,14 +135,21 @@ serviceMonitor:
 
 prometheusRule:
   # -- Create a PrometheusRule alerting on remedik itself: down, ingest
-  # failing, nothing matching, remediations failing, deliveries truncated,
-  # unauthenticated attempts. Something that holds write access to a cluster
-  # should be watched by the same monitoring it consumes.
+  # failing, nothing matching, remediations failing, a guard that keeps
+  # refusing, deliveries truncated, unauthenticated attempts. Something that
+  # holds write access to a cluster should be watched by the same monitoring
+  # it consumes.
   enabled: false
   # -- Namespace for the PrometheusRule; defaults to the release namespace
   namespace: ""
   # -- Labels the PrometheusRule needs to be selected, as for the ServiceMonitor
   additionalLabels: {}
+  # -- How many refusals of one strategy by one guard in an hour count as
+  # remedik having given up. A refusal on its own is remedik working
+  # correctly; this many means the alert keeps arriving and remediation is not
+  # resolving it, and a refusal creates no record and runs no escalation, so
+  # nobody has been told.
+  guardRefusalsPerHour: 6
   severity:
     # -- Severity label for the rule that fires when remedik is not scraped
     critical: critical

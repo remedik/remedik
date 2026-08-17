@@ -3,10 +3,12 @@ package external
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -217,5 +219,148 @@ func TestWebhookCall_ActsOnNothingInTheCluster(t *testing.T) {
 	// which is the honest reading: there is nothing here to be cooling down.
 	if !target.IsZero() {
 		t.Errorf("target = %q, want none", target)
+	}
+}
+
+// The default body must not change: every service webhook.call was written
+// for is already parsing it.
+func TestWebhookCall_TheDefaultFormatIsUnchanged(t *testing.T) {
+	var body []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	a := NewWebhookCall(&secretClient{}, operatorNamespace)
+	req := webhookRequest(action.Params{URLParam: server.URL})
+
+	if _, err := a.Execute(context.Background(), req); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	// An object, not an array: the shape callers already parse.
+	var one payload
+	if err := json.Unmarshal(body, &one); err != nil {
+		t.Fatalf("the default body is no longer a single object: %v", err)
+	}
+	if one.Remediation != "pod-crashloop-x7k2q" {
+		t.Errorf("remediation = %q, want the record's name", one.Remediation)
+	}
+}
+
+// Alertmanager's /api/v2/alerts refuses anything but an array of alerts. This
+// was found by pointing a real escalation at a real Alertmanager and reading
+// the 400 it answered.
+func TestWebhookCall_AlertmanagerFormatIsAnArrayOfAlerts(t *testing.T) {
+	var body []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	a := NewWebhookCall(&secretClient{}, operatorNamespace)
+	a.Now = func() time.Time { return time.Date(2026, 8, 17, 9, 0, 0, 0, time.UTC) }
+
+	req := webhookRequest(action.Params{
+		URLParam:    server.URL,
+		FormatParam: FormatAlertmanager,
+	})
+	req.Labels["team"] = "payments-oncall"
+	req.Labels["remedik_message"] = `deployments.apps "api" not found`
+	req.Target = action.Target{Kind: "deployment", Namespace: "payments", Name: "api"}
+
+	if _, err := a.Execute(context.Background(), req); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	var alerts []alertmanagerAlert
+	if err := json.Unmarshal(body, &alerts); err != nil {
+		t.Fatalf("the body is not an array of alerts: %v\nbody: %s", err, body)
+	}
+	if len(alerts) != 1 {
+		t.Fatalf("alerts = %d, want 1", len(alerts))
+	}
+	got := alerts[0]
+
+	// The routing tree is the point: a label the symptom carried has to reach
+	// the raised alert, or the page goes somewhere else.
+	if got.Labels["team"] != "payments-oncall" {
+		t.Errorf("team = %q, want the triggering alert's label preserved", got.Labels["team"])
+	}
+	// And it must not impersonate the alert that is still firing.
+	if got.Labels["alertname"] == "KubePodCrashLooping" {
+		t.Error("alertname is the triggering alert's; Alertmanager would treat " +
+			"the two as one alert and drop this one")
+	}
+	if got.Labels["alertname"] != DefaultEscalationAlertName {
+		t.Errorf("alertname = %q, want %q", got.Labels["alertname"], DefaultEscalationAlertName)
+	}
+	if got.Labels["severity"] != DefaultEscalationSeverity {
+		t.Errorf("severity = %q, want %q", got.Labels["severity"], DefaultEscalationSeverity)
+	}
+	if got.Annotations["description"] != `deployments.apps "api" not found` {
+		t.Errorf("description = %q, want the failure message", got.Annotations["description"])
+	}
+	if got.StartsAt != "2026-08-17T09:00:00Z" {
+		t.Errorf("startsAt = %q, want the injected clock", got.StartsAt)
+	}
+	// endsAt unset, so Alertmanager expires it through resolve_timeout rather
+	// than remedik needing to send a resolve it never will.
+	if strings.Contains(string(body), "endsAt") {
+		t.Error("endsAt is set, which resolves the page immediately")
+	}
+}
+
+func TestWebhookCall_AStepCanOverrideTheRaisedAlert(t *testing.T) {
+	var body []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	a := NewWebhookCall(&secretClient{}, operatorNamespace)
+	req := webhookRequest(action.Params{
+		URLParam:       server.URL,
+		FormatParam:    FormatAlertmanager,
+		AlertNameParam: "PaymentsRemediationFailed",
+		SeverityParam:  "warning",
+	})
+
+	if _, err := a.Execute(context.Background(), req); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	var alerts []alertmanagerAlert
+	if err := json.Unmarshal(body, &alerts); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if alerts[0].Labels["alertname"] != "PaymentsRemediationFailed" {
+		t.Errorf("alertname = %q, want the step's override", alerts[0].Labels["alertname"])
+	}
+	if alerts[0].Labels["severity"] != "warning" {
+		t.Errorf("severity = %q, want the step's override", alerts[0].Labels["severity"])
+	}
+}
+
+// An unknown format has to fail the dry run. Finding out during an incident
+// that the page cannot be encoded is the whole thing dry-run exists to avoid.
+func TestWebhookCall_AnUnknownFormatFailsThePlan(t *testing.T) {
+	a := NewWebhookCall(&secretClient{}, operatorNamespace)
+	req := webhookRequest(action.Params{
+		URLParam:    "https://example.invalid/hook",
+		FormatParam: "slack",
+	})
+
+	_, err := a.Plan(context.Background(), req)
+	if err == nil {
+		t.Fatal("Plan() error = nil for an unknown format")
+	}
+	for _, want := range []string{"slack", FormatRemedik, FormatAlertmanager} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
 	}
 }

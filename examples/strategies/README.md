@@ -21,6 +21,7 @@ suit your alerts, and start with the operator in dry-run.
 | [drain-a-dead-node.yaml](drain-a-dead-node.yaml) | `KubeNodeUnreachable` | Drains it, honouring disruption budgets |
 | [volume-filling-up.yaml](volume-filling-up.yaml) | `KubePersistentVolumeFillingUp` | Expands the claim, where the class allows |
 | [escalate-on-failure.yaml](escalate-on-failure.yaml) | `KubePodCrashLooping`, `KubeNodeNotReady` | Remediates, and pages somebody when that does not work |
+| [escalate-into-alertmanager.yaml](escalate-into-alertmanager.yaml) | `KubePodCrashLooping` | Raises `RemediationFailed` in Alertmanager, so the routing you already have decides who is woken |
 | [replace-a-node.yaml](replace-a-node.yaml) | `KubeNodeUnreachable` | Drains it here, lets a pipeline terminate the instance |
 
 Every action a recipe uses must be enabled in the chart, because each one is

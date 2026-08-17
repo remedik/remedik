@@ -124,6 +124,22 @@ func (r *StepRunner) Run(ctx context.Context, labels map[string]string, plan []v
 	return result
 }
 
+// Step runs one step and reports it, with no opinion about what the steps
+// around it did.
+//
+// Exported for the escalation, which needs exactly this and must not inherit
+// Run's stop-at-the-first-failure rule: its steps are alternative ways to
+// reach a person, not a sequence.
+func (r *StepRunner) Step(
+	ctx context.Context, index int, labels map[string]string, step v1alpha1.Step,
+) (v1alpha1.StepStatus, error) {
+	now := r.now
+	if r.Now != nil {
+		now = r.Now
+	}
+	return r.runStep(ctx, index, labels, step, now)
+}
+
 func (r *StepRunner) runStep(
 	ctx context.Context,
 	index int,

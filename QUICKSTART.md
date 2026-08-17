@@ -54,6 +54,11 @@ receivers:
 
 Then route the alerts you want remediated to that receiver.
 
+If the point is that on-call is only woken when remediation did not work, read
+[docs/routing.md](docs/routing.md) before you route anything: it is three
+routes rather than one, and the third is the one that keeps remedik out of
+your paging path's critical section.
+
 ### 3. Add a strategy
 
 Start from the cookbook in [`examples/strategies/`](examples/strategies/):

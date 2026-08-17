@@ -1,0 +1,98 @@
+# Escalate back into Alertmanager, so the routing you already have decides who
+# gets woken.
+#
+#   alert → remedik → remediate → worked, done
+#                              └→ failed → raise RemediationFailed in
+#                                          Alertmanager → your existing route
+#                                          → PagerDuty / Slack / whoever
+#
+# This is usually the right escalation, and it is the cheapest. Everything
+# that decides *who gets paged* already lives in Alertmanager:
+#
+#   * the routing tree, so the page reaches whoever owns that namespace
+#   * silences, so a maintenance window suppresses remedik's page too
+#   * inhibition, so a page about a symptom is dropped while the cause fires
+#   * the on-call schedule, through whatever receiver you already configured
+#
+# Paging PagerDuty directly from remedik works too — see escalate-on-failure
+# — but it means a second copy of that configuration, with its own
+# credentials, to keep in step. Duplicated paging config is how a page ends up
+# going to somebody who left.
+#
+# `format: alertmanager` exists because Alertmanager's /api/v2/alerts takes an
+# array of alerts and refuses anything else. Without it the call is answered
+# 400 and the record says nobody was told.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: restart-then-raise
+spec:
+  enabled: true
+  trigger:
+    match:
+      alertname: KubePodCrashLooping
+  guards:
+    cooldown: 15m
+    maxPerHour: 4
+    blastRadius:
+      minAvailable: 1
+  steps:
+    - action: deployment.restart
+  onFailure:
+    # Two attempts before anybody is woken.
+    retries: 1
+    steps:
+      - action: webhook.call
+        with:
+          # The in-cluster Service. kube-prometheus-stack names it
+          # <release>-kube-prometheus-alertmanager; check yours with
+          # `kubectl -n monitoring get svc`.
+          url: http://monitoring-kube-prometheus-alertmanager.monitoring.svc:9093/api/v2/alerts
+          format: alertmanager
+          timeout: 10s
+          # Defaults, shown because they are what your routes match on:
+          #   alertname: RemediationFailed
+          #   severity:  critical
+          # Override either if your routing tree expects different names.
+          # alertname: PaymentsRemediationFailed
+          # severity: warning
+
+      # A second channel, for the case where Alertmanager is what is broken.
+      # Every escalation step runs -- a failed channel does not silence the
+      # ones after it -- and the escalation counts as delivered if any of them
+      # got through. Both working means being paged twice; add
+      # `mode: firstSuccess` beside `retries` above to try them in order and
+      # stop at the first that lands.
+      #
+      # - action: webhook.call
+      #   with:
+      #     url: https://events.pagerduty.com/v2/enqueue
+      #     secretRef: pagerduty-routing-key
+      #     secretKey: key
+      #     header: Authorization
+      #     headerPrefix: "Token token="
+---
+# Two things to do in Alertmanager once this is in place.
+#
+# 1. Route RemediationFailed to on-call. The raised alert inherits every label
+#    the triggering alert carried, so a route you already have on `team` or
+#    `namespace` will match it. Nothing new is needed unless you want the
+#    remediation failure handled differently from the symptom:
+#
+#      route:
+#        routes:
+#          - receiver: pagerduty-critical
+#            matchers:
+#              - alertname = "RemediationFailed"
+#
+# 2. Make sure it does not come back. If a strategy matches RemediationFailed,
+#    remedik will remediate its own page, and the only thing bounding that
+#    loop is the guards. Send it to a receiver remedik is not behind:
+#
+#      - receiver: pagerduty-critical      # not the remedik webhook
+#        matchers:
+#          - alertname = "RemediationFailed"
+#
+# There is no third thing. remedik does not resolve the alert it raised:
+# Alertmanager expires it through `resolve_timeout` on its own, and a
+# remediation is never retried, so nothing here would ever send the resolve.

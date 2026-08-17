@@ -6,15 +6,20 @@ import (
 	"strings"
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"github.com/remedik/remedik/api/v1alpha1"
 )
 
-// The view models are what the templates render. Building them here, rather
-// than reaching into the API types from the templates, keeps two promises:
-// the templates hold no logic worth testing, and everything worth testing
-// is a pure function from resources to a struct.
+// The view models every page shares, and the primitives that order and narrow
+// the records they are built from.
+//
+// Building views here, rather than reaching into the API types from the
+// templates, keeps two promises: the templates hold no logic worth testing,
+// and everything worth testing is a pure function from resources to a struct.
+//
+// A page's own view lives with that page — overview.go, remediations.go,
+// remediation.go, namespaces.go, strategies.go. This file holds only what more
+// than one of them needs, which is what stops it growing back into the
+// nine-hundred-line file it was.
 
 // Navigation identifiers, used to mark the current page in the header.
 const (
@@ -70,6 +75,28 @@ func (p Posture) Exceptions() []string {
 	}
 	return p.DryRunOnly
 }
+
+// postureChipLimit is how many namespaces the header chip names.
+//
+// It exists because the chip listed all of them, and a cluster with twenty
+// exceptions turned the header into a paragraph that pushed the cluster name
+// onto a second line — on every page, since this is the chrome. Three is
+// enough to recognise, and the full list is still in the title attribute and
+// on the overview's posture panel.
+const postureChipLimit = 3
+
+// ExceptionsBrief is the header chip's text: a few names, then a count.
+func (p Posture) ExceptionsBrief() string {
+	names := p.Exceptions()
+	if len(names) <= postureChipLimit {
+		return strings.Join(names, ", ")
+	}
+	return fmt.Sprintf("%s and %d more",
+		strings.Join(names[:postureChipLimit], ", "), len(names)-postureChipLimit)
+}
+
+// ExceptionsAll is every differing namespace, for the title attribute.
+func (p Posture) ExceptionsAll() string { return strings.Join(p.Exceptions(), ", ") }
 
 // Page carries what every page's chrome needs.
 type Page struct {
@@ -171,173 +198,17 @@ type SimulatedTally struct {
 	LastRun string
 }
 
-// RemediationView is one execution, in full.
-type RemediationView struct {
-	Page
-
-	Name     string
-	Strategy string
-	Target   string
-	State    string
-	Tone     string
-	Summary  string
-	Reason   string
-	Message  string
-	DryRun   bool
-	Attempt  int32
-	// MaxAttempts states the retry budget the way it reads on the page:
-	// one attempt, plus the retries the strategy allowed.
-	MaxAttempts int32
-	Created     string
-	CreatedAge  string
-	Started     string
-	Completed   string
-	Duration    string
-	Alert       AlertView
-	Steps       []StepView
-	// Escalation is who was told, and whether telling them worked. Nil when
-	// the strategy declares no escalation — which is itself worth seeing on
-	// a failed remediation, so the page says so rather than staying silent.
-	Escalation *EscalationView
-	// Failed is the terminal state, kept as a bool because the page asks the
-	// question more than once and State is a display string.
-	Failed bool
-}
-
-// EscalationView is the onFailure plan and what became of it.
+// ErrorView is the page shown instead of a page.
 //
-// It is deliberately a separate block on the page. A page that folded these
-// into the steps would make "we told PagerDuty" read as a fourth attempt at
-// the restart, and would hide the case that matters most: the remediation
-// failed and the page failed too, so nobody knows.
-type EscalationView struct {
-	Phase     string
-	Tone      string
-	Message   string
-	Completed string
-	Steps     []StepView
-	// Sent reports whether anybody was actually told.
-	Sent bool
-}
-
-// ShowMessage reports whether the escalation's own message adds anything to
-// the steps below it. With one step it is the same sentence twice, and a page
-// that repeats itself looks like it is padding.
-func (v EscalationView) ShowMessage() bool {
-	if v.Message == "" {
-		return false
-	}
-	for _, step := range v.Steps {
-		if step.Message == v.Message {
-			return false
-		}
-	}
-	return true
-}
-
-// NobodyWasTold reports a failed remediation with no escalation declared.
-//
-// It is not a criticism — most strategies do not need one. It is on the page
-// because this is the moment somebody discovers the feature exists, and
-// because "it failed and no alert went anywhere" is a fact worth stating out
-// loud rather than leaving to be inferred from an absence.
-func (v RemediationView) NobodyWasTold() bool { return v.Failed && v.Escalation == nil }
-
-// ShowRawMessage reports whether the status message adds anything to the
-// summary. For a failed step the summary already quotes it, and saying the
-// same thing twice makes a page look like it is padding.
-func (v RemediationView) ShowRawMessage() bool {
-	if v.Message == "" {
-		return false
-	}
-	return v.Reason != v1alpha1.ReasonStepFailed && v.Reason != v1alpha1.ReasonUnknownAction
-}
-
-// AlertView is the alert that triggered an execution.
-type AlertView struct {
-	Name        string
-	Fingerprint string
-	StartsAt    string
-	StartsAge   string
-	Labels      []Label
-}
-
-// StepView is one step of the plan, joined with whatever happened to it.
-type StepView struct {
-	Number   int
-	Action   string
-	Target   string
-	Phase    string
-	Tone     string
-	Plan     string
-	Message  string
-	Params   []Label
-	Started  string
-	Duration string
-	// Kubectl is the equivalent command a human would have typed. Shown so
-	// that the change is reviewable by someone who has never read remedik's
-	// source — which is most of the people who will read this page.
-	Kubectl string
-	// Outputs are what the action specifically knew: replicas, an exit
-	// code, a revision.
-	Outputs []Label
-	// Verified is what the action's own post-condition check found. Empty
-	// means the action does not check its work, or this was a dry run.
-	Verified string
-	// Ran reports whether this step has a recorded outcome. A step with
-	// none never started, which is a different thing from one that was
-	// skipped after an earlier failure.
-	Ran bool
-}
-
-// StrategiesView is the strategy list.
-type StrategiesView struct {
-	Page
-
-	Strategies []StrategyView
-	Total      int
-	Enabled    int
-	Disabled   int
-}
-
-// StrategyView is one strategy and what it has done.
-type StrategyView struct {
-	Name         string
-	Enabled      bool
-	Mode         string
-	Matchers     []Label
-	Cooldown     string
-	MaxPerHour   string
-	Steps        []StepSpecView
-	Runs         int64
-	LastRun      string
-	LastRunExact string
-	Age          string
-	Succeeded    int
-	Failed       int
-	Simulated    int
-	Recent       []RemediationRow
-	// NotReady carries the message of a Ready condition that is false —
-	// a strategy referencing an action this build does not implement, for
-	// instance. Empty when the strategy is fine or has no condition yet.
-	NotReady string
-}
-
-// HasGuards reports whether any guard is enforced. Both guards are opt-in,
-// so "none" is a real and visible answer rather than a blank cell.
-func (s StrategyView) HasGuards() bool { return s.Cooldown != "" || s.MaxPerHour != "" }
-
-// StepSpecView is a declared step, before it has run.
-type StepSpecView struct {
-	Number int
-	Action string
-	Params []Label
-}
-
-// ErrorView is any page that is not a page: 401, 404, 405, 503.
+// It carries the same chrome as any other, so a reader who hits a 404 or a
+// read failure still knows which cluster they are looking at and can navigate
+// away — an error page that drops the shell reads as the whole thing being
+// broken rather than one request.
 type ErrorView struct {
 	Page
 
+	// Status is the HTTP status, and Title and Detail say what happened in
+	// words: what went wrong, and what to do about it.
 	Status int
 	Title  string
 	Detail string
@@ -352,7 +223,7 @@ type ErrorView struct {
 // It is built whenever dry-run is on — a trial that has produced nothing
 // yet is itself worth stating — and whenever simulations exist, so the
 // report an operator based their decision on survives turning dry-run off.
-func buildDryRunReport(remediations []v1alpha1.Remediation, dryRun bool, now time.Time) *DryRunReport {
+func buildDryRunReport(remediations []*v1alpha1.Remediation, dryRun bool, now time.Time) *DryRunReport {
 	type tally struct {
 		count   int
 		targets map[string]struct{}
@@ -367,8 +238,7 @@ func buildDryRunReport(remediations []v1alpha1.Remediation, dryRun bool, now tim
 
 	// The list is newest first, so the first record seen for a strategy is
 	// its most recent one — which is the example worth showing.
-	for i := range remediations {
-		rem := &remediations[i]
+	for _, rem := range remediations {
 		if rem.Status.State != v1alpha1.RemediationStateSimulated {
 			continue
 		}
@@ -433,306 +303,58 @@ func buildDryRunReport(remediations []v1alpha1.Remediation, dryRun bool, now tim
 	return report
 }
 
-func buildRow(rem *v1alpha1.Remediation, now time.Time) RemediationRow {
-	state := displayState(rem.Status.State)
-	return RemediationRow{
-		Name:      rem.Name,
-		URL:       "/remediations/" + rem.Name,
-		Strategy:  rem.Spec.StrategyName,
-		Target:    rem.Spec.Target,
-		Alert:     rem.Spec.Alert.Name,
-		State:     state,
-		Tone:      stateTone(rem.Status.State),
-		Age:       FormatAge(rem.CreationTimestamp.Time, now),
-		AgeExact:  FormatTimestamp(rem.CreationTimestamp.Time),
-		Duration:  FormatSpan(rem.Status.StartedAt, rem.Status.CompletedAt),
-		Attempt:   rem.Status.Attempt,
-		DryRun:    rem.Spec.DryRun,
-		Reason:    rem.Status.Reason,
-		Escalated: escalationMarker(rem.Status.Escalation),
-	}
-}
-
-func escalationMarker(esc *v1alpha1.EscalationStatus) string {
-	switch {
-	case esc == nil:
-		return ""
-	case esc.Phase == v1alpha1.StepPhaseSucceeded:
-		return escalationSent
-	default:
-		return escalationFailed
-	}
-}
-
-func buildRemediation(rem *v1alpha1.Remediation, now time.Time) RemediationView {
-	view := RemediationView{
-		Name:        rem.Name,
-		Strategy:    rem.Spec.StrategyName,
-		Target:      rem.Spec.Target,
-		State:       displayState(rem.Status.State),
-		Tone:        stateTone(rem.Status.State),
-		Reason:      rem.Status.Reason,
-		Message:     rem.Status.Message,
-		DryRun:      rem.Spec.DryRun,
-		Attempt:     rem.Status.Attempt,
-		MaxAttempts: rem.Spec.Retries + 1,
-		Created:     FormatTimestamp(rem.CreationTimestamp.Time),
-		CreatedAge:  FormatAge(rem.CreationTimestamp.Time, now),
-		Started:     FormatTimestampOf(rem.Status.StartedAt),
-		Completed:   FormatTimestampOf(rem.Status.CompletedAt),
-		Duration:    FormatSpan(rem.Status.StartedAt, rem.Status.CompletedAt),
-		Alert: AlertView{
-			Name:        rem.Spec.Alert.Name,
-			Fingerprint: rem.Spec.Alert.Fingerprint,
-			StartsAt:    FormatTimestampOf(rem.Spec.Alert.StartsAt),
-			StartsAge:   FormatAgeOf(rem.Spec.Alert.StartsAt, now),
-			Labels:      sortedLabels(rem.Spec.Alert.Labels),
-		},
-		Steps: buildSteps(rem),
-	}
-	view.Failed = rem.Status.State == v1alpha1.RemediationStateFailed
-	view.Escalation = buildEscalation(rem)
-	view.Summary = summarise(rem, view.Steps)
-	return view
-}
-
-// applyFilter keeps the records the filter admits, without copying when
-// nothing is being narrowed.
-func applyFilter(remediations []v1alpha1.Remediation, filter Filter) []v1alpha1.Remediation {
+func applyFilter(
+	remediations []*v1alpha1.Remediation, filter Filter,
+) []*v1alpha1.Remediation {
 	if !filter.Active() {
 		return remediations
 	}
-	kept := make([]v1alpha1.Remediation, 0, len(remediations))
-	for i := range remediations {
-		if filter.Matches(&remediations[i]) {
-			kept = append(kept, remediations[i])
+	// Sized from what matches rather than from the input, in two passes.
+	// Counting is cheap; a slice grown to ten thousand capacity to hold sixty
+	// entries is not.
+	n := 0
+	for _, rem := range remediations {
+		if filter.Matches(rem) {
+			n++
+		}
+	}
+	kept := make([]*v1alpha1.Remediation, 0, n)
+	for _, rem := range remediations {
+		if filter.Matches(rem) {
+			kept = append(kept, rem)
 		}
 	}
 	return kept
-}
-
-// buildSteps joins the plan with what happened to it.
-//
-// The plan is on the spec and the outcome is on the status, and they can
-// disagree in length: a run interrupted after two of three steps has three
-// planned and two recorded. Joining by index rather than zipping means a
-// step that never started still appears, which is exactly what someone
-// reading a failure needs to see.
-func buildSteps(rem *v1alpha1.Remediation) []StepView {
-	return joinSteps(rem.Spec.Steps, rem.Status.Steps)
-}
-
-// joinSteps pairs a plan with its outcome. It serves the remediation's own
-// steps and the escalation's alike, because they are the same join.
-func joinSteps(plan []v1alpha1.Step, recorded []v1alpha1.StepStatus) []StepView {
-	status := make(map[int32]*v1alpha1.StepStatus, len(recorded))
-	highest := -1
-	for i := range recorded {
-		st := &recorded[i]
-		status[st.Index] = st
-		if int(st.Index) > highest {
-			highest = int(st.Index)
-		}
-	}
-
-	count := max(len(plan), highest+1)
-	steps := make([]StepView, 0, count)
-
-	for i := range count {
-		view := StepView{Number: i + 1, Phase: string(v1alpha1.StepPhasePending)}
-
-		if i < len(plan) {
-			view.Action = plan[i].Action
-			view.Params = sortedLabels(plan[i].With)
-		}
-
-		if st, ok := status[int32(i)]; ok {
-			view.Ran = true
-			if st.Action != "" {
-				view.Action = st.Action
-			}
-			view.Target = st.Target
-			view.Phase = string(st.Phase)
-			view.Plan = st.Plan
-			view.Message = st.Message
-			view.Kubectl = st.Kubectl
-			view.Outputs = sortedLabels(st.Outputs)
-			view.Verified = st.Verified
-			view.Started = FormatTimestampOf(st.StartedAt)
-			view.Duration = FormatSpan(st.StartedAt, st.CompletedAt)
-		}
-
-		view.Tone = phaseTone(v1alpha1.StepPhase(view.Phase))
-		steps = append(steps, view)
-	}
-
-	return steps
-}
-
-// buildEscalation renders the onFailure plan's outcome, when there was one.
-func buildEscalation(rem *v1alpha1.Remediation) *EscalationView {
-	esc := rem.Status.Escalation
-	if esc == nil {
-		return nil
-	}
-
-	sent := esc.Phase == v1alpha1.StepPhaseSucceeded
-	return &EscalationView{
-		Phase:     string(esc.Phase),
-		Tone:      phaseTone(esc.Phase),
-		Message:   esc.Message,
-		Completed: FormatTimestampOf(esc.CompletedAt),
-		Steps:     joinSteps(rem.Spec.EscalationSteps, esc.Steps),
-		Sent:      sent,
-	}
-}
-
-// summarise writes the one line that answers "so what happened?" without
-// making the reader assemble it from the fields below.
-func summarise(rem *v1alpha1.Remediation, steps []StepView) string {
-	switch rem.Status.State {
-	case v1alpha1.RemediationStateSucceeded:
-		return fmt.Sprintf("Completed %s.", plural(len(steps), "step"))
-
-	case v1alpha1.RemediationStateSimulated:
-		return "Dry-run: the plan below was recorded and nothing in the cluster was changed."
-
-	case v1alpha1.RemediationStateFailed:
-		switch rem.Status.Reason {
-		case v1alpha1.ReasonInterrupted:
-			return "The operator restarted while this attempt was running. It was failed rather " +
-				"than resumed, because silently repeating a step that had already changed " +
-				"something is the worse outcome."
-		case v1alpha1.ReasonUnknownAction:
-			return "A step named an action this build does not implement. " + rem.Status.Message
-		case v1alpha1.ReasonStepFailed:
-			if step, ok := failedStep(steps); ok {
-				return fmt.Sprintf("Step %d (%s) failed: %s", step.Number, step.Action, step.Message)
-			}
-			return "A step failed and no retries remained. " + rem.Status.Message
-		default:
-			if rem.Status.Message != "" {
-				return rem.Status.Message
-			}
-			return "The execution failed."
-		}
-
-	case v1alpha1.RemediationStateRunning:
-		return fmt.Sprintf("Attempt %d is running.", rem.Status.Attempt)
-
-	case v1alpha1.RemediationStatePending:
-		if rem.Status.Attempt > 0 {
-			return fmt.Sprintf("Attempt %d failed; waiting to retry (%s allowed).",
-				rem.Status.Attempt, plural(int(rem.Spec.Retries), "retry-retries"))
-		}
-		return "Created and waiting for the reconciler to pick it up."
-
-	default:
-		return "Created and waiting for the reconciler to pick it up."
-	}
-}
-
-func failedStep(steps []StepView) (StepView, bool) {
-	for _, step := range steps {
-		if step.Phase == string(v1alpha1.StepPhaseFailed) {
-			return step, true
-		}
-	}
-	return StepView{}, false
-}
-
-func buildStrategies(
-	strategies []v1alpha1.RemediationStrategy,
-	remediations []v1alpha1.Remediation,
-	now time.Time,
-) StrategiesView {
-	sortNewestFirst(remediations)
-
-	// One pass over the records; every strategy then reads its own slice
-	// rather than scanning the list again.
-	byStrategy := map[string][]*v1alpha1.Remediation{}
-	for i := range remediations {
-		name := remediations[i].Spec.StrategyName
-		byStrategy[name] = append(byStrategy[name], &remediations[i])
-	}
-
-	sort.Slice(strategies, func(i, j int) bool { return strategies[i].Name < strategies[j].Name })
-
-	view := StrategiesView{Total: len(strategies)}
-	view.Strategies = make([]StrategyView, 0, len(strategies))
-
-	for i := range strategies {
-		strategy := &strategies[i]
-		item := StrategyView{
-			Name:         strategy.Name,
-			Enabled:      strategy.IsEnabled(),
-			Mode:         string(strategy.Spec.Execution.Mode),
-			Matchers:     sortedLabels(strategy.Spec.Trigger.Match),
-			Runs:         strategy.Status.ExecutionCount,
-			LastRun:      FormatAgeOf(strategy.Status.LastExecutionTime, now),
-			LastRunExact: FormatTimestampOf(strategy.Status.LastExecutionTime),
-			Age:          FormatAge(strategy.CreationTimestamp.Time, now),
-			NotReady:     notReadyMessage(strategy.Status.Conditions),
-		}
-		if item.Mode == "" {
-			item.Mode = string(v1alpha1.ExecutionModeAuto)
-		}
-		if d := strategy.Spec.Guards.Cooldown; d != nil && d.Duration > 0 {
-			item.Cooldown = shortDuration(d.Duration)
-		}
-		if strategy.Spec.Guards.MaxPerHour > 0 {
-			item.MaxPerHour = fmt.Sprint(strategy.Spec.Guards.MaxPerHour)
-		}
-
-		for j := range strategy.Spec.Steps {
-			item.Steps = append(item.Steps, StepSpecView{
-				Number: j + 1,
-				Action: strategy.Spec.Steps[j].Action,
-				Params: sortedLabels(strategy.Spec.Steps[j].With),
-			})
-		}
-
-		const perStrategyRecent = 5
-		for _, rem := range byStrategy[strategy.Name] {
-			switch rem.Status.State {
-			case v1alpha1.RemediationStateSucceeded:
-				item.Succeeded++
-			case v1alpha1.RemediationStateFailed:
-				item.Failed++
-			case v1alpha1.RemediationStateSimulated:
-				item.Simulated++
-			case v1alpha1.RemediationStatePending, v1alpha1.RemediationStateRunning:
-			}
-			if len(item.Recent) < perStrategyRecent {
-				item.Recent = append(item.Recent, buildRow(rem, now))
-			}
-		}
-
-		// The status counter is written by the engine and can lag; the
-		// records are the ground truth the reader can click through to.
-		if item.Runs == 0 {
-			item.Runs = int64(len(byStrategy[strategy.Name]))
-		}
-
-		if item.Enabled {
-			view.Enabled++
-		} else {
-			view.Disabled++
-		}
-		view.Strategies = append(view.Strategies, item)
-	}
-
-	return view
 }
 
 // --------------------------------------------------------------------------
 // Helpers
 // --------------------------------------------------------------------------
 
-// sortNewestFirst orders records the way an incident is read: what just
-// happened, first. Ties break by name so two records created in the same
+// newestFirst returns the records ordered the way an incident is read: what
+// just happened, first. Ties break by name so two records created in the same
 // second do not swap places between refreshes.
-func sortNewestFirst(remediations []v1alpha1.Remediation) {
+//
+// It returns pointers and leaves the caller's slice alone, and both halves of
+// that matter.
+//
+// A Remediation is 552 bytes, so sorting ten thousand of them by value moves
+// five and a half megabytes around to answer a question about timestamps;
+// sorting pointers moves eighty kilobytes. And the previous version sorted in
+// place, which reordered the manager's cached list — harmless as it happened,
+// but a view builder quietly rearranging its input is the kind of side effect
+// that is only harmless until somebody calls it twice.
+func newestFirst(remediations []v1alpha1.Remediation) []*v1alpha1.Remediation {
+	out := make([]*v1alpha1.Remediation, len(remediations))
+	for i := range remediations {
+		out[i] = &remediations[i]
+	}
+	sortNewestFirst(out)
+	return out
+}
+
+// sortNewestFirst orders an existing pointer slice in place.
+func sortNewestFirst(remediations []*v1alpha1.Remediation) {
 	sort.Slice(remediations, func(i, j int) bool {
 		a, b := remediations[i].CreationTimestamp.Time, remediations[j].CreationTimestamp.Time
 		if a.Equal(b) {
@@ -755,140 +377,4 @@ func sortedLabels(m map[string]string) []Label {
 	}
 	sort.Slice(labels, func(i, j int) bool { return labels[i].Key < labels[j].Key })
 	return labels
-}
-
-// displayState names the state a record is in. An empty state is a record
-// the reconciler has not reached yet, which reads as Pending.
-func displayState(state v1alpha1.RemediationState) string {
-	if state == "" {
-		return string(v1alpha1.RemediationStatePending)
-	}
-	return string(state)
-}
-
-func stateTone(state v1alpha1.RemediationState) string {
-	switch state {
-	case v1alpha1.RemediationStateSucceeded:
-		return toneOK
-	case v1alpha1.RemediationStateFailed:
-		return toneFailed
-	case v1alpha1.RemediationStateSimulated:
-		return toneDryRun
-	case v1alpha1.RemediationStateRunning:
-		return toneRunning
-	case v1alpha1.RemediationStatePending:
-		return toneWaiting
-	default:
-		return toneWaiting
-	}
-}
-
-func phaseTone(phase v1alpha1.StepPhase) string {
-	switch phase {
-	case v1alpha1.StepPhaseSucceeded:
-		return toneOK
-	case v1alpha1.StepPhaseFailed:
-		return toneFailed
-	case v1alpha1.StepPhaseSimulated:
-		return toneDryRun
-	case v1alpha1.StepPhaseRunning:
-		return toneRunning
-	case v1alpha1.StepPhaseSkipped:
-		return toneMuted
-	case v1alpha1.StepPhasePending:
-		return toneWaiting
-	default:
-		return toneWaiting
-	}
-}
-
-// notReadyMessage returns the message of a Ready condition that is false.
-// A strategy that cannot run is worth saying so on the page that lists it.
-func notReadyMessage(conditions []metav1.Condition) string {
-	for i := range conditions {
-		if conditions[i].Type != "Ready" || conditions[i].Status != metav1.ConditionFalse {
-			continue
-		}
-		if msg := conditions[i].Message; msg != "" {
-			return msg
-		}
-		return conditions[i].Reason
-	}
-	return ""
-}
-
-// firstPlan is the plan line of a record's first recorded step — the
-// sentence that says what would have been done.
-func firstPlan(rem *v1alpha1.Remediation) string {
-	for i := range rem.Status.Steps {
-		if plan := rem.Status.Steps[i].Plan; plan != "" {
-			return plan
-		}
-	}
-	return ""
-}
-
-func successRate(succeeded, failed int) string {
-	total := succeeded + failed
-	if total == 0 {
-		return "nothing executed yet"
-	}
-	return fmt.Sprintf("%d%% of executed runs", percent(succeeded, total))
-}
-
-func failedDetail(failed int) string {
-	if failed == 0 {
-		return "none"
-	}
-	return "needs a look"
-}
-
-func percent(part, total int) int {
-	if total == 0 {
-		return 0
-	}
-	return int(float64(part)/float64(total)*100 + 0.5)
-}
-
-// shortDuration renders a guard's duration the way it was written in the
-// manifest — "15m", not "15m0s".
-func shortDuration(d time.Duration) string {
-	switch {
-	case d == 0:
-		return "0"
-	case d%time.Hour == 0:
-		return fmt.Sprintf("%dh", d/time.Hour)
-	case d%time.Minute == 0:
-		return fmt.Sprintf("%dm", d/time.Minute)
-	case d%time.Second == 0:
-		return fmt.Sprintf("%ds", d/time.Second)
-	default:
-		return d.String()
-	}
-}
-
-// unit is plural's other half: the noun alone, for places that already show
-// the number. "1 1 escalation failed" is what happens without it.
-func unit(n int, name string) string {
-	singular, pluralForm, irregular := strings.Cut(name, "-")
-	if !irregular {
-		pluralForm = singular + "s"
-	}
-	if n == 1 {
-		return singular
-	}
-	return pluralForm
-}
-
-// plural handles the units this package counts. Irregular plurals are given
-// explicitly as "singular-plural"; everything else takes an s.
-func plural(n int, unit string) string {
-	singular, pluralForm, irregular := strings.Cut(unit, "-")
-	if !irregular {
-		pluralForm = singular + "s"
-	}
-	if n == 1 {
-		return "1 " + singular
-	}
-	return fmt.Sprintf("%d %s", n, pluralForm)
 }

@@ -152,3 +152,76 @@
   paint();
   schedule();
 })();
+
+/*
+ * Makes the namespace and strategy selects apply the moment you choose.
+ *
+ * They are inside a GET form with a submit button, which works with
+ * JavaScript off and is why it is built that way. But every other control on
+ * that row is a link that applies on one click, so a select that needed a
+ * second gesture read as broken -- reported as "the buttons work, the
+ * dropdown does nothing", which is exactly what it looked like.
+ *
+ * So with JavaScript the form submits on change and the button is hidden as
+ * redundant; without it, the button is the control and nothing here runs.
+ * Filtering is still navigation either way: the form is a GET, so the result
+ * is a URL somebody can paste.
+ */
+(function () {
+  "use strict";
+
+  // How long a run of change events is allowed to settle before navigating.
+  var SETTLE_MS = 250;
+
+  var forms = document.querySelectorAll("form.filter-select");
+  if (!forms.length || typeof window.requestAnimationFrame !== "function") {
+    return;
+  }
+
+  Array.prototype.forEach.call(forms, function (form) {
+    var select = form.querySelector("select");
+    if (!select) {
+      return;
+    }
+
+    // The button is now redundant, but it is what works without this script,
+    // so it is hidden here rather than left out of the markup.
+    form.classList.add("is-live");
+
+    var pending = null;
+
+    // requestSubmit keeps the browser's own form handling -- the GET
+    // serialisation, the history entry -- where submit() would bypass it.
+    function apply() {
+      window.clearTimeout(pending);
+      pending = null;
+      if (typeof form.requestSubmit === "function") {
+        form.requestSubmit();
+      } else {
+        form.submit();
+      }
+    }
+
+    // A closed, focused select fires change on every arrow press in some
+    // browsers, which would be one page load per keystroke. Coalescing means
+    // a run of arrow presses navigates once, when it settles.
+    select.addEventListener("change", function () {
+      window.clearTimeout(pending);
+      pending = window.setTimeout(apply, SETTLE_MS);
+    });
+
+    // Enter commits the native dropdown, so waiting out the delay after it
+    // would feel broken. Apply straight away instead.
+    //
+    // The first version of this cleared the pending submit here and never made
+    // one, so choosing with the keyboard -- open, type to search, Enter, which
+    // is the interaction the control's own label suggests -- did nothing at
+    // all. That is the bug this whole block exists to fix, reintroduced inside
+    // the fix.
+    select.addEventListener("keydown", function (event) {
+      if (event.key === "Enter") {
+        apply();
+      }
+    });
+  });
+})();

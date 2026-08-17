@@ -12,7 +12,7 @@
   <div class="page-head-badges">
     <span class="mode mode-muted">{{plural .Total "namespace-namespaces"}}</span>
     {{if .Attention}}
-    <span class="mode mode-failed">{{.Attention}} need attention</span>
+    <span class="mode mode-failed">{{.AttentionLabel}}</span>
     {{else}}
     <span class="mode mode-ok">nothing to look at</span>
     {{end}}
@@ -21,67 +21,51 @@
 </div>
 
 {{if .Any}}
-<p class="dim hint ns-hint">
-  Ordered by what needs attention, not by name: failures nobody was told about first,
-  then failures somebody has seen, then volume. Namespaces remedik has never touched do
-  not appear &mdash; their absence is the answer.
-</p>
+<p class="dim hint ns-hint">{{.Summary}}</p>
 
-<div class="ns-list">
-  {{range .Rows}}
-  <article class="card ns-row ns-{{.Tone}}" aria-labelledby="ns-{{.Name}}">
-    <header class="ns-head">
-      <h2 class="card-title mono" id="ns-{{.Name}}">
-        <a href="{{.URL}}">{{.Name}}</a>
-      </h2>
-      <div class="ns-badges">
-        <span class="pill pill-{{.PostureTone}}" title="{{.PostureDetail}}">{{.Posture}}</span>
-        {{if .Note}}<span class="pill pill-plain">{{.Note}}</span>{{end}}
-      </div>
-    </header>
+<div class="ns-table-scroll">
+  <table class="ns-table">
+    <caption>{{.Summary}}</caption>
+    <thead>
+      <tr>
+        <th scope="col" class="ns-col-name">Namespace</th>
+        <th scope="col">Posture</th>
+        <th scope="col" class="ns-num">Runs</th>
+        <th scope="col" class="ns-num">OK</th>
+        <th scope="col" class="ns-num">Failed</th>
+        <th scope="col" class="ns-num" title="Failures with no successful escalation">Unheard</th>
+        <th scope="col" class="ns-num">Sim</th>
+        <th scope="col" class="ns-col-rate">Success rate</th>
+        <th scope="col" class="ns-col-last">Last</th>
+      </tr>
+    </thead>
 
-    <div class="ns-body">
-      <dl class="ns-counts">
-        <div class="ns-count">
-          <dt>Executions</dt>
-          <dd class="ns-number">{{.Total}}</dd>
-        </div>
-        <div class="ns-count">
-          <dt>Succeeded</dt>
-          <dd class="ns-number ns-number-ok">{{.Succeeded}}</dd>
-        </div>
-        <div class="ns-count">
-          <dt>Failed</dt>
-          <dd class="ns-number{{if .Failed}} ns-number-failed{{end}}">{{.Failed}}</dd>
-        </div>
-        <div class="ns-count">
-          <dt>Simulated</dt>
-          <dd class="ns-number">{{.Simulated}}</dd>
-        </div>
-        {{if .InFlight}}
-        <div class="ns-count">
-          <dt>In flight</dt>
-          <dd class="ns-number">{{.InFlight}}</dd>
-        </div>
-        {{end}}
-        <div class="ns-count">
-          <dt>Nobody told</dt>
-          <dd class="ns-number{{if .Unheard}} ns-number-failed{{end}}">{{.Unheard}}</dd>
-        </div>
-      </dl>
+    {{if .Rows}}
+    <tbody>
+      <tr class="ns-group">
+        <th scope="rowgroup" colspan="9">
+          Needs attention
+          <span class="ns-group-note">worst first &mdash; unheard failures, then failures, then volume</span>
+        </th>
+      </tr>
+      {{range .Rows}}{{template "ns-row" .}}{{end}}
+    </tbody>
+    {{end}}
 
-      <div class="ns-rate">
-        {{if ge .RatePct 0}}
-        <div class="ns-bar" role="img" aria-label="Success rate {{.Rate}}">
-          <span class="ns-bar-fill {{pct .RatePct}}"></span>
-        </div>
-        {{end}}
-        <p class="dim ns-rate-label">{{.Rate}}{{if .Last}} &middot; last {{.Last}} ago{{end}}</p>
-      </div>
-    </div>
-  </article>
-  {{end}}
+    {{if .AnyRest}}
+    <tbody>
+      <tr class="ns-group">
+        <th scope="rowgroup" colspan="9">
+          {{.RestTitle}}
+          <span class="ns-group-note">{{.RestNote}}</span>
+        </th>
+      </tr>
+      {{range .Rest}}{{template "ns-row" .}}{{end}}
+    </tbody>
+    {{end}}
+  </table>
 </div>
+
 {{else}}
 <div class="card empty">
   <h2 class="card-title">Nothing has run yet</h2>
@@ -95,4 +79,39 @@
 </div>
 {{end}}
 
+{{end}}
+
+{{/* One row per namespace, defined once and used by both groups so the two
+     halves of the page cannot drift apart in what they show.
+
+     A table rather than a card each: with a dozen namespaces carrying six
+     numbers apiece, the question is always "which of these is worse", and that
+     is a comparison down a column. Cards laid the same six numbers out twelve
+     times over and the chrome outweighed the content. */}}
+{{define "ns-row"}}
+<tr class="ns-tr ns-tr-{{.Tone}}">
+  <td class="ns-col-name">
+    <a class="mono ns-name" href="{{.URL}}">{{.Name}}</a>
+  </td>
+  <td>
+    <span class="pill pill-sm pill-{{.PostureTone}}" title="{{.PostureDetail}}">{{.Posture}}</span>
+    {{if .PostureNote}}<span class="ns-sub" title="These executions did not run under the posture configured now">{{.PostureNote}}</span>{{end}}
+  </td>
+  <td class="ns-num">{{.Total}}</td>
+  <td class="ns-num">{{if .Succeeded}}<span class="ns-num-ok">{{.Succeeded}}</span>{{else}}<span class="ns-zero">0</span>{{end}}</td>
+  <td class="ns-num">{{if .Failed}}<span class="ns-num-bad">{{.Failed}}</span>{{else}}<span class="ns-zero">0</span>{{end}}</td>
+  <td class="ns-num">{{if .Unheard}}<span class="ns-num-bad">{{.Unheard}}</span>{{else}}<span class="ns-zero">0</span>{{end}}</td>
+  <td class="ns-num">{{if .Simulated}}{{.Simulated}}{{else}}<span class="ns-zero">0</span>{{end}}</td>
+  <td class="ns-col-rate">
+    {{if ge .RatePct 0}}
+    <span class="ns-bar" role="img" aria-label="{{.Rate}}">
+      <span class="ns-bar-fill {{pct .RatePct}}"></span>
+    </span>
+    <span class="ns-rate-num">{{.RatePct}}%</span>
+    {{else}}
+    <span class="dim ns-rate-none">nothing ran</span>
+    {{end}}
+  </td>
+  <td class="dim ns-col-last">{{if .Last}}{{.Last}}{{else}}&mdash;{{end}}</td>
+</tr>
 {{end}}

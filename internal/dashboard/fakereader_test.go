@@ -19,6 +19,16 @@ type fakeReader struct {
 	remediations []v1alpha1.Remediation
 	strategies   []v1alpha1.RemediationStrategy
 
+	// deepCopy makes the fake behave like the manager's cache, which
+	// DeepCopies every object into the list unless the caller says
+	// otherwise. Off by default so the correctness tests stay fast; on in
+	// the benchmarks, where measuring the cheap fake instead of the real
+	// cache would hide the cost the dashboard actually pays.
+	deepCopy bool
+	// honourUnsafe makes it skip that copy when the caller passes
+	// client.UnsafeDisableDeepCopy, as the cache does.
+	honourUnsafe bool
+
 	// listErr and getErr replace the operation, so the failure paths are
 	// testable without a cluster.
 	listErr error
@@ -63,12 +73,25 @@ func (r *fakeReader) List(
 	}
 	r.listedNamespaces = append(r.listedNamespaces, options.Namespace)
 
+	unsafe := r.honourUnsafe &&
+		options.UnsafeDisableDeepCopy != nil && *options.UnsafeDisableDeepCopy
+
 	switch target := list.(type) {
 	case *v1alpha1.RemediationList:
 		target.Items = append([]v1alpha1.Remediation(nil), r.remediations...)
+		if r.deepCopy && !unsafe {
+			for i := range target.Items {
+				target.Items[i] = *target.Items[i].DeepCopy()
+			}
+		}
 		return nil
 	case *v1alpha1.RemediationStrategyList:
 		target.Items = append([]v1alpha1.RemediationStrategy(nil), r.strategies...)
+		if r.deepCopy && !unsafe {
+			for i := range target.Items {
+				target.Items[i] = *target.Items[i].DeepCopy()
+			}
+		}
 		return nil
 	default:
 		return fmt.Errorf("fakeReader: unexpected list type %T", list)

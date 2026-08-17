@@ -79,8 +79,9 @@ func TestFilterCountsMatchCountingEachOptionSeparately(t *testing.T) {
 	records := bigCluster(6, 4, 400)
 	active := Filter{State: "Succeeded"}
 
-	options := BuildFilterOptions(records)
-	groups := options.Groups(active, records)
+	pointers := ptrs(records)
+	options := BuildFilterOptions(pointers)
+	groups := options.Groups(active, pointers)
 
 	for _, group := range groups {
 		rest := Filter{Namespace: active.Namespace, Strategy: active.Strategy, State: active.State}

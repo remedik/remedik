@@ -304,7 +304,15 @@ func securityHeaders(w http.ResponseWriter) {
 	head := w.Header()
 	head.Set("Content-Security-Policy",
 		"default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:; "+
-			"connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+			// 'self', not 'none'. The filter's select is a GET form posting to
+			// this same origin, and 'none' blocked it — silently, in the
+			// console, with the control looking merely unresponsive. It was
+			// reported as "the dropdown does nothing" four times before a
+			// browser was driven to read the console.
+			//
+			// 'self' is still the whole grant: the page cannot submit anywhere
+			// but back to the dashboard.
+			"connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 	head.Set("X-Content-Type-Options", "nosniff")
 	head.Set("X-Frame-Options", "DENY")
 	head.Set("Referrer-Policy", "no-referrer")
@@ -318,19 +326,18 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), readTimeout)
 	defer cancel()
 
-	var remediations v1alpha1.RemediationList
-	if err := h.reader.List(ctx, &remediations, client.InNamespace(h.namespace)); err != nil {
+	remediations, err := h.listRemediations(ctx)
+	if err != nil {
 		h.unavailable(w, r, "list remediations", err)
 		return
 	}
-
-	var strategies v1alpha1.RemediationStrategyList
-	if err := h.reader.List(ctx, &strategies); err != nil {
+	strategies, err := h.listStrategies(ctx)
+	if err != nil {
 		h.unavailable(w, r, "list strategies", err)
 		return
 	}
 
-	view := buildOverview(remediations.Items, strategies.Items, h.posture, h.now())
+	view := buildOverview(remediations, strategies, h.posture, h.now())
 	view.Page = h.page("Overview", navOverview)
 	h.render(w, r, overviewTemplate, view)
 }
@@ -344,14 +351,14 @@ func (h *Handler) remediations(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), readTimeout)
 	defer cancel()
 
-	var remediations v1alpha1.RemediationList
-	if err := h.reader.List(ctx, &remediations, client.InNamespace(h.namespace)); err != nil {
+	remediations, err := h.listRemediations(ctx)
+	if err != nil {
 		h.unavailable(w, r, "list remediations", err)
 		return
 	}
 
 	query := r.URL.Query()
-	view := buildRemediations(remediations.Items, ParseFilter(query), ParsePage(query), h.now())
+	view := buildRemediations(remediations, ParseFilter(query), ParsePage(query), h.now())
 	view.Page = h.page("Remediations", navRemediations)
 	h.render(w, r, remediationsTemplate, view)
 }
@@ -391,13 +398,13 @@ func (h *Handler) namespaces(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), readTimeout)
 	defer cancel()
 
-	var remediations v1alpha1.RemediationList
-	if err := h.reader.List(ctx, &remediations, client.InNamespace(h.namespace)); err != nil {
+	remediations, err := h.listRemediations(ctx)
+	if err != nil {
 		h.unavailable(w, r, "list remediations", err)
 		return
 	}
 
-	view := buildNamespaces(remediations.Items, h.posture, h.now())
+	view := buildNamespaces(remediations, h.posture, h.now())
 	view.Page = h.page("Namespaces", navNamespaces)
 	h.render(w, r, namespacesTemplate, view)
 }
@@ -406,19 +413,18 @@ func (h *Handler) strategies(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), readTimeout)
 	defer cancel()
 
-	var strategies v1alpha1.RemediationStrategyList
-	if err := h.reader.List(ctx, &strategies); err != nil {
+	strategies, err := h.listStrategies(ctx)
+	if err != nil {
 		h.unavailable(w, r, "list strategies", err)
 		return
 	}
-
-	var remediations v1alpha1.RemediationList
-	if err := h.reader.List(ctx, &remediations, client.InNamespace(h.namespace)); err != nil {
+	remediations, err := h.listRemediations(ctx)
+	if err != nil {
 		h.unavailable(w, r, "list remediations", err)
 		return
 	}
 
-	view := buildStrategies(strategies.Items, remediations.Items, h.now())
+	view := buildStrategies(strategies, remediations, h.now())
 	view.Page = h.page("Strategies", navStrategies)
 	h.render(w, r, strategiesTemplate, view)
 }
@@ -428,6 +434,47 @@ func (h *Handler) notFound(w http.ResponseWriter, r *http.Request) {
 		"Page not found",
 		fmt.Sprintf("The dashboard serves the overview, the strategies list and one page "+
 			"per remediation. There is nothing at %s.", r.URL.Path))
+}
+
+// --------------------------------------------------------------------------
+// Reading
+// --------------------------------------------------------------------------
+
+// readOnly is passed to every List this package makes.
+//
+// The manager's cache DeepCopies every object into the list so that a caller
+// which mutates cannot corrupt it. That copy is the single largest cost of
+// serving a page: at ten thousand records it is around thirteen megabytes and
+// a hundred and thirty thousand allocations, paid again on every render — and
+// the auto-refresh means every open tab pays it every ten seconds.
+//
+// This package never writes to a listed object. It is constructed from a
+// client.Reader, so it holds no method that could, and the only mutation
+// anywhere near the data is sortNewestFirst, which reorders the slice this
+// package owns rather than touching an object. TestTheDashboardNeverMutates
+// holds that, because the option is only safe while it stays true.
+var readOnly = []client.ListOption{client.UnsafeDisableDeepCopy}
+
+// listRemediations reads every record in the operator's namespace.
+//
+// Four pages need exactly this, and they needed it as four copies of the same
+// List call, error wrap and message.
+func (h *Handler) listRemediations(ctx context.Context) ([]v1alpha1.Remediation, error) {
+	var list v1alpha1.RemediationList
+	opts := append([]client.ListOption{client.InNamespace(h.namespace)}, readOnly...)
+	if err := h.reader.List(ctx, &list, opts...); err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
+// listStrategies reads every strategy. They are cluster-scoped.
+func (h *Handler) listStrategies(ctx context.Context) ([]v1alpha1.RemediationStrategy, error) {
+	var list v1alpha1.RemediationStrategyList
+	if err := h.reader.List(ctx, &list, readOnly...); err != nil {
+		return nil, err
+	}
+	return list.Items, nil
 }
 
 // --------------------------------------------------------------------------

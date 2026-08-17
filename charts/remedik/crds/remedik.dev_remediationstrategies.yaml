@@ -128,6 +128,29 @@ spec:
               onFailure:
                 description: OnFailure decides what happens when a step fails.
                 properties:
+                  mode:
+                    default: all
+                    description: |-
+                      Mode decides how the escalation steps are run.
+
+                      Unlike the remediation's own plan, a failed escalation step never
+                      prevents the ones after it: the steps are alternative ways to reach a
+                      person, so a fallback that stops at the first failure is a single point
+                      of failure that only shows itself on the night it matters.
+
+                        - "all" (the default) runs every step. Use it for channels that
+                          should all happen — page somebody and file a ticket.
+                        - "firstSuccess" runs them in order until one gets through, and skips
+                          the rest. Use it for an ordered fallback, so both channels working
+                          does not mean being paged twice.
+
+                      Either way the escalation is Succeeded when at least one step
+                      succeeded, because the question the record answers is whether anybody
+                      was told.
+                    enum:
+                    - all
+                    - firstSuccess
+                    type: string
                   retries:
                     default: 0
                     description: |-

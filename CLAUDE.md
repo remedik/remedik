@@ -61,6 +61,15 @@ This repository explains itself. Read these before proposing changes:
    makes a write impossible to call, the other makes it impossible to
    reach. An approve button needs the identity model the Slack change
    introduces, so that the audit trail records *who* asked.
+
+   Its corollary: **a Content-Security-Policy violation is invisible to every
+   test that does not run a browser.** This one has silently broken two
+   features — `style-src` discarded inline styles and four bar charts rendered
+   at full width for months; `form-action 'none'` blocked the filter's form
+   and it was reported broken four times. Both were correct markup, correct
+   handlers, correct server. If a page looks right and behaves otherwise,
+   `hack/browser-check.mjs` reads the console, which is the only place the
+   browser says so.
 9. **English everywhere** in the repository: code, comments, docs, commits.
 
 ## Workflow

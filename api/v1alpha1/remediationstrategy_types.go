@@ -191,7 +191,42 @@ type OnFailure struct {
 	// +optional
 	// +kubebuilder:validation:MaxItems=8
 	Steps []Step `json:"steps,omitempty"`
+
+	// Mode decides how the escalation steps are run.
+	//
+	// Unlike the remediation's own plan, a failed escalation step never
+	// prevents the ones after it: the steps are alternative ways to reach a
+	// person, so a fallback that stops at the first failure is a single point
+	// of failure that only shows itself on the night it matters.
+	//
+	//   - "all" (the default) runs every step. Use it for channels that
+	//     should all happen — page somebody and file a ticket.
+	//   - "firstSuccess" runs them in order until one gets through, and skips
+	//     the rest. Use it for an ordered fallback, so both channels working
+	//     does not mean being paged twice.
+	//
+	// Either way the escalation is Succeeded when at least one step
+	// succeeded, because the question the record answers is whether anybody
+	// was told.
+	//
+	// +kubebuilder:default=all
+	// +kubebuilder:validation:Enum=all;firstSuccess
+	// +optional
+	Mode EscalationMode `json:"mode,omitempty"`
 }
+
+// EscalationMode is how the escalation's steps are run.
+type EscalationMode string
+
+const (
+	// EscalationModeAll runs every step. It is the default because it is what
+	// a working configuration already does: when every step succeeds, every
+	// step runs. Making firstSuccess the default would silently stop running
+	// the second step for anybody who wanted a page and a ticket.
+	EscalationModeAll EscalationMode = "all"
+	// EscalationModeFirstSuccess stops at the first step that gets through.
+	EscalationModeFirstSuccess EscalationMode = "firstSuccess"
+)
 
 // RemediationStrategyStatus reports observed state.
 type RemediationStrategyStatus struct {

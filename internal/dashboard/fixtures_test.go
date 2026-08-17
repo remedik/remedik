@@ -191,3 +191,16 @@ func disabledStrategy() v1alpha1.RemediationStrategy {
 		},
 	}
 }
+
+// ptrs is what the view pipeline takes. The page builders still accept values
+// at their boundary and convert once; everything below them works on pointers,
+// because a Remediation is 552 bytes and copying ten thousand of them to
+// answer a question about their contents is five and a half megabytes of
+// nothing.
+func ptrs(remediations []v1alpha1.Remediation) []*v1alpha1.Remediation {
+	out := make([]*v1alpha1.Remediation, len(remediations))
+	for i := range remediations {
+		out[i] = &remediations[i]
+	}
+	return out
+}

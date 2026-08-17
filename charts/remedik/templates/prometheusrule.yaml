@@ -78,6 +78,49 @@ spec:
               permissions, a workload that no longer exists, or a cluster too
               busy for rollouts to complete.
 
+        # The threshold below is written with `| default`, and that is not
+        # tidiness: `helm upgrade --reuse-values` reuses the previous
+        # release's values without merging in new chart defaults, so a key
+        # added by an upgrade renders empty. An empty threshold is `>= `,
+        # which the Prometheus operator's admission webhook rejects — and it
+        # rejects the whole rule file, so every alert here disappears at the
+        # moment somebody upgrades. Found exactly that way.
+        #
+        # The other quiet failure, and the one people do not expect.
+        #
+        # A guard refusing once is remedik working: a cooldown exists so that
+        # a crash loop which survived one restart gets a human rather than a
+        # second restart. But a guard refusing the same strategy for an hour
+        # means remedik decided it cannot help and *nobody was told* — a
+        # refusal produces an event and this metric, not a Remediation record
+        # and not an escalation.
+        #
+        # That matters most in the case remedik is bought for: the alert is
+        # routed to remedik instead of on-call, the remediation appeared to
+        # work, the problem came back, and the cooldown has been quietly
+        # absorbing the alert ever since. Without this, nobody is paged.
+        - alert: RemedikGuardRefusingRepeatedly
+          expr: |
+            sum by (strategy, guard) (
+              increase(remedik_guard_rejections_total[1h])
+            ) >= {{ .Values.prometheusRule.guardRefusalsPerHour | default 6 }}
+          for: 15m
+          labels:
+            severity: {{ .Values.prometheusRule.severity.warning }}
+          annotations:
+            summary: >-
+              remedik's {{ "{{ $labels.guard }}" }} guard keeps refusing
+              {{ "{{ $labels.strategy }}" }}
+            description: >-
+              The {{ "{{ $labels.guard }}" }} guard has refused
+              {{ "{{ $labels.strategy }}" }} at least
+              {{ .Values.prometheusRule.guardRefusalsPerHour | default 6 }} times in an
+              hour. Each refusal is correct in isolation; this many means the
+              alert keeps arriving and remediation is not resolving it. No
+              Remediation record is created for a refusal and no escalation
+              runs, so assume nobody has been told. Find the workload with
+              `kubectl get events --field-selector reason=GuardRejected`.
+
         # The quietest failure remedik has. A remediation failed, the
         # escalation was meant to tell somebody, and that failed too — so
         # nothing reached a person and the incident is running unattended.

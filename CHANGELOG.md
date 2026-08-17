@@ -59,7 +59,194 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   No new permission and no new read: the page is an arrangement of records
   the dashboard already listed.
 
+- **`docs/routing.md`**, which is the answer to the question remedik exists
+  for: how to route an alert so on-call is woken only when remediation did not
+  work. It is three routes rather than one, and the third is the one people
+  leave out — a longer-fuse alert straight to on-call, independent of remedik,
+  so that remedik being down or wedged degrades to "paged half an hour later"
+  instead of "not paged".
+
+  Writing it down found two failure modes the design has and the docs did not
+  admit: a remediation that succeeded while the problem came back, where the
+  cooldown correctly refuses and nothing escalates; and an alert remedik never
+  received, which it cannot report on.
+
+- **`RemedikGuardRefusingRepeatedly`** in the shipped `PrometheusRule`. A guard
+  refusing once is remedik working. A guard refusing the same strategy six
+  times in an hour means the alert keeps arriving and remediation is not
+  resolving it — and because a refusal creates no record and runs no
+  escalation, this is the only signal that exists.
+
+- **`webhook.call` can escalate back into Alertmanager**, with
+  `format: alertmanager`. It raises `RemediationFailed` carrying every label
+  the triggering alert had, so the routing tree that delivered the symptom to
+  a team delivers the failure to the same team — and the silences, inhibition
+  rules and on-call schedule apply, because they already existed.
+
+  It could not before: Alertmanager's `/api/v2/alerts` takes an array of
+  alerts and answered `400 cannot unmarshal object into ... PostableAlerts`.
+  That was the wrong endpoint to be unable to reach, since it is the one every
+  user of remedik already runs, and paging PagerDuty directly means a second
+  copy of the routing with its own credentials to keep in step.
+
+  `format` is a closed set of named shapes, never a template: a strategy is
+  read during an incident by somebody who did not write it. An unknown format
+  fails the dry run rather than the page.
+
+- **`make dev-seed`**, which fills the dev cluster with a cluster's worth of
+  history — 150 namespaces and around 1900 records by default, reproducible
+  from a fixed seed. Every screenshot and every manual check until now was
+  made against nine records in three namespaces, which tells you nothing
+  about a dashboard whose claim is that it works at any size.
+
+  It paid for itself immediately: four defects below were found by running it
+  once.
+
+### Changed
+
+- **The read path was measured and cut down.** Every page render and every
+  Prometheus scrape read the whole world and threw it away. At ten thousand
+  records, serving one page allocated **19MB and 143,000 objects** — paid again
+  every ten seconds by every open tab. It is now 5.8MB and 3,300, and absorbing
+  one 200-alert Alertmanager delivery went from 17MB and 6.7ms to 803kB and
+  0.88ms.
+
+  Four causes, each with a benchmark committed beside the fix:
+
+  - **The cache deep-copied every record on every read.** The dashboard is
+    read-only by construction, so it lists with
+    `client.UnsafeDisableDeepCopy`. Two tests keep that safe: one proves no
+    listed object changes while every page is served, one proves the option is
+    still asked for. The metrics snapshot and the guard replay read the same way.
+  - **The strategies were listed once per alert**, inside the delivery loop —
+    and Alertmanager groups, so one POST carries hundreds. Reading once per
+    delivery is also more correct: the batch is now one decision against one
+    view of the strategies, where before its first and last alert could see
+    different sets with nothing recording that they had.
+  - **`TargetNamespace` allocated a slice per call**, and every page asks it of
+    every record six to eight times over: about 70,000 allocations per render to
+    return a substring already in memory. It allocates nothing now.
+  - **Filtering cost more than not filtering.** `applyFilter` sized its result
+    for every record and copied each 552-byte struct it kept, so narrowing
+    10,000 records to 60 allocated 5.5MB. The view pipeline works on pointers,
+    which also removed a side effect: `sortNewestFirst` had been reordering the
+    caller's slice.
+
+  No behaviour changed, no test was rewritten to pass, `make e2e` is 121/121.
+
+- **`view.go` held four pages, the filter, the sort and ten formatters in 916
+  lines.** Split into `strategies.go`, `remediation.go` and `formatting.go` by
+  pure code movement; the shared file is 365 lines. Not one test changed, which
+  is the only evidence that a refactor of this shape was a refactor.
+
+- **`/namespaces` is one table rather than a dozen cards.** With six numbers per
+  namespace the question is always which is worse, and that is a comparison down
+  a column — twelve cards laid the same six numbers out twelve times and the
+  chrome outweighed the content. Zeros are recessed so the eye lands on what is
+  not zero, severity rides the left edge instead of colouring a row, and the
+  posture qualifier went from a sentence repeated on every row to a count under
+  the chip with the pattern stated once above. Nine rows fit where four did.
+
 ### Fixed
+- **The namespace filter's dropdown never worked, and the cause was the
+  dashboard's own security policy.** `form-action 'none'` blocked every form
+  submission on the page. The markup was a correct GET form, the handler was
+  correct, the server filtered correctly — and the browser refused to submit,
+  saying so in the console and nowhere else. So the control looked merely
+  unresponsive and was reported broken four times.
+
+  It is `form-action 'self'` now, which is the whole grant: the page can submit
+  back to the dashboard and nowhere else. A header assertion in the unit tests
+  and in the e2e keeps it that way.
+
+  This is the second feature this policy has broken silently. The first was
+  `style-src 'self'` discarding inline styles, which rendered four bar charts
+  at full width for months. The pattern is worth naming: a policy violation is
+  invisible to every test that does not run a browser.
+
+  Two other things were wrong in the same control and are also fixed. It needed
+  a second gesture — clicking `Go` — in a row where every other control applies
+  on one click, so it now applies on change, with the button kept in the markup
+  and hidden, because the button is what works with JavaScript off. And the
+  handler meant to apply the choice on `Enter` cancelled the pending submit
+  instead of making one, so choosing with the keyboard did nothing even once
+  the policy allowed it.
+
+- **The dashboard's JavaScript had no tests.** It does now —
+  `hack/js-test.mjs`, run by `make verify`, exercising the real file against a
+  stub DOM and a clock: a change submits once after it settles, six changes in
+  a row navigate once rather than six times, `Enter` applies instead of
+  cancelling, and a form with no select is left alone. Confirmed to fail when
+  the `Enter` defect is reintroduced.
+
+  `hack/browser-check.mjs` is the other half: it drives a real Chrome through
+  the DevTools Protocol and reads the console, which is the only way the policy
+  violation was ever going to be found.
+
+- **A fallback page could not be configured.** The escalation stopped at its
+  first failed step, so a `webhook.call` to Alertmanager followed by one to
+  PagerDuty recorded the second as `Skipped` and paged nobody. The
+  configuration read as a fallback and behaved as a single point of failure —
+  invisibly, because every channel succeeds when the path is tested.
+
+  Every escalation step now runs. The escalation is `Succeeded` when at least
+  one got through, since the question the record answers is whether anybody was
+  told, and the broken channel is still there as its own step with its own
+  message. `onFailure.mode: firstSuccess` is for an ordered fallback that should
+  not page twice when both channels work.
+
+  The remediation's own plan still stops at its first failure — that rule is
+  correct there, and a test now says so, because this is the kind of fix that
+  leaks.
+
+
+- **The namespaces page did not hold at 150 namespaces.** It rendered every
+  row — 151kB — and with an ordinary failure rate 81 of 150 were above the
+  fold, at which point "needs attention" has stopped meaning anything.
+
+  The worst dozen now get a card each. Everything else is a compact table
+  that still carries its failure counts, opening with the namespaces that did
+  not fit, and the page says how many it held back. Paging was considered and
+  rejected: page two of a list ordered by severity is by construction the
+  part that does not need attention.
+
+- **The namespaces page showed today's posture beside historical counts**, so
+  a namespace could read `Reporting` next to fifteen real failures. Both
+  numbers were right — the posture is resolved when a record is created and
+  cannot be rewritten later — but the page was contradicting itself in
+  silence. It now says when the records ran under a different posture.
+
+- **The header's posture chip named every exception**, on every page, so a
+  cluster with twenty of them turned the chrome into a paragraph. It names
+  three and counts the rest; the full list stays in the tooltip and on the
+  overview.
+
+- **Three CSS custom properties were read but never defined**, so the borders
+  and colours they drew silently did not exist. That is the same failure mode
+  as the inline styles the Content-Security-Policy discarded, and it now has
+  the same kind of guard: a test that fails on a `var(--x)` nothing declares.
+
+- **The cookbook's flagship recipe did not work against the alert it names.**
+  `pod-crashloop.yaml` restarts a Deployment on `KubePodCrashLooping`, but
+  kube-prometheus-stack's own version of that alert carries `namespace`,
+  `pod`, `container` and `reason` — and no `deployment`. So the first thing a
+  new user copies recorded a failure.
+
+  remedik's refusal is correct: deriving a Deployment from a pod name is a
+  guess, and a guess restarts the wrong workload during an incident. The
+  recipe now says so, and gives the four real options including the Prometheus
+  rule that adds the label from kube-state-metrics' ownership data.
+
+  Found by pointing a real Prometheus at remedik and waiting the fifteen
+  minutes for the rule to fire. The end-to-end test sends synthetic alerts
+  carrying whatever labels the test author chose, which is why it went
+  unnoticed.
+
+- **A new chart value could break every alert on upgrade.**
+  `helm upgrade --reuse-values` reuses the previous release's values and does
+  not merge in new chart defaults, so `guardRefusalsPerHour` rendered empty —
+  and `>= ` is PromQL the Prometheus operator's webhook rejects, taking the
+  whole rule file with it. The threshold now carries a template default.
 
 - The dashboard's `mode-failed` badge rendered in the muted palette, so a
   count meant to stand out did not.

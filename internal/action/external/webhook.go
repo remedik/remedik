@@ -46,7 +46,43 @@ const (
 	HeaderPrefixParam = "headerPrefix"
 	// TimeoutParam bounds the call.
 	TimeoutParam = "timeout"
+	// FormatParam names the shape of the request body.
+	FormatParam = "format"
+	// AlertNameParam overrides the alertname of an Alertmanager alert.
+	AlertNameParam = "alertname"
+	// SeverityParam overrides its severity.
+	SeverityParam = "severity"
 )
+
+// Body formats.
+//
+// A closed set, deliberately, and never a template. A strategy is read during
+// an incident by somebody who did not write it, and a Go template inside one
+// is a second language to debug at the worst possible moment. It also means
+// this action can state what it sends, which is the question a reviewer asks
+// before granting anything webhook access.
+const (
+	// FormatRemedik is the default: one object describing the remediation.
+	// Every service webhook.call was written for takes an arbitrary body.
+	FormatRemedik = "remedik"
+	// FormatAlertmanager is Alertmanager's POST /api/v2/alerts: an array of
+	// alerts. It is the one endpoint that refuses anything else, and the one
+	// worth reaching most — the routing tree, the silences, the inhibition
+	// rules and the on-call schedule all already live there.
+	FormatAlertmanager = "alertmanager"
+)
+
+// DefaultEscalationAlertName is the alert raised by FormatAlertmanager.
+//
+// Not the name of the alert that triggered the remediation: that alert is
+// still firing, and reusing its name would have Alertmanager treat the two as
+// one. "The remediation failed" is also a different fact from "the pod is
+// crash looping", and a receiver should be able to route on it.
+const DefaultEscalationAlertName = "RemediationFailed"
+
+// DefaultEscalationSeverity is critical because remediation was attempted and
+// did not work, which is worse than the symptom that triggered it.
+const DefaultEscalationSeverity = "critical"
 
 // DefaultWebhookTimeout bounds a call that does not set one. An execution
 // holds the single reconcile worker, so a webhook that never answers is a
@@ -70,6 +106,16 @@ type WebhookCall struct {
 	client     client.Client
 	http       *http.Client
 	operatorNS string
+	// Now supplies the timestamp an Alertmanager body needs. Tests inject a
+	// fixed clock so that Plan and Execute can be compared byte for byte.
+	Now func() time.Time
+}
+
+func (a *WebhookCall) now() time.Time {
+	if a.Now != nil {
+		return a.Now()
+	}
+	return time.Now()
 }
 
 // NewWebhookCall builds the action. Secrets are read from operatorNamespace
@@ -168,6 +214,7 @@ func (a *WebhookCall) Execute(ctx context.Context, req action.Request) (action.R
 // a dry run cannot promise something Execute would refuse.
 type call struct {
 	endpoint       string
+	format         string
 	method         string
 	timeout        time.Duration
 	header         string
@@ -238,13 +285,79 @@ func (a *WebhookCall) prepare(ctx context.Context, req action.Request) (call, er
 		c.credentialFrom = name + "/" + key
 	}
 
-	body, err := json.Marshal(payloadOf(req))
+	format := req.Params.Get(FormatParam, FormatRemedik)
+	var shaped any
+	switch format {
+	case FormatRemedik:
+		shaped = payloadOf(req)
+	case FormatAlertmanager:
+		shaped = alertmanagerBodyOf(req, a.now())
+	default:
+		// Refused here, which Plan also runs, so a dry run reports it rather
+		// than a live incident being the first time anybody finds out.
+		return call{}, fmt.Errorf("parameter %q: %q is not a known format; use %q or %q",
+			FormatParam, format, FormatRemedik, FormatAlertmanager)
+	}
+	c.format = format
+
+	body, err := json.Marshal(shaped)
 	if err != nil {
 		return call{}, fmt.Errorf("encode the request body: %w", err)
 	}
 	c.body = body
 
 	return c, nil
+}
+
+// alertmanagerBodyOf builds a POST /api/v2/alerts body: an array of one.
+//
+// The labels are the design, not decoration. An alert Alertmanager cannot
+// route reaches nobody, so the raised alert inherits every label of the alert
+// that triggered the remediation — which means the routing tree that
+// delivered the symptom to a team delivers the failure to the same team, with
+// no second copy of that configuration to keep in step.
+func alertmanagerBodyOf(req action.Request, now time.Time) []alertmanagerAlert {
+	labels := make(map[string]string, len(req.Labels)+3)
+	for k, v := range req.Labels {
+		labels[k] = v
+	}
+
+	// alertname last, and never the triggering alert's: that alert is still
+	// firing, and reusing its name would have Alertmanager treat the two as
+	// one and drop this one as a duplicate.
+	labels["severity"] = req.Params.Get(SeverityParam, DefaultEscalationSeverity)
+	labels["alertname"] = req.Params.Get(AlertNameParam, DefaultEscalationAlertName)
+
+	annotations := map[string]string{
+		"summary": fmt.Sprintf("remedik could not remediate %s",
+			firstNonEmpty(targetOrEmpty(req.Target), req.Strategy)),
+		"remediation": req.Remediation,
+	}
+	if msg := req.Labels["remedik_message"]; msg != "" {
+		annotations["description"] = msg
+	}
+	if req.DryRun {
+		annotations["dryRun"] = "this remediation only reported; nothing was changed"
+	}
+
+	// startsAt is set and endsAt is not, deliberately: Alertmanager expires
+	// an alert it stops hearing about through its own resolve_timeout, and
+	// remedik pages once and is never retried. Setting endsAt would resolve
+	// the page immediately, which is worse than not sending it.
+	return []alertmanagerAlert{{
+		Labels:      labels,
+		Annotations: annotations,
+		StartsAt:    now.UTC().Format(time.RFC3339),
+	}}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // credential reads the Secret, from remedik's own namespace only.
@@ -285,6 +398,14 @@ type payload struct {
 
 type payloadAlert struct {
 	Name string `json:"name,omitempty"`
+}
+
+// alertmanagerAlert is Alertmanager's PostableAlert, which is the only body
+// shape it accepts on /api/v2/alerts.
+type alertmanagerAlert struct {
+	Labels      map[string]string `json:"labels"`
+	Annotations map[string]string `json:"annotations,omitempty"`
+	StartsAt    string            `json:"startsAt,omitempty"`
 }
 
 func payloadOf(req action.Request) payload {

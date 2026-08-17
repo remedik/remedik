@@ -81,20 +81,20 @@ func (p Paging) Many() bool { return p.Pages > 1 }
 func buildRemediations(
 	remediations []v1alpha1.Remediation, filter Filter, page int, now time.Time,
 ) RemediationsView {
-	sortNewestFirst(remediations)
+	ordered := newestFirst(remediations)
 
 	// The controls are built from every record, so a choice can always be
 	// changed or undone. A control whose options shrink as you use it is one
 	// you can get stuck in.
-	options := BuildFilterOptions(remediations)
+	options := BuildFilterOptions(ordered)
 
 	view := RemediationsView{
 		Filter:          filter,
-		Groups:          options.Groups(filter, remediations),
-		TotalUnfiltered: len(remediations),
+		Groups:          options.Groups(filter, ordered),
+		TotalUnfiltered: len(ordered),
 	}
 
-	kept := applyFilter(remediations, filter)
+	kept := applyFilter(ordered, filter)
 	counts := tally(kept)
 
 	view.Total = len(kept)
@@ -109,8 +109,9 @@ func buildRemediations(
 	// which are display values: an empty result sets First to 0 to render
 	// "0 of 0", and deriving the loop from it started at index -1.
 	start := min((view.Paging.Page-1)*pageSize, len(kept))
+	view.Rows = make([]RemediationRow, 0, min(pageSize, len(kept)-start))
 	for i := start; i < min(start+pageSize, len(kept)); i++ {
-		view.Rows = append(view.Rows, buildRow(&kept[i], now))
+		view.Rows = append(view.Rows, buildRow(kept[i], now))
 	}
 	view.Shown = len(view.Rows)
 

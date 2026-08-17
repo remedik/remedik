@@ -22,33 +22,139 @@ import (
 // comparable, and showing their failure counts side by side without saying
 // which is which invites exactly the wrong conclusion.
 
+// attentionLimit is how many namespaces get a full card.
+//
+// The number exists because the first version had no bound, and a cluster of
+// a hundred and fifty namespaces with an ordinary failure rate put eighty-one
+// of them above the fold — at which point "needs attention" has stopped
+// meaning anything and the page is a hundred and fifty kilobytes of cards
+// nobody reads.
+//
+// A dozen is about what somebody will actually work through. Everything past
+// it is in the table, with its failures still shown, and the page says how
+// many there are rather than quietly truncating.
+const attentionLimit = 12
+
 // NamespacesView is the /namespaces page.
+//
+// It is two lists rather than one, and that is the answer to scale. Paging a
+// list ordered by severity would be worse than either: page two of "what
+// needs attention" is by construction the part that does not. So the worst
+// handful get a card each, and every other namespace is a row in a compact
+// table that still carries its numbers.
 type NamespacesView struct {
 	Page
 
-	// Rows is one namespace each, ordered by what needs attention.
+	// Rows is the worst namespaces, worst first, at most attentionLimit.
 	Rows []NamespaceRow
+	// Rest is every other namespace, busiest first. It is not "the quiet
+	// ones": some of them have failures, and the table shows them.
+	Rest []NamespaceRow
 	// Total is every namespace remedik has touched.
 	Total int
 	// Executions is every record behind the page.
 	Executions int
-	// Attention is how many rows have something wrong.
+	// Attention is how many namespaces have something wrong, whether or not
+	// they fitted on a card.
 	Attention int
+	// Withheld is how many of those did not fit, so the page can say so
+	// rather than truncating in silence.
+	Withheld int
+	// Shifted is how many namespaces hold executions that ran under a
+	// different posture from the one configured now. Counted so the summary
+	// can state the pattern once instead of every row repeating it.
+	Shifted int
 }
 
+// AnyRest reports whether the compact table has anything in it.
+func (v NamespacesView) AnyRest() bool { return len(v.Rest) > 0 }
+
+// RestTitle names the table for what is actually in it. When the attention
+// list was capped, the table is not "the quiet ones" — it opens with the
+// namespaces that did not fit, and calling it quiet would be a lie the page
+// tells to look tidier.
+func (v NamespacesView) RestTitle() string {
+	switch {
+	case v.Withheld > 0:
+		return "Everything else"
+	case v.Attention > 0:
+		return "Quiet"
+	default:
+		return "Every namespace"
+	}
+}
+
+// RestNote says what the second group contains, including what was held back
+// from the first. A page that silently shows twelve of eighty-one is a page
+// that has hidden sixty-nine problems.
+func (v NamespacesView) RestNote() string {
+	if v.Withheld > 0 {
+		return fmt.Sprintf("%s with failures that did not fit above, then %s with none",
+			plural(v.Withheld, "namespace-namespaces"),
+			plural(len(v.Rest)-v.Withheld, "namespace-namespaces"))
+	}
+	return "no failures on record, busiest first"
+}
+
+// Summary is the one line above the table.
+//
+// It replaces two paragraphs of hint text that between them repeated the
+// counts already in the badges and the group headers. On a page whose problem
+// was that it had too much on it, prose that says what the numbers say is the
+// first thing to go.
+func (v NamespacesView) Summary() string {
+	const absence = "Namespaces remedik has never touched do not appear — " +
+		"their absence is the answer."
+	shifted := ""
+	if v.Shifted > 0 {
+		shifted = fmt.Sprintf(" %s hold executions that ran under a different "+
+			"posture from the one configured now, which is why a count can look "+
+			"impossible beside its chip.", plural(v.Shifted, "namespace-namespaces"))
+	}
+	if v.Attention == 0 {
+		return fmt.Sprintf("%s, none of them with a failure on record.%s %s",
+			plural(v.Total, "namespace-namespaces"), shifted, absence)
+	}
+	return fmt.Sprintf("%s of %d have something wrong.%s %s",
+		plural(v.Attention, "namespace-namespaces"), v.Total, shifted, absence)
+}
+
+// AllQuiet reports the good case: remedik has run here and nothing is wrong.
+func (v NamespacesView) AllQuiet() bool { return v.Total > 0 && v.Attention == 0 }
+
 // Any reports whether anything has been recorded at all.
-func (v NamespacesView) Any() bool { return len(v.Rows) > 0 }
+func (v NamespacesView) Any() bool { return v.Total > 0 }
+
+// AttentionLabel is the badge's text. It is built here rather than in the
+// template because "1 need attention" is the kind of thing a reader notices
+// and a template cannot conjugate.
+func (v NamespacesView) AttentionLabel() string {
+	if v.Attention == 1 {
+		return "1 needs attention"
+	}
+	return fmt.Sprintf("%d need attention", v.Attention)
+}
 
 // NamespaceRow is one namespace's record.
 type NamespaceRow struct {
 	Name string
 
-	// Posture is "Live" or "Reporting" — what remedik may do here.
+	// Posture is "Live" or "Reporting" — what remedik may do here *now*.
 	Posture string
 	// PostureTone is the palette name for the posture chip.
 	PostureTone string
 	// PostureDetail explains the chip in a few words.
 	PostureDetail string
+	// PostureNote is set when the records disagree with the posture as it is
+	// configured today.
+	//
+	// This matters because of the project's own rule: the posture is resolved
+	// once, when a record is created, and written onto it — so history says
+	// which posture it ran under and a later config change cannot rewrite
+	// it. Which means a namespace marked "Reporting" can perfectly well hold
+	// executions that changed something, and a page showing today's chip
+	// beside historical counts would be quietly contradicting itself.
+	PostureNote string
 
 	// Total, Succeeded, Failed, Simulated and InFlight are the outcomes.
 	Total     int
@@ -61,6 +167,11 @@ type NamespaceRow struct {
 	// escalation itself failed. This is the number that matters most, and
 	// the reason the page exists rather than a namespace column on a list.
 	Unheard int
+
+	// RanForReal and RanDry count how the executions were actually recorded,
+	// which is what makes a posture change visible.
+	RanForReal int
+	RanDry     int
 
 	// Rate is the success rate over attempts that actually ran, in words.
 	Rate string
@@ -108,6 +219,11 @@ func buildNamespaces(
 		}
 
 		row.Total++
+		if rem.Spec.DryRun {
+			row.RanDry++
+		} else {
+			row.RanForReal++
+		}
 		switch rem.Status.State {
 		case v1alpha1.RemediationStateSucceeded:
 			row.Succeeded++
@@ -130,17 +246,39 @@ func buildNamespaces(
 	}
 
 	view := NamespacesView{Total: len(byName)}
+	var wrong, fine []NamespaceRow
 	for name, row := range byName {
 		row.applyPosture(posture, name)
 		row.summarise()
 		view.Executions += row.Total
 		if row.NeedsAttention() {
-			view.Attention++
+			wrong = append(wrong, *row)
+			continue
 		}
-		view.Rows = append(view.Rows, *row)
+		fine = append(fine, *row)
 	}
 
-	sortNamespaceRows(view.Rows)
+	sortNamespaceRows(wrong)
+	sortNamespaceRows(fine)
+
+	for _, row := range append(wrong, fine...) {
+		if row.PostureNote != "" {
+			view.Shifted++
+		}
+	}
+
+	view.Attention = len(wrong)
+	if len(wrong) > attentionLimit {
+		view.Rows = wrong[:attentionLimit]
+		view.Withheld = len(wrong) - attentionLimit
+		// The ones that did not fit keep their place at the top of the table,
+		// ahead of the namespaces with nothing wrong.
+		view.Rest = append(view.Rest, wrong[attentionLimit:]...)
+	} else {
+		view.Rows = wrong
+	}
+	view.Rest = append(view.Rest, fine...)
+
 	return view
 }
 
@@ -162,11 +300,21 @@ func (r *NamespaceRow) applyPosture(posture Posture, name string) {
 		r.Posture = "Reporting"
 		r.PostureTone = toneDryRun
 		r.PostureDetail = "remedik plans here, it does not act"
+		if r.RanForReal > 0 {
+			// Terse, and in the posture column rather than under the name.
+			// The long form repeated on every row on a cluster where the
+			// posture had moved, and a note that appears everywhere is not a
+			// note. The count it carries is the informative half.
+			r.PostureNote = fmt.Sprintf("%d ran live", r.RanForReal)
+		}
 		return
 	}
 	r.Posture = "Live"
 	r.PostureTone = toneOK
 	r.PostureDetail = "remedik acts here"
+	if r.RanDry > 0 && r.RanForReal == 0 {
+		r.PostureNote = fmt.Sprintf("%d only reported", r.RanDry)
+	}
 }
 
 // summarise fills in the rate, the tone and the note.

@@ -35,8 +35,18 @@ type HistoryLoader struct {
 
 // Load replays every Remediation into the history.
 func (l *HistoryLoader) Load(ctx context.Context) error {
+	// Read-only, and this runs on the path that must finish before the gateway
+	// accepts anything — so it is also the one read where latency is a startup
+	// delay rather than a background cost.
+	//
+	// It reads through the API server rather than the cache (the loader is
+	// given mgr.GetAPIReader), where UnsafeDisableDeepCopy is a no-op: the
+	// objects are freshly decoded and nobody else holds them. Passing it costs
+	// nothing and means the option travels with the intent, so a later change
+	// to a cached reader gets it for free.
 	var list v1alpha1.RemediationList
-	if err := l.Reader.List(ctx, &list, client.InNamespace(l.Namespace)); err != nil {
+	if err := l.Reader.List(ctx, &list,
+		client.InNamespace(l.Namespace), client.UnsafeDisableDeepCopy); err != nil {
 		return fmt.Errorf("list remediations: %w", err)
 	}
 

@@ -101,9 +101,27 @@ func TestSecurityHeaders(t *testing.T) {
 			if !strings.Contains(csp, "default-src 'none'") {
 				t.Errorf("Content-Security-Policy = %q, want a default-src of 'none'", csp)
 			}
-			for _, directive := range []string{"style-src 'self'", "script-src 'self'"} {
+			for _, directive := range []string{
+				"style-src 'self'", "script-src 'self'",
+				// 'self' rather than 'none', and this is the whole reason the
+				// filter's select works: it is a GET form posting back here,
+				// and 'none' blocked every submission. The control looked
+				// merely unresponsive and the only evidence was a console
+				// message, so it was reported as broken four times.
+				"form-action 'self'",
+			} {
 				if !strings.Contains(csp, directive) {
 					t.Errorf("Content-Security-Policy = %q, want %q", csp, directive)
+				}
+			}
+			// Everything the page is allowed to reach is its own origin, and
+			// that has to stay true: a policy that grew a host would be the
+			// dashboard fetching from somewhere, which the offline promise
+			// forbids.
+			for _, forbidden := range []string{"http:", "https:", "*"} {
+				if strings.Contains(csp, forbidden) {
+					t.Errorf("Content-Security-Policy = %q reaches outside its own origin (%q)",
+						csp, forbidden)
 				}
 			}
 			if strings.Contains(csp, "unsafe-inline") {
@@ -319,6 +337,92 @@ func TestEveryTemplateClassIsStyled(t *testing.T) {
 					t.Errorf("%s uses class %q, which the stylesheet does not define", name, used)
 				}
 			}
+		}
+	}
+}
+
+// Every custom property the stylesheet reads is one it also defines.
+//
+// A `var(--surface-sunken)` that nothing declares is not an error anywhere: the
+// browser drops the declaration and the element renders without it. That is
+// the same failure mode as the inline styles the Content-Security-Policy
+// discarded — correct-looking markup, silently ignored — and it happened
+// twice while the namespaces page was written, once for a border and once for
+// a text colour.
+func TestEveryCustomPropertyIsDefined(t *testing.T) {
+	css, err := files.ReadFile("assets/app.css")
+	if err != nil {
+		t.Fatalf("read app.css: %v", err)
+	}
+	sheet := string(css)
+
+	// Definitions are found after the reads are removed, so that `var(--x)`
+	// is never mistaken for a declaration of --x. A declaration can sit on
+	// the same line as its selector — `.pct-0 { --pct: 0%; }` — so anchoring
+	// to the start of a line would miss the generated ones.
+	reads := regexp.MustCompile(`var\(\s*--[a-zA-Z0-9-]+`)
+	declarations := reads.ReplaceAllString(sheet, "var(")
+
+	defined := map[string]bool{}
+	for _, m := range regexp.MustCompile(`(--[a-zA-Z0-9-]+)\s*:`).FindAllStringSubmatch(declarations, -1) {
+		defined[m[1]] = true
+	}
+	if len(defined) < 20 {
+		t.Fatalf("found only %d custom properties; the pattern is wrong, not the stylesheet",
+			len(defined))
+	}
+
+	seen := map[string]bool{}
+	for _, m := range regexp.MustCompile(`var\(\s*(--[a-zA-Z0-9-]+)`).FindAllStringSubmatch(sheet, -1) {
+		name := m[1]
+		if defined[name] || seen[name] {
+			continue
+		}
+		seen[name] = true
+		t.Errorf("var(%s) is read but never defined, so every declaration using "+
+			"it is silently dropped by the browser", name)
+	}
+}
+
+// The select applies on change because the script finds it by class. Rename
+// the class in one place and the control silently needs its button back — and
+// the button is hidden by the same class, so it would need a gesture that is
+// no longer visible. That is worse than either state on its own.
+func TestTheFilterSelectIsWiredToItsScript(t *testing.T) {
+	js, err := files.ReadFile("assets/app.js")
+	if err != nil {
+		t.Fatalf("read app.js: %v", err)
+	}
+	css, err := files.ReadFile("assets/app.css")
+	if err != nil {
+		t.Fatalf("read app.css: %v", err)
+	}
+	page, err := files.ReadFile("templates/remediations.html")
+	if err != nil {
+		t.Fatalf("read remediations.html: %v", err)
+	}
+
+	for what, checks := range map[string][]struct {
+		in   string
+		body string
+	}{
+		`the script's selector`: {{`form.filter-select`, string(js)}},
+		`the markup's class`:    {{`class="filter-select"`, string(page)}},
+		`the button's rule`:     {{`.filter-select.is-live button`, string(css)}},
+		`the script's flag`:     {{`"is-live"`, string(js)}},
+	} {
+		for _, c := range checks {
+			if !strings.Contains(c.body, c.in) {
+				t.Errorf("%s is missing: %q not found", what, c.in)
+			}
+		}
+	}
+
+	// It has to keep working with the script off, which is the only reason the
+	// button exists at all.
+	for _, want := range []string{`method="get"`, `type="submit"`} {
+		if !strings.Contains(string(page), want) {
+			t.Errorf("the filter form no longer works without JavaScript: %q missing", want)
 		}
 	}
 }

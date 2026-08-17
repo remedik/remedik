@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -600,4 +601,124 @@ type panickingReader struct{ client.Reader }
 
 func (panickingReader) List(context.Context, client.ObjectList, ...client.ListOption) error {
 	panic("a builder bug")
+}
+
+// The dashboard lists with client.UnsafeDisableDeepCopy, which hands it the
+// manager's own objects rather than copies. That removes about thirteen
+// megabytes and a hundred and thirty thousand allocations from every render —
+// and it is only safe while this package never writes to a listed object,
+// because a write would corrupt the cache every controller reads from.
+//
+// So the guarantee is checked rather than remembered: every page is rendered
+// against records whose contents are compared before and after.
+func TestTheDashboardNeverMutatesWhatItReads(t *testing.T) {
+	records := []v1alpha1.Remediation{
+		succeededRemediation("ok", 5),
+		failedRemediation("bad", 4),
+		simulatedRemediation("dry", "deployment/payments/api", 3),
+		pendingRemediation("waiting", 2),
+	}
+	strategies := []v1alpha1.RemediationStrategy{enabledStrategy(), disabledStrategy()}
+
+	// A deep copy taken before anything is served, to compare against.
+	want := make([]v1alpha1.Remediation, len(records))
+	for i := range records {
+		want[i] = *records[i].DeepCopy()
+	}
+	wantStrategies := make([]v1alpha1.RemediationStrategy, len(strategies))
+	for i := range strategies {
+		wantStrategies[i] = *strategies[i].DeepCopy()
+	}
+
+	h, _ := newHandler(t, Config{
+		Reader: &fakeReader{remediations: records, strategies: strategies},
+	})
+
+	for _, path := range []string{
+		"/", "/remediations", "/remediations?namespace=payments&state=Failed",
+		"/remediations?page=2", "/namespaces", "/strategies",
+		"/remediations/ok", "/remediations/bad",
+	} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s = %d, want 200", path, rec.Code)
+		}
+	}
+
+	// The order may differ: sortNewestFirst reorders the slice this package
+	// owns, which is allowed. The contents may not.
+	byName := map[string]*v1alpha1.Remediation{}
+	for i := range records {
+		byName[records[i].Name] = &records[i]
+	}
+	for i := range want {
+		got, ok := byName[want[i].Name]
+		if !ok {
+			t.Fatalf("record %q disappeared from the slice", want[i].Name)
+		}
+		if !reflect.DeepEqual(*got, want[i]) {
+			t.Errorf("record %q was modified while serving a page.\n"+
+				"The dashboard lists with UnsafeDisableDeepCopy, so a write here "+
+				"corrupts the manager's cache for every controller. Either stop "+
+				"writing, or drop the option in listRemediations.", want[i].Name)
+		}
+	}
+	for i := range strategies {
+		if !reflect.DeepEqual(strategies[i], wantStrategies[i]) {
+			t.Errorf("strategy %q was modified while serving a page", strategies[i].Name)
+		}
+	}
+}
+
+// And the option is actually asked for, since the test above would pass just
+// as well if it were quietly dropped.
+func TestListsAreZeroCopy(t *testing.T) {
+	// New directly: the shared helper swaps in its own fakeReader when the
+	// one it is given is not that type.
+	reader := &recordingReader{}
+	h, err := New(Config{
+		Reader:    reader,
+		Namespace: testNamespace,
+		Logger:    quietLogger(),
+		Now:       testNow,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	if len(reader.optionsSeen) == 0 {
+		t.Fatal("no List was made")
+	}
+	for i, opts := range reader.optionsSeen {
+		if opts.UnsafeDisableDeepCopy == nil || !*opts.UnsafeDisableDeepCopy {
+			t.Errorf("List %d did not pass client.UnsafeDisableDeepCopy, so every "+
+				"render deep-copies every record again", i)
+		}
+	}
+}
+
+// recordingReader captures the options each List was given.
+type recordingReader struct {
+	optionsSeen []client.ListOptions
+}
+
+func (r *recordingReader) Get(
+	context.Context, client.ObjectKey, client.Object, ...client.GetOption,
+) error {
+	return nil
+}
+
+func (r *recordingReader) List(
+	_ context.Context, _ client.ObjectList, opts ...client.ListOption,
+) error {
+	var options client.ListOptions
+	for _, opt := range opts {
+		opt.ApplyToList(&options)
+	}
+	r.optionsSeen = append(r.optionsSeen, options)
+	return nil
 }

@@ -1,0 +1,44 @@
+# A remediation that cannot succeed, escalating through two channels where the
+# first one is unreachable.
+#
+# It exists for one assertion: a failed escalation step must not silence the
+# steps after it. That was a real defect, and an invisible one -- every channel
+# succeeds when somebody tests the path, so the skipped-step behaviour is never
+# seen until the night a channel is down.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: e2e-fallback
+spec:
+  enabled: true
+  trigger:
+    match:
+      alertname: E2EFallback
+  guards:
+    cooldown: 1s
+    maxPerHour: 20
+  steps:
+    # The Deployment does not exist, so the remediation fails for good.
+    - action: deployment.restart
+  onFailure:
+    retries: 0
+    # The default, stated because it is the behaviour under test.
+    mode: all
+    steps:
+      # Nothing listens here. Under the old rule this failure skipped the
+      # channel below and nobody was told.
+      - action: webhook.call
+        with:
+          url: http://127.0.0.1:9/unreachable
+          timeout: 3s
+      # remedik's own gateway, which the suite already uses as a reachable
+      # endpoint: it answers 200 to a body it understood, and nothing outside
+      # the cluster is needed to prove the path.
+      - action: webhook.call
+        with:
+          url: http://remedik-gateway.remedik.svc.cluster.local:8090/webhooks/alertmanager
+          secretRef: remedik-gateway-token
+          secretKey: token
+          header: Authorization
+          headerPrefix: "Bearer "
+          timeout: 20s

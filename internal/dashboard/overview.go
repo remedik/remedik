@@ -145,18 +145,21 @@ func buildOverview(
 	posture Posture,
 	now time.Time,
 ) OverviewView {
-	sortNewestFirst(remediations)
+	// One pointer slice, ordered once, shared by every panel below. The
+	// records themselves are never copied and the caller's slice is not
+	// touched.
+	ordered := newestFirst(remediations)
 
-	counts := tally(remediations)
+	counts := tally(ordered)
 
 	view := OverviewView{
-		Total:         len(remediations),
+		Total:         len(ordered),
 		StrategyCount: len(strategies),
 		PosturePanel:  buildPosturePanel(posture),
-		Attention:     buildAttention(remediations),
-		Activity:      buildActivity(remediations, now),
-		Namespaces:    buildBreakdown(remediations, targetNamespaceOf, byNamespace),
-		Strategies:    buildBreakdown(remediations, strategyOf, byStrategy),
+		Attention:     buildAttention(ordered),
+		Activity:      buildActivity(ordered, now),
+		Namespaces:    buildBreakdown(ordered, targetNamespaceOf, byNamespace),
+		Strategies:    buildBreakdown(ordered, strategyOf, byStrategy),
 	}
 	for i := range strategies {
 		if strategies[i].IsEnabled() {
@@ -202,15 +205,15 @@ func buildOverview(
 		},
 	}
 
-	view.Recent = make([]RemediationRow, 0, min(len(remediations), recentLimit))
-	for i := range remediations {
+	view.Recent = make([]RemediationRow, 0, min(len(ordered), recentLimit))
+	for i, rem := range ordered {
 		if i == recentLimit {
 			break
 		}
-		view.Recent = append(view.Recent, buildRow(&remediations[i], now))
+		view.Recent = append(view.Recent, buildRow(rem, now))
 	}
 
-	if report := buildDryRunReport(remediations, posture.DryRun, now); report != nil {
+	if report := buildDryRunReport(ordered, posture.DryRun, now); report != nil {
 		view.DryRunning = report
 	}
 	return view
@@ -221,10 +224,10 @@ type stateCounts struct {
 	succeeded, failed, simulated, inFlight int
 }
 
-func tally(remediations []v1alpha1.Remediation) stateCounts {
+func tally(remediations []*v1alpha1.Remediation) stateCounts {
 	var counts stateCounts
-	for i := range remediations {
-		switch remediations[i].Status.State {
+	for _, rem := range remediations {
+		switch rem.Status.State {
 		case v1alpha1.RemediationStateSucceeded:
 			counts.succeeded++
 		case v1alpha1.RemediationStateFailed:
@@ -274,11 +277,10 @@ func buildPosturePanel(posture Posture) PosturePanel {
 	return panel
 }
 
-func buildAttention(remediations []v1alpha1.Remediation) AttentionPanel {
+func buildAttention(remediations []*v1alpha1.Remediation) AttentionPanel {
 	var failed, unheard, untold, interrupted int
 
-	for i := range remediations {
-		rem := &remediations[i]
+	for _, rem := range remediations {
 		if rem.Status.State != v1alpha1.RemediationStateFailed {
 			continue
 		}
@@ -340,7 +342,7 @@ func buildAttention(remediations []v1alpha1.Remediation) AttentionPanel {
 	return panel
 }
 
-func buildActivity(remediations []v1alpha1.Remediation, now time.Time) ActivityPanel {
+func buildActivity(remediations []*v1alpha1.Remediation, now time.Time) ActivityPanel {
 	panel := ActivityPanel{
 		Bars:   make([]ActivityBar, activityHours),
 		Window: fmt.Sprintf("last %d hours", activityHours),
@@ -353,8 +355,7 @@ func buildActivity(remediations []v1alpha1.Remediation, now time.Time) ActivityP
 		panel.Bars[i].Label = start.Add(time.Duration(i) * time.Hour).Format("15:04")
 	}
 
-	for i := range remediations {
-		rem := &remediations[i]
+	for _, rem := range remediations {
 		created := rem.CreationTimestamp.Time
 		if created.Before(start) {
 			continue
@@ -411,14 +412,13 @@ func byNamespace(name string) string { return Filter{Namespace: name}.Path() }
 func byStrategy(name string) string { return Filter{Strategy: name}.Path() }
 
 func buildBreakdown(
-	remediations []v1alpha1.Remediation,
+	remediations []*v1alpha1.Remediation,
 	key func(*v1alpha1.Remediation) string,
 	link func(string) string,
 ) []Breakdown {
 	rows := map[string]*Breakdown{}
 
-	for i := range remediations {
-		rem := &remediations[i]
+	for _, rem := range remediations {
 		name := key(rem)
 		if name == "" {
 			continue

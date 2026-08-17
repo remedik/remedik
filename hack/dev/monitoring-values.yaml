@@ -2,10 +2,79 @@
 # Small footprint, fast feedback. NOT for production.
 grafana:
   adminPassword: remedik-dev
-alertmanager:
-  enabled: true
+
 prometheus:
   prometheusSpec:
     scrapeInterval: 15s
     evaluationInterval: 15s
     retention: 24h
+
+alertmanager:
+  enabled: true
+
+  # Alertmanager is where the loop starts, and until now the dev cluster did
+  # not have remedik in it at all — the chart's default config has a single
+  # "null" receiver that swallows everything. The end-to-end test never
+  # noticed because it posts to the gateway directly, which is the right thing
+  # for a test of remedik and exactly the wrong thing for noticing this.
+  #
+  # So the dev cluster wires the real path: rule fires in Prometheus,
+  # Alertmanager groups it, and it arrives at the gateway as a webhook. That
+  # is the only way an alert reaches remedik — it does not poll Prometheus and
+  # has no other input.
+  config:
+    global:
+      resolve_timeout: 5m
+
+    route:
+      # Watchdog is kube-prometheus-stack's own "the pipeline is alive" alert.
+      # It fires constantly by design and means nothing to remedik.
+      receiver: "null"
+      group_by: [namespace, alertname]
+      group_wait: 10s
+      group_interval: 1m
+      repeat_interval: 1h
+      routes:
+        - receiver: "null"
+          matchers:
+            - alertname = "Watchdog"
+
+        # remedik's own escalation, raised when a remediation failed. It must
+        # not come back to remedik: a strategy matching it would remediate
+        # remedik's own page, and the loop that creates is bounded only by the
+        # guards. In a real cluster this is where on-call actually lives.
+        - receiver: "null"
+          matchers:
+            - alertname = "RemediationFailed"
+
+        # Everything else goes to remedik. It answers 200 to anything it
+        # understood, including "no strategy matched", so routing broadly is
+        # safe: an alert with no strategy is recorded as unmatched and
+        # nothing happens. In a real cluster you would route deliberately
+        # rather than by exclusion.
+        #
+        # group_wait is short here because the point of the dev cluster is to
+        # see the loop close while you are still looking at it.
+        - receiver: remedik
+          matchers:
+            - alertname != "Watchdog"
+          group_wait: 10s
+
+    receivers:
+      - name: "null"
+
+      - name: remedik
+        webhook_configs:
+          - url: http://remedik-gateway.remedik.svc:8090/webhooks/alertmanager
+            # remedik answers 200 for a normal no-match, so a retry storm can
+            # only mean something is actually wrong.
+            send_resolved: false
+            http_config:
+              authorization:
+                type: Bearer
+                # Matches --set gateway.auth.token=dev-token in `make
+                # dev-deploy`. A literal token in a values file is fine for a
+                # throwaway kind cluster and is not fine anywhere else: in
+                # production the token is a Secret you manage, referenced with
+                # gateway.auth.existingSecret.
+                credentials: dev-token
