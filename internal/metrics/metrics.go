@@ -104,7 +104,17 @@ var (
 // It panics on duplicate registration, which can only happen if it is
 // called twice — a programming error, not a runtime condition.
 func MustRegister() {
-	metrics.Registry.MustRegister(
+	metrics.Registry.MustRegister(collectors()...)
+}
+
+// collectors is the one list of what this package reports.
+//
+// It exists as a function so that a test can ask the same question Prometheus
+// does — what metrics does this process serve — without registering them.
+// The shipped Grafana dashboard and the shipped alert rules both name these
+// metrics in files nothing compiles, so the agreement is checked instead.
+func collectors() []prometheus.Collector {
+	return []prometheus.Collector{
 		alertsReceived,
 		alertsTruncated,
 		alertsUnmatched,
@@ -117,7 +127,7 @@ func MustRegister() {
 		escalations,
 		recordsSwept,
 		recordsHeld,
-	)
+	}
 }
 
 // Gateway implements gateway.Recorder.

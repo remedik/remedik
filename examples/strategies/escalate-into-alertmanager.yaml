@@ -53,9 +53,9 @@ spec:
           # Defaults, shown because they are what your routes match on:
           #   alertname: RemediationFailed
           #   severity:  critical
-          # Override either if your routing tree expects different names.
-          # alertname: PaymentsRemediationFailed
-          # severity: warning
+          # Override either if your routing tree expects different names:
+          #   alertname: PaymentsRemediationFailed
+          #   severity: warning
 
       # A second channel, for the case where Alertmanager is what is broken.
       # Every escalation step runs -- a failed channel does not silence the

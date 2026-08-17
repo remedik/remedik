@@ -102,7 +102,7 @@ type PostureConfig struct {
 // registry. It panics on duplicate registration, which can only happen if it
 // is called twice — a programming error, not a runtime condition.
 func MustRegisterPosture(cfg PostureConfig) {
-	ctrlmetrics.Registry.MustRegister(buildInfo, dryRunGauge, namespacePostureGauge)
+	ctrlmetrics.Registry.MustRegister(postureCollectors()...)
 
 	buildInfo.WithLabelValues(cfg.Version).Set(1)
 	if cfg.DryRun {
@@ -121,6 +121,16 @@ func MustRegisterPosture(cfg PostureConfig) {
 			logger:   cfg.Logger,
 		})
 	}
+}
+
+// postureCollectors is the posture half of what this package reports; see
+// collectors for why the list is a function.
+//
+// The snapshot collector is deliberately not here: it is registered only when
+// a snapshot function is supplied, but the metrics it describes exist either
+// way, so it is described separately.
+func postureCollectors() []prometheus.Collector {
+	return []prometheus.Collector{buildInfo, dryRunGauge, namespacePostureGauge}
 }
 
 // postureCollector reports counts that are questions about now.

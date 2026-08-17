@@ -117,9 +117,12 @@ Two independent layers, and both are deliberate:
   routing**, so a page added later cannot opt out.
 
 One makes a write impossible to call; the other makes it impossible to reach.
-Writes belong to `kubectl` and, later, to an approval flow that has an identity
-model — because an approve button whose audit trail cannot say *who* asked is
-worse than no button.
+
+Writes belong to `kubectl`, and that includes approving a remediation: a
+decision is a patch on the object it is about, which the cluster's audit log
+attributes without remedik doing anything. An approve *button* needs an identity
+model the dashboard does not have, and a button whose audit trail cannot say
+*who* asked is worse than no button.
 
 ## 9. It can be stopped in one command, and the stop is auditable
 

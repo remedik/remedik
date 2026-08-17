@@ -1,0 +1,97 @@
+# Four strategies for the approval gate: one to approve, one to deny, one
+# nobody decides on, and the red button.
+#
+# They are separate strategies rather than one, so each assertion drives its own
+# record and none of them can be confused by a cooldown from another.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: e2e-approve
+spec:
+  enabled: true
+  trigger:
+    match:
+      alertname: E2EApprove
+  execution:
+    mode: approval
+    approvalTimeout: 10m
+  guards:
+    maxPerHour: 20
+  steps:
+    - action: deployment.restart
+      with:
+        verifyTimeout: 60s
+---
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: e2e-deny
+spec:
+  enabled: true
+  trigger:
+    match:
+      alertname: E2EDeny
+  execution:
+    mode: approval
+    approvalTimeout: 10m
+  guards:
+    maxPerHour: 20
+  steps:
+    - action: deployment.restart
+  onFailure:
+    # Declared deliberately: the assertion is that a DENIAL does not use it,
+    # which is only meaningful when there is something it could have used.
+    retries: 0
+    steps:
+      - action: webhook.call
+        with:
+          url: http://remedik-gateway.remedik.svc.cluster.local:8090/webhooks/alertmanager
+          secretRef: remedik-gateway-token
+          secretKey: token
+          header: Authorization
+          headerPrefix: "Bearer "
+          timeout: 20s
+---
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: e2e-ignore
+spec:
+  enabled: true
+  trigger:
+    match:
+      alertname: E2EIgnore
+  execution:
+    mode: approval
+    # A second, because the suite is not going to wait fifteen minutes to prove
+    # that nobody looking reaches somebody.
+    approvalTimeout: 1s
+  guards:
+    maxPerHour: 20
+  steps:
+    - action: deployment.restart
+  onFailure:
+    retries: 0
+    steps:
+      - action: webhook.call
+        with:
+          url: http://remedik-gateway.remedik.svc.cluster.local:8090/webhooks/alertmanager
+          secretRef: remedik-gateway-token
+          secretKey: token
+          header: Authorization
+          headerPrefix: "Bearer "
+          timeout: 20s
+---
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: e2e-manual
+spec:
+  enabled: true
+  trigger:
+    match:
+      alertname: E2EManual
+  execution:
+    mode: manual
+  steps:
+    - action: deployment.restart

@@ -173,6 +173,63 @@ configuring.
 The chart creates that ConfigMap for you, so this works on a fresh install
 without authoring anything at three in the morning. remedik can only read it.
 
+### Letting a person approve the risky ones
+
+Some remediations should not happen because a rule matched. Draining a node,
+scaling a database, anything whose blast radius you would want a colleague to
+look at: set the strategy to ask first.
+
+```yaml
+spec:
+  execution:
+    mode: approval        # auto (default), approval, or manual
+    approvalTimeout: 30m  # how long to wait before giving up on a person
+```
+
+A matching alert then creates a `Remediation` that sits in `AwaitingApproval`
+and does nothing — nothing is resolved, nothing is planned, nothing runs. You
+approve it the same way you do everything else in a cluster:
+
+```bash
+kubectl -n remedik patch remediation <name> --type merge \
+  -p '{"spec":{"approval":{"decision":"approve","by":"your-name"}}}'
+```
+
+Deny it with `"decision":"deny"`, and add `"note":"why"` — the note goes on the
+record, so the next person to read it knows what you knew.
+
+Three things worth knowing before you rely on it:
+
+- **It runs against the cluster as it is when you approve**, not as it was when
+  the alert fired. An approval from an hour ago does not execute an hour-old
+  plan.
+- **Silence escalates.** No decision within `approvalTimeout` and the
+  remediation fails as `ApprovalTimeout` and runs `onFailure.steps`, so the
+  alert reaches a person the ordinary way. A gate that quietly dropped what
+  nobody looked at would turn an alert into silence, which is worse than not
+  having a gate. A *denial* does not escalate: somebody looked.
+- **`by` is what the patcher typed**, and remedik says so rather than presenting
+  it as verified. Who actually issued the patch is in your cluster's audit log,
+  which is the only place that can answer it.
+
+Anything that can patch a Kubernetes object can approve: you at a terminal, a
+runbook, a GitOps commit, a bot. `kubectl get remediations` lists what is
+waiting, and the dashboard's overview puts it first — a queue nobody can see is
+a queue nobody empties.
+
+`mode: manual` is the other end: the strategy never starts from an alert, and
+the refusal is recorded where a guard refusal is. Useful for a strategy you are
+still writing, or one that exists to be run by hand.
+
+### When nothing happens
+
+remedik is supposed to do very little, so "nothing happened" is both the normal
+case and the failure case. [docs/troubleshooting.md](docs/troubleshooting.md)
+walks the six gates an alert passes — arrived, matched, resolved, allowed by the
+guards, allowed by the posture, not paused or waiting for a person — with the
+command that answers each. `--set logLevel=debug` makes remedik explain, per
+strategy, why it was not the one.
+
 ### 5. Read the dry-run reports
 
 ```bash
@@ -223,19 +280,58 @@ kubectl -n remedik get secret remedik-dashboard-token \
   -o jsonpath='{.data.token}' | base64 -d
 ```
 
-Three pages:
+Five pages:
 
-- **Overview** — counts by outcome, the dry-run report, and the 50 most
-  recent executions.
+- **Overview** — counts by outcome, the dry-run report, what needs attention
+  first, and the most recent executions.
+- **Remediations** — every execution, filterable by namespace, strategy and
+  outcome, for when the overview's most-recent list is not far enough back.
 - **A remediation** — the triggering alert and its labels, the plan, each
   step's outcome, message and timings, the attempt count, and why it ended
   the way it did.
+- **Namespaces** — which namespaces remedik acts in and which it only reports
+  on, with what happened in each. This is the page for a cluster where the
+  posture is not the same everywhere.
 - **Strategies** — every strategy with its matchers, guards, steps and last
   run; disabled ones are marked as such.
 
 Nothing on it changes anything: it serves GET and HEAD, and answers 405 to
 everything else. Enabling it grants remedik no permission it did not already
 have.
+
+### Upgrading
+
+```bash
+helm upgrade remedik oci://ghcr.io/remedik/charts/remedik --namespace remedik --reuse-values
+```
+
+Two things about upgrades are worth knowing before one surprises you.
+
+**Apply the CRDs.** `helm upgrade` does not upgrade them — Helm applies a
+chart's CRDs once, on first install, and never again, because a CRD replaced
+carelessly takes every resource using it along. So a field added since your
+install would be *pruned silently* by the API server rather than rejected: a
+strategy asking for human approval would lose the field that makes it wait, and
+nothing would say so.
+
+remedik refuses that upgrade rather than letting it happen quietly, and tells
+you the command:
+
+```bash
+helm show crds oci://ghcr.io/remedik/charts/remedik | kubectl apply --server-side --force-conflicts -f -
+```
+
+`--force-conflicts` is part of the command, not a workaround: Helm recorded
+itself as the field manager when it installed the CRDs, so taking that ownership
+over is exactly the intent. Applying a CRD does not touch the resources already
+using it. If you manage
+CRDs yourself, `--set crdCheck.enabled=false` says so.
+
+**`--reuse-values` does not merge new defaults.** It replays the values from
+your last install, so a key added since is simply absent — you get the new
+version with the new feature switched off. `helm upgrade -f my-values.yaml`
+without `--reuse-values` is the predictable form; if you use `--reuse-values`,
+read the changelog for keys you now want.
 
 ---
 

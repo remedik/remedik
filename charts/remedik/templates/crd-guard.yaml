@@ -1,0 +1,81 @@
+{{/*
+Refuses an upgrade whose CRDs the cluster does not have.
+
+`helm upgrade` does not upgrade CRDs — Helm applies a chart's crds/ directory
+once, on first install, and never again. That is the right default: a CRD
+replaced carelessly takes every custom resource in the cluster with it. But it
+means a new field is silently absent after an upgrade, because the API server
+prunes what its schema does not know. A strategy that asks for human approval
+loses the field and remediates unattended, and nothing anywhere says so.
+
+This is not hypothetical. It is how a cluster running this operator turned out
+to be missing `execution.approvalTimeout`: the chart had it, the CRD did not,
+and the only symptom was a field that would not apply.
+
+So the chart compares the stamp `hack/stamp-crds.sh` writes into each generated
+CRD against the one in the cluster, and stops with the command that fixes it.
+Silent-and-wrong is the one outcome worth failing an upgrade over.
+
+Notes on when this can and cannot see anything:
+
+  - `lookup` returns nothing during `helm template` and `--dry-run`, by design.
+    So this guard is inert there, which is why `make helm-lint` cannot exercise
+    it and `hack/e2e.sh` does.
+  - On a first install the CRD does not exist yet, and Helm is about to create
+    it. Nothing to compare, nothing to say.
+  - A CRD with no stamp at all predates this check, which means it came from an
+    older chart — so applying the current one is the right move anyway.
+
+Escapable, because a guard that cannot be turned off is an outage waiting for
+the case its author did not think of: `--set crdCheck.enabled=false`. Read with
+`dig` rather than `| default true`, because Go's `default` treats false as empty
+— `false | default true` is true, so the first version of that escape hatch
+could not be used at all. `make e2e` caught it, which is why it asserts on the
+hatch and not only on the refusal.
+*/}}
+{{- if dig "enabled" true (.Values.crdCheck | default dict) }}
+{{- range $file, $name := dict
+	"crds/remedik.dev_remediations.yaml" "remediations.remedik.dev"
+	"crds/remedik.dev_remediationstrategies.yaml" "remediationstrategies.remedik.dev" }}
+{{- $live := lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" $name }}
+{{- if $live }}
+	{{- $want := "" }}
+	{{- range (regexFindAll `remedik\.dev/schema-hash: [0-9a-f]+` ($.Files.Get $file) 1) }}
+		{{- $want = trim (index (splitList ":" .) 1) }}
+	{{- end }}
+	{{- $have := dig "metadata" "annotations" "remedik.dev/schema-hash" "" (toJson $live | fromJson) }}
+	{{- if and $want (ne $want $have) }}
+		{{- fail (printf `
+%s in this cluster is not the one in this chart.
+
+  in the cluster: %s
+  in the chart:   %s
+
+helm upgrade does not upgrade CRDs, so a new field would be pruned silently by
+the API server rather than rejected -- a strategy could lose the very field
+that makes it wait for a person.
+
+Apply them first, then run this again:
+
+  helm show crds %s | kubectl apply --server-side --force-conflicts -f -
+
+or, from a checkout:
+
+  kubectl apply --server-side --force-conflicts -f charts/remedik/crds/
+
+--force-conflicts is not a warning to skip past: Helm recorded itself as the
+field manager when it installed these, so taking that ownership over is exactly
+what you are asking for. Applying a CRD does not touch the resources already
+using it.
+
+If you manage CRDs yourself and this check is in your way:
+--set crdCheck.enabled=false
+`
+			$name
+			(default "no stamp, so it predates this check" $have)
+			$want
+			(printf "oci://ghcr.io/remedik/charts/remedik --version %s" $.Chart.Version)) }}
+	{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

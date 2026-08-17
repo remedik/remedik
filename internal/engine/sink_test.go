@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -576,5 +577,163 @@ func TestSink_GivingUpOnOneTargetLeavesTheOthersAlone(t *testing.T) {
 	}
 	if metrics.started != 1 {
 		t.Errorf("RemediationStarted = %d, want 1: the other target proceeds", metrics.started)
+	}
+}
+
+// A manual strategy is the red button: it never starts from an alert.
+func TestSink_ManualStrategyNeverStartsFromAnAlert(t *testing.T) {
+	manual := strategy("restart-api",
+		map[string]string{"alertname": "KubePodCrashLooping"},
+		func(s *v1alpha1.RemediationStrategy) {
+			s.Spec.Execution.Mode = v1alpha1.ExecutionModeManual
+		})
+
+	f := newSink(t, false, manual)
+	f.sink.Consume([]alert.Alert{firingAlert()})
+
+	if got := len(f.client.remediations()); got != 0 {
+		t.Errorf("records = %d, want 0: a manual strategy never runs from an alert", got)
+	}
+	// Recorded where a guard refusal is, because it is the same question --
+	// "why did nothing happen" -- and an operator should not have to know that
+	// this particular no came from somewhere else.
+	if f.metrics.rejected["manual"] != 1 {
+		t.Errorf("refusals = %v, want one for manual", f.metrics.rejected)
+	}
+	if f.metrics.started != 0 {
+		t.Errorf("RemediationStarted = %d, want 0", f.metrics.started)
+	}
+}
+
+// An approval strategy creates the record with a deadline, so the wait is
+// bounded from the moment it exists rather than from whenever it is first
+// reconciled.
+func TestSink_ApprovalStrategySetsADeadline(t *testing.T) {
+	approval := strategy("restart-api",
+		map[string]string{"alertname": "KubePodCrashLooping"},
+		func(s *v1alpha1.RemediationStrategy) {
+			s.Spec.Execution.Mode = v1alpha1.ExecutionModeApproval
+			s.Spec.Execution.ApprovalTimeout = &metav1.Duration{Duration: 30 * time.Minute}
+		})
+
+	f := newSink(t, false, approval)
+	f.sink.Consume([]alert.Alert{firingAlert()})
+
+	records := f.client.remediations()
+	if len(records) != 1 {
+		t.Fatalf("records = %d, want 1", len(records))
+	}
+	rem := records[0]
+
+	if rem.Spec.Mode != v1alpha1.ExecutionModeApproval {
+		t.Errorf("Mode = %q, want approval: the record must keep the behaviour "+
+			"it started with", rem.Spec.Mode)
+	}
+	if rem.Spec.ApprovalDeadline == nil {
+		t.Fatal("no deadline; the wait would be unbounded")
+	}
+	want := testClock.Add(30 * time.Minute)
+	if !rem.Spec.ApprovalDeadline.Time.Equal(want) {
+		t.Errorf("deadline = %v, want %v", rem.Spec.ApprovalDeadline.Time, want)
+	}
+	if rem.Spec.Approval != nil {
+		t.Error("an approval decision was pre-filled; nobody has decided yet")
+	}
+}
+
+// With no timeout configured, the default applies -- a gate that waits for ever
+// turns an alert into nothing.
+func TestSink_ApprovalFallsBackToTheDefaultTimeout(t *testing.T) {
+	approval := strategy("restart-api",
+		map[string]string{"alertname": "KubePodCrashLooping"},
+		func(s *v1alpha1.RemediationStrategy) {
+			s.Spec.Execution.Mode = v1alpha1.ExecutionModeApproval
+		})
+
+	f := newSink(t, false, approval)
+	f.sink.Consume([]alert.Alert{firingAlert()})
+
+	rem := f.client.remediations()[0]
+	want := testClock.Add(v1alpha1.DefaultApprovalTimeout)
+	if rem.Spec.ApprovalDeadline == nil || !rem.Spec.ApprovalDeadline.Time.Equal(want) {
+		t.Errorf("deadline = %v, want the default %v",
+			rem.Spec.ApprovalDeadline, want)
+	}
+}
+
+// "why did nothing happen" is the question this product gets asked most, and
+// "no strategy matches this alert" was the whole answer. The line now carries
+// the alert's labels, and debug says which strategy missed and how.
+func TestSink_AnUnmatchedAlertSaysWhatToCompareAgainst(t *testing.T) {
+	var logged strings.Builder
+	logger := slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
+
+	// One strategy that wants a label the alert does not have, and one that
+	// wants a different value for a label it does.
+	wrongKey := strategy("wants-exported", map[string]string{
+		"exported_namespace": "payments"})
+	wrongValue := strategy("wants-checkout", map[string]string{
+		"alertname": "KubePodCrashLooping", "namespace": "checkout"})
+
+	registry, err := action.NewRegistry(&scriptedAction{name: "deployment.restart"})
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+
+	sink := &Sink{
+		Client: newFakeClient(wrongKey, wrongValue), Registry: registry,
+		History: guards.NewMemoryHistory(0), Namespace: testNamespace,
+		Posture: NewPosture(true, nil), Metrics: newCountingRecorder(),
+		Logger: logger, Now: func() time.Time { return testClock },
+	}
+
+	sink.Consume([]alert.Alert{firingAlert()})
+
+	out := logged.String()
+	for _, want := range []string{
+		// The labels, on the line that says nothing matched.
+		"alertname=KubePodCrashLooping",
+		// And each strategy's own reason.
+		"the alert has no exported_namespace label",
+		"namespace is",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the log does not contain %q; an operator would have to go\n"+
+				"and find the alert in Alertmanager to get this far.\nlog:\n%s",
+				want, out)
+		}
+	}
+}
+
+// And it costs nothing when nobody asked for it: at info level the per-strategy
+// explanation is one line per strategy per unmatched alert, which on a busy
+// cluster is the log nobody can read.
+func TestSink_TheExplanationIsDebugOnly(t *testing.T) {
+	var logged strings.Builder
+	logger := slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+
+	registry, err := action.NewRegistry(&scriptedAction{name: "deployment.restart"})
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	sink := &Sink{
+		Client:   newFakeClient(strategy("wants-checkout", map[string]string{"namespace": "checkout"})),
+		Registry: registry, History: guards.NewMemoryHistory(0),
+		Namespace: testNamespace, Posture: NewPosture(true, nil),
+		Metrics: newCountingRecorder(), Logger: logger,
+		Now: func() time.Time { return testClock },
+	}
+
+	sink.Consume([]alert.Alert{firingAlert()})
+
+	if strings.Contains(logged.String(), "a strategy did not match") {
+		t.Error("the per-strategy explanation was logged at info level")
+	}
+	if !strings.Contains(logged.String(), "no strategy matches this alert") {
+		t.Error("the summary line is missing, which is the one that must always be there")
 	}
 }

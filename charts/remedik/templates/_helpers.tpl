@@ -141,3 +141,28 @@ what to do about it.
 {{- fail "\nremedik: the dashboard shows alert labels, namespaces and workload names, so it needs a token.\nSet one of:\n  dashboard.auth.token=<value>            (the chart creates the Secret)\n  dashboard.auth.existingSecret=<name>    (you manage the Secret; key: token)\nTo serve it without authentication — local development only — set dashboard.auth.disabled=true.\n" -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+The kill switch's name and whether to create it, read so that a missing `pause`
+block means the defaults rather than an error.
+
+This exists because `helm upgrade --reuse-values` does NOT merge the new chart's
+defaults: it replays the previous release's values, so every key added since is
+absent, and a template that reaches into one fails the upgrade. That happened
+here twice — once rendering an empty duration into an alert rule the Prometheus
+operator then rejected, once dereferencing this block. `hack/reuse-values.sh`
+now renders the chart against the last release's values on every `make verify`.
+
+The kill switch in particular defaults to existing rather than to being absent.
+An upgrade that quietly leaves a cluster without the one command that stops
+remediation is the wrong side to fail on.
+*/}}
+{{- define "remedik.pauseConfigMapName" -}}
+{{- (.Values.pause).configMapName | default "remedik-pause" -}}
+{{- end -}}
+
+{{- define "remedik.pauseCreate" -}}
+{{- $pause := .Values.pause | default dict -}}
+{{- if hasKey $pause "create" -}}{{ $pause.create }}{{- else -}}true{{- end -}}
+{{- end -}}
+

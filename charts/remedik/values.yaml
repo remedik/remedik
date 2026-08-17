@@ -211,6 +211,20 @@ prometheusRule:
     # -- Severity label for the rest
     warning: warning
 
+# -- Refuse an upgrade whose CRDs the cluster does not have.
+#
+# `helm upgrade` does not upgrade CRDs: Helm applies a chart's crds/ directory
+# once, on first install, and never again. So a field added since your install
+# is pruned silently by the API server rather than rejected — a strategy that
+# asks for human approval can lose the field that makes it wait. The chart
+# compares a stamp in each generated CRD with the one in the cluster and stops
+# with the command that fixes it.
+#
+# Turn it off if you manage CRDs yourself and would rather not be asked.
+crdCheck:
+  # -- Compare the cluster's CRDs with the chart's before upgrading.
+  enabled: true
+
 grafanaDashboard:
   # -- Ship the remedik Grafana dashboard as a ConfigMap for the Grafana
   # sidecar to load. The JSON is versioned in the chart, so the dashboard is

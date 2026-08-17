@@ -38,6 +38,10 @@ func stateTone(state v1alpha1.RemediationState) string {
 		return toneRunning
 	case v1alpha1.RemediationStatePending:
 		return toneWaiting
+	case v1alpha1.RemediationStateAwaitingApproval:
+		// Warn, not waiting: a record waiting for a retry needs nobody, and one
+		// waiting for a person needs somebody now. They must not look alike.
+		return toneWarn
 	default:
 		return toneWaiting
 	}

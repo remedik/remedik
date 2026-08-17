@@ -2,20 +2,51 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"time"
 )
+
+// DefaultApprovalTimeout is how long an approval-mode remediation waits when
+// the strategy does not say.
+//
+// Fifteen minutes: long enough that somebody paged has time to look, short
+// enough that an incident is not still waiting for a decision when the next
+// shift starts.
+const DefaultApprovalTimeout = 15 * time.Minute
 
 // ExecutionMode decides how much autonomy a strategy has.
 //
-// +kubebuilder:validation:Enum=auto
+// +kubebuilder:validation:Enum=auto;approval;manual
 type ExecutionMode string
 
 const (
-	// ExecutionModeAuto remediates without asking. It is the only mode
-	// implemented in v1alpha1; "approval" and "manual" arrive with the
-	// Slack change, and the enum is widened then so that a manifest
-	// written against a newer remedik fails loudly on an older one
-	// instead of silently remediating without approval.
+	// ExecutionModeAuto remediates without asking.
 	ExecutionModeAuto ExecutionMode = "auto"
+
+	// ExecutionModeApproval waits for a person.
+	//
+	// The remediation is created and reaches AwaitingApproval. Nothing is
+	// resolved, planned or executed until somebody decides — which also means
+	// the plan, once approved, describes the cluster as it is then rather than
+	// as it was when the alert arrived.
+	//
+	// A decision is an ordinary Kubernetes write:
+	//
+	//	kubectl -n remedik patch remediation <name> --type merge \
+	//	  -p '{"spec":{"approval":{"decision":"approve","by":"dana"}}}'
+	//
+	// So it is attributable in the cluster's audit log, expressible from a
+	// terminal, a runbook, a GitOps commit or a bot, and needs nothing outside
+	// the cluster. Approval was scoped with a Slack bot for a long time, which
+	// is why it went unbuilt; the gate does not need one.
+	//
+	// No decision within ApprovalTimeout fails the remediation and escalates,
+	// because the failure mode of a human gate is that nobody looks.
+	ExecutionModeApproval ExecutionMode = "approval"
+
+	// ExecutionModeManual never starts from an alert. For the strategies a team
+	// wants to keep behind a red button; the refusal is recorded where a guard
+	// refusal is, so "why did nothing happen" has an answer in the usual place.
+	ExecutionModeManual ExecutionMode = "manual"
 )
 
 // RemediationStrategySpec defines what a strategy matches and what it does.
@@ -71,14 +102,23 @@ type Trigger struct {
 	Match map[string]string `json:"match"`
 }
 
-// Execution controls autonomy and notifications.
+// Execution controls autonomy.
 type Execution struct {
-	// Mode is how the strategy runs. Only "auto" is supported in
-	// v1alpha1.
+	// Mode is how the strategy runs: "auto", "approval" or "manual".
 	//
 	// +kubebuilder:default=auto
 	// +optional
 	Mode ExecutionMode `json:"mode,omitempty"`
+
+	// ApprovalTimeout is how long an approval-mode remediation waits before
+	// giving up on a person and escalating.
+	//
+	// Defaults to DefaultApprovalTimeout. Silence is the failure mode of a
+	// human gate, so this cannot be disabled: a gate that waits for ever turns
+	// an alert into nothing, which is worse than having no gate.
+	//
+	// +optional
+	ApprovalTimeout *metav1.Duration `json:"approvalTimeout,omitempty"`
 }
 
 // Guards bound how often a strategy may act. Both limits are opt-in: zero

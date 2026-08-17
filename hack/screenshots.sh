@@ -76,6 +76,12 @@ DETAIL="$(kubectl -n "$NAMESPACE" get remediations \
 	-o jsonpath='{range .items[?(@.status.state=="Failed")]}{.metadata.name}{"\n"}{end}' | head -1)"
 [ -n "$DETAIL" ] || DETAIL="$(kubectl -n "$NAMESPACE" get remediations -o jsonpath='{.items[0].metadata.name}')"
 
+# And a waiting one, if the cluster has any: it is the only page that asks the
+# reader for something, and a screenshot of it says more about what this product
+# is than any amount of prose about human approval.
+WAITING="$(kubectl -n "$NAMESPACE" get remediations \
+	-o jsonpath='{range .items[?(@.status.state=="AwaitingApproval")]}{.metadata.name}{"\n"}{end}' | head -1)"
+
 shoot() {
 	local name="$1" path="$2" size="$3"
 	"$CHROME" --headless=new --disable-gpu --hide-scrollbars --force-color-profile=srgb \
@@ -93,5 +99,10 @@ shoot remediations "/remediations"              "1400,900"
 shoot detail       "/remediations/${DETAIL}"    "1400,1250"
 shoot namespaces   "/namespaces"                "1400,900"
 shoot strategies   "/strategies"                "1400,900"
+if [ -n "$WAITING" ]; then
+	shoot approval "/remediations/${WAITING}" "1400,1100"
+else
+	printf '    %-14s %s\n' "approval" "skipped: nothing is awaiting approval"
+fi
 
 echo "==> Done — docs/screenshots/"

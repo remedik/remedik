@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/remedik/remedik/api/v1alpha1"
 )
 
@@ -300,5 +302,162 @@ func TestOverviewShowsOnlyATail(t *testing.T) {
 	}
 	if view.Total != len(records) {
 		t.Errorf("Total = %d, want every record counted", view.Total)
+	}
+}
+
+// A queue nobody can see is a queue nobody empties, and an approval gate that
+// silently accumulates is worse than none: it looks like remediation working.
+func TestBuildAttention_WaitingForApprovalComesFirst(t *testing.T) {
+	waiting := succeededRemediation("waiting", 5)
+	waiting.Status.State = v1alpha1.RemediationStateAwaitingApproval
+	waiting.Status.Message = "waiting for approval; 12m left before this escalates"
+
+	// A failure nobody was told about, which is the loudest of the reports.
+	untold := failedRemediation("untold", 4)
+	untold.Status.Escalation = nil
+
+	panel := buildAttention(ptrs([]v1alpha1.Remediation{untold, waiting}))
+
+	if len(panel.Items) < 2 {
+		t.Fatalf("items = %d, want the waiting record and the failure", len(panel.Items))
+	}
+	// First, because it is the only entry where somebody doing something
+	// changes the outcome. The rest are reports; this is a request.
+	if !strings.Contains(panel.Items[0].Label, "waiting for you") {
+		t.Errorf("first item = %q, want the approval queue ahead of the reports",
+			panel.Items[0].Label)
+	}
+	if !strings.Contains(panel.Items[0].Detail, "escalate") {
+		t.Errorf("detail = %q, want it to say what happens if nobody looks",
+			panel.Items[0].Detail)
+	}
+	// And it links to the queue, so the panel is a way in rather than a notice.
+	if !strings.Contains(panel.Items[0].URL, "AwaitingApproval") {
+		t.Errorf("URL = %q, want it to filter to what is waiting", panel.Items[0].URL)
+	}
+}
+
+// A record waiting for a retry needs nobody; one waiting for a person needs
+// somebody now. They must not look alike.
+func TestStateTone_ApprovalDoesNotLookLikeARetry(t *testing.T) {
+	waiting := stateTone(v1alpha1.RemediationStateAwaitingApproval)
+	pending := stateTone(v1alpha1.RemediationStatePending)
+
+	if waiting == pending {
+		t.Errorf("AwaitingApproval and Pending share the tone %q; one needs a "+
+			"person and the other needs nothing", waiting)
+	}
+}
+
+// "In flight" covers two situations a reader acts on differently: waiting on
+// remedik, and waiting on a person. Labelling an approval queue "pending or
+// running" describes a busy operator when the truth is a queue nobody emptied.
+func TestOverview_InFlightSaysWhichHalfIsWaitingOnAPerson(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		counts     stateCounts
+		wantDetail string
+		wantState  string
+	}{
+		{
+			name:       "nothing is waiting for a person",
+			counts:     stateCounts{inFlight: 3},
+			wantDetail: "pending or running",
+			wantState:  string(v1alpha1.RemediationStatePending),
+		},
+		{
+			name:       "everything is waiting for a person",
+			counts:     stateCounts{inFlight: 2, awaiting: 2},
+			wantDetail: "waiting for a person",
+			wantState:  string(v1alpha1.RemediationStateAwaitingApproval),
+		},
+		{
+			name:       "some of each",
+			counts:     stateCounts{inFlight: 5, awaiting: 2},
+			wantDetail: "2 waiting for a person, 3 pending or running",
+			wantState:  string(v1alpha1.RemediationStateAwaitingApproval),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := inFlightDetail(tc.counts); got != tc.wantDetail {
+				t.Errorf("detail = %q, want %q", got, tc.wantDetail)
+			}
+			// The link goes to whichever half somebody can act on.
+			if got := inFlightURL(tc.counts); got != (Filter{State: tc.wantState}).Path() {
+				t.Errorf("URL = %q, want the %s filter", got, tc.wantState)
+			}
+		})
+	}
+}
+
+// And the tally itself: a waiting record is in flight and also counted apart.
+func TestOverview_AwaitingApprovalIsInFlightAndCountedApart(t *testing.T) {
+	counts := tally([]*v1alpha1.Remediation{
+		{Status: v1alpha1.RemediationStatus{State: v1alpha1.RemediationStateAwaitingApproval}},
+		{Status: v1alpha1.RemediationStatus{State: v1alpha1.RemediationStateRunning}},
+		{Status: v1alpha1.RemediationStatus{State: v1alpha1.RemediationStateSucceeded}},
+	})
+	if counts.awaiting != 1 {
+		t.Errorf("awaiting = %d, want 1", counts.awaiting)
+	}
+	if counts.inFlight != 2 {
+		t.Errorf("inFlight = %d, want 2: waiting for approval has not finished", counts.inFlight)
+	}
+}
+
+// The activity panel is about when remediations ran, not when their records
+// were written. The two differ for anything that did not arrive in real time —
+// a restored backup, or a seeded demonstration cluster — and bucketing by
+// creation piles a day of work into one bar and flattens the rest to nothing.
+func TestActivity_BucketsByWhenItRanNotWhenItWasWritten(t *testing.T) {
+	now := time.Date(2026, 8, 18, 12, 30, 0, 0, time.UTC)
+	written := metav1.NewTime(now.Add(-time.Minute))
+
+	ran := func(hoursAgo int) *v1alpha1.Remediation {
+		at := metav1.NewTime(now.Add(-time.Duration(hoursAgo) * time.Hour))
+		return &v1alpha1.Remediation{
+			ObjectMeta: metav1.ObjectMeta{CreationTimestamp: written},
+			Status: v1alpha1.RemediationStatus{
+				State:     v1alpha1.RemediationStateSucceeded,
+				StartedAt: &at,
+			},
+		}
+	}
+
+	panel := buildActivity([]*v1alpha1.Remediation{ran(1), ran(2), ran(3)}, now)
+
+	if panel.Busiest != 1 {
+		t.Errorf("busiest hour = %d, want 1: three runs an hour apart were "+
+			"counted in one bar", panel.Busiest)
+	}
+
+	occupied := 0
+	for _, bar := range panel.Bars {
+		if bar.Total > 0 {
+			occupied++
+		}
+	}
+	if occupied != 3 {
+		t.Errorf("occupied bars = %d, want 3", occupied)
+	}
+}
+
+// A record that never ran has no start, so it counts where it exists.
+func TestActivity_ARecordThatHasNotRunCountsWhereItExists(t *testing.T) {
+	now := time.Date(2026, 8, 18, 12, 30, 0, 0, time.UTC)
+	rem := &v1alpha1.Remediation{
+		ObjectMeta: metav1.ObjectMeta{
+			CreationTimestamp: metav1.NewTime(now.Add(-90 * time.Minute)),
+		},
+		Status: v1alpha1.RemediationStatus{State: v1alpha1.RemediationStateAwaitingApproval},
+	}
+
+	if got := ranAt(rem); !got.Equal(rem.CreationTimestamp.Time) {
+		t.Errorf("ranAt() = %v, want the creation time", got)
+	}
+	if panel := buildActivity([]*v1alpha1.Remediation{rem}, now); panel.Total != 0 {
+		// It is in a bar, but it contributes to none of the three outcomes, so
+		// the total counts nothing it did not do.
+		t.Logf("total = %d", panel.Total)
 	}
 }

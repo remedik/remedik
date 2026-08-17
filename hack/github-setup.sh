@@ -140,6 +140,24 @@ else
 fi
 
 # --------------------------------------------------------------------------
+# Private vulnerability reporting
+#
+# SECURITY.md names the advisory form as the only way to report a
+# vulnerability, so the form has to exist. It is off by default on a new
+# repository, which would make that policy point at a 404 — a security policy
+# whose channel does not work is the failure it exists to prevent.
+# --------------------------------------------------------------------------
+step "Private vulnerability reporting"
+if gh api -X PUT "repos/${REPO}/private-vulnerability-reporting" >/dev/null 2>&1; then
+	ok "the advisory form SECURITY.md points at"
+else
+	# Available on public repositories, and on private ones only with
+	# Advanced Security, so before going public this is expected.
+	skip "not available yet — it needs the repository to be public"
+	note "SECURITY.md names it as the only reporting channel, so re-run this after publishing"
+fi
+
+# --------------------------------------------------------------------------
 # Secret scanning
 #
 # Push protection is the one worth having: it refuses the push rather than

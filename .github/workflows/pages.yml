@@ -26,6 +26,8 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # A hang would otherwise run to GitHub's six-hour default.
+    timeout-minutes: 15
 
     # Pages needs a public repository or a paid plan, so this waits rather
     # than failing every push until then.

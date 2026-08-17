@@ -21,6 +21,8 @@ jobs:
   analysis:
     name: analysis
     runs-on: ubuntu-latest
+    # A hang would otherwise run to GitHub's six-hour default.
+    timeout-minutes: 20
 
     # Scorecard publishes to the code-scanning API, which needs GitHub
     # Advanced Security on a private repository and is free on a public one.

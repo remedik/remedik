@@ -1,22 +1,24 @@
 # Advanced setup
 
-> **Everything on this page is planned, not shipped.** The chart values for
-> these are not shipped either: a key that quietly does nothing is worse than
-> a missing one, because somebody sets it, believes it, and finds out during
-> an incident. The YAML below is a design, not a configuration you can apply.
+> **Everything on this page is planned, not shipped**, and the chart values for
+> it are not shipped either: a key that quietly does nothing is worse than a
+> missing one, because somebody sets it, believes it, and finds out during an
+> incident. The YAML below is a design, not a configuration you can apply.
 >
-> **Everything on this page is planned, not shipped.** Each section is a
-> design commitment; the values schemas show where remedik is going, and
-> become concrete, tested documentation when the capability lands. For what
-> works today see [QUICKSTART.md](../QUICKSTART.md) and the generated
-> [chart reference](../charts/remedik/README.md).
+> Each section is a design commitment. It becomes concrete, tested
+> documentation when the capability lands. For what works today see
+> [QUICKSTART.md](../QUICKSTART.md), [troubleshooting](troubleshooting.md) and
+> the generated [chart reference](../charts/remedik/README.md).
 
-## Execution modes & notifications
+## Notifications
 
-Only `execution.mode: auto` exists today. Per-strategy `approval` and
-`manual`, and `notify.level` (`none` / `onCompletion` / `verbose`), arrive
-with the Slack change — see
-[architecture](architecture.md#execution-modes-per-strategy).
+`execution.mode` is **shipped**: `auto`, `approval` and `manual` all work, and
+approving is a `kubectl patch` on the remediation — see
+[QUICKSTART](../QUICKSTART.md) and
+[architecture](architecture.md#execution-modes). What is still planned is
+`notify.level` (`none` / `onCompletion` / `verbose`) and the Slack bot that
+would carry it, which is a nicer front end for the gate rather than the thing
+that brings it.
 
 ## Install profiles
 

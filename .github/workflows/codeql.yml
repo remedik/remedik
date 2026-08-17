@@ -24,6 +24,8 @@ jobs:
   analyze:
     name: analyze
     runs-on: ubuntu-latest
+    # A hang would otherwise run to GitHub's six-hour default.
+    timeout-minutes: 30
 
     # Code scanning needs GitHub Advanced Security on a private repository,
     # and is free on a public one. Rather than leave a permanently red

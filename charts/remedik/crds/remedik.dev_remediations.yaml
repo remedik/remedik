@@ -4,6 +4,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.21.0
+    remedik.dev/schema-hash: 8a56faeef89ec2da
   name: remediations.remedik.dev
 spec:
   group: remedik.dev
@@ -94,6 +95,48 @@ spec:
                 required:
                 - fingerprint
                 type: object
+              approval:
+                description: |-
+                  Approval is the human decision. Empty means nobody has decided yet.
+
+                  It is in the spec rather than the status because it is an input, made by
+                  a person, not an observation made by the controller — and because a
+                  person patching a spec is the ordinary way to tell a Kubernetes object
+                  something.
+                properties:
+                  by:
+                    description: |-
+                      By is who claims to have decided.
+
+                      remedik does not verify it and does not present it as verified: it cannot
+                      authenticate a patch without an admission webhook. The cluster's audit log
+                      is the authority on who issued the write; this is a useful cross-check and
+                      the thing a reader of the record sees first.
+                    type: string
+                  decision:
+                    description: Decision is "approve" or "deny".
+                    enum:
+                    - approve
+                    - deny
+                    type: string
+                  note:
+                    description: |-
+                      Note is why, in the decider's words. It survives on the record, which is
+                      the point: "denied, we are already rolling forward" is worth more to the
+                      next person than the decision alone.
+                    type: string
+                required:
+                - decision
+                type: object
+              approvalDeadline:
+                description: |-
+                  ApprovalDeadline is when an approval-mode remediation stops waiting.
+
+                  Absolute rather than a duration, and set when the record is created: a
+                  duration would restart on every reconcile, so a remediation would wait
+                  for ever as long as anything requeued it.
+                format: date-time
+                type: string
               dryRun:
                 description: |-
                   DryRun records the posture this execution ran under, resolved from
@@ -156,6 +199,18 @@ spec:
                   - action
                   type: object
                 type: array
+              mode:
+                default: auto
+                description: |-
+                  Mode is the strategy's execution mode, copied at creation for the same
+                  reason the steps are: an in-flight remediation keeps the behaviour it
+                  started with, and the record still explains itself after the strategy is
+                  edited or deleted.
+                enum:
+                - auto
+                - approval
+                - manual
+                type: string
               retries:
                 description: |-
                   Retries is the retry budget copied from the strategy at creation
@@ -396,6 +451,7 @@ spec:
                 description: State is the current lifecycle state.
                 enum:
                 - Pending
+                - AwaitingApproval
                 - Running
                 - Succeeded
                 - Failed

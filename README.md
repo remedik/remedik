@@ -160,6 +160,43 @@ run too — the one exception in remedik, so a trial proves the path before
 anybody needs it. `remedik_escalations_total{outcome="Failed"}` is its own
 alertable signal: a remediation failed and nobody was told.
 
+**Some things should wait for a person, and remedik will.** A strategy can ask
+before it acts, per strategy — a node drain is not a pod restart:
+
+```yaml
+execution:
+  mode: approval          # auto (default), approval, or manual
+  approvalTimeout: 30m
+```
+
+The remediation then sits in `AwaitingApproval` and does nothing — nothing is
+resolved, nothing is planned — until somebody decides:
+
+```bash
+kubectl -n remedik patch remediation drain-safely-x7k2q --type merge \
+  -p '{"spec":{"approval":{"decision":"approve","by":"dana"}}}'
+```
+
+A patch, not a bot: attributable in your cluster's audit log, and usable from a
+terminal, a runbook, a GitOps commit or a chat integration you write. It runs
+against the cluster as it is when you approve, not as it was when the alert
+fired. And **silence escalates** — no decision within `approvalTimeout` and the
+alert reaches on-call the ordinary way, because a gate that quietly drops what
+nobody looked at is worse than no gate.
+
+**And one command stops everything, with no restart:**
+
+```bash
+kubectl -n remedik patch configmap remedik-pause --type merge \
+  -p '{"data":{"paused":"true","reason":"network incident"}}'
+```
+
+Every replica is dry-run within seconds. It does not go quiet: records keep
+appearing, marked `Simulated` and labelled with your reason, so you can see what
+was suppressed rather than guess. remedik's RBAC on that ConfigMap is read-only
+on that one name — **it cannot un-pause itself**, because a switch the tool can
+flip is not a switch.
+
 **Posture is per namespace, so adoption is not all-or-nothing.** `dryRun` is
 the default; `namespacePosture` overrides it for the namespaces that have
 earned it, in one install:
@@ -250,9 +287,9 @@ kind is always hiding among the first.
 
 ## Design pillars
 
-**The execution path is deterministic.** YAML decides, guards bound, and —
-from v0.2.0 — humans approve destructive steps. Optional AI features read
-and explain; they never execute. See
+**The execution path is deterministic.** YAML decides, guards bound, and
+humans approve what you decide needs approving. Optional AI features read and
+explain; they never execute. See
 [ADR-0003](docs/adr/0003-deterministic-core-ai-read-only.md).
 
 **Dry-run is a guarantee, not a flag.** Every action implements `Resolve`,
@@ -284,7 +321,9 @@ the record still explains the run after the strategy is edited or deleted.
 | [QUICKSTART.md](QUICKSTART.md) | Install it, or work on it |
 | [docs/invariants.md](docs/invariants.md) | **What remedik promises never to do** — read this before granting it write access |
 | [docs/routing.md](docs/routing.md) | Waking on-call only when remediation did not work — the routing, and the safety net that makes it safe to rely on |
+| [docs/troubleshooting.md](docs/troubleshooting.md) | **Why did nothing happen?** — the six gates an alert passes, and the command that answers each |
 | [docs/architecture.md](docs/architecture.md) | Components, state machine, guards, topologies |
+| [docs/managed-kubernetes.md](docs/managed-kubernetes.md) | EKS, GKE and AKS — what is the same, what differs about alerts and nodes, and what is untested |
 | [docs/advanced-setup.md](docs/advanced-setup.md) | Hub/spoke, cloud packs, audit sinks, AI diagnosis (planned) |
 | [charts/remedik/README.md](charts/remedik/README.md) | Every chart value |
 | [examples/strategies/](examples/strategies/) | Cookbook |
@@ -298,12 +337,15 @@ the record still explains the run after the strategy is edited or deleted.
 - **v0.1.0 (in progress)** — alert gateway, `RemediationStrategy` and
   `Remediation` CRDs, deterministic engine with guards, dry-run and retries,
   fourteen actions across workloads, capacity, nodes and escape hatches,
-  three guards including `blastRadius`, escalation through `onFailure.steps`,
-  per-namespace posture, a filterable read-only dashboard, a Helm chart whose RBAC follows the features you
+  four guards including `blastRadius` and a give-up guard that stops
+  remediating what is not getting better, escalation through
+  `onFailure.steps`, human approval and a one-command kill switch,
+  per-namespace posture, record retention, leader election, a filterable
+  read-only dashboard, a Helm chart whose RBAC follows the features you
   enable, Prometheus metrics with a Grafana dashboard and alerts, signed
   releases.
-- **v0.2.0** — the Slack bot with approval buttons and manual commands,
-  namespace health, audit sinks (Splunk HEC, Loki, Elasticsearch).
+- **v0.2.0** — a Slack bot as a front end for the approval gate that already
+  exists, audit sinks (Splunk HEC, Loki, Elasticsearch).
 - **Later** — hub/spoke multi-cluster, cloud packs, `ActionPlugin` CRD, MCP
   server, workload-aware cost recommendations.
 

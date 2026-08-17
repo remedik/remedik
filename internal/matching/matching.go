@@ -88,3 +88,48 @@ func Select(a alert.Alert, rules []Rule) (Rule, bool) {
 	}
 	return candidates[0], true
 }
+
+// WhyNot explains, for one rule, why it did not handle an alert.
+//
+// This is the question operators actually ask, and it is the one the product
+// answered worst: "no strategy matches this alert" is true and useless when
+// nine strategies exist and one of them was meant to. The mistake is nearly
+// always a label — a strategy matching `namespace: payments` against an alert
+// whose label is `exported_namespace`, or a value with a trailing space.
+//
+// It returns an empty string when the rule does match, so a caller can build
+// the whole picture by asking about every rule.
+//
+// Deliberately in this package and not in the engine: the reason a rule did not
+// match is knowledge about matching, and it is stdlib-only so it stays as easy
+// to test as the decision it explains.
+func WhyNot(a alert.Alert, r Rule) string {
+	if !r.Enabled {
+		return "disabled"
+	}
+	if len(r.Match) == 0 {
+		return "no matchers, which would match every alert, so it is refused"
+	}
+
+	// Sorted, so the same mismatch reads the same way every time. An
+	// explanation that changes between two runs of the same input is one
+	// nobody trusts.
+	keys := make([]string, 0, len(r.Match))
+	for key := range r.Match {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		want := r.Match[key]
+		got, present := a.Labels[key]
+		switch {
+		case !present:
+			return "the alert has no " + key + " label; the strategy wants " +
+				key + "=" + want
+		case got != want:
+			return key + " is " + got + ", the strategy wants " + want
+		}
+	}
+	return ""
+}

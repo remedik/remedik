@@ -1,4 +1,4 @@
-{{- if .Values.workloadAlerts.enabled }}
+{{- if (.Values.workloadAlerts).enabled }}
 {{- /*
   Alerts about your workloads, carrying the label remedik needs to act on them.
 
@@ -43,9 +43,9 @@ spec:
               kube_pod_owner{job="kube-state-metrics", owner_kind="ReplicaSet"},
               "deployment", "$1", "owner_name", "(.+)-[^-]+$"
             ) >= 1
-          for: {{ .Values.workloadAlerts.crashLoopFor }}
+          for: {{ .Values.workloadAlerts.crashLoopFor | default "15m" }}
           labels:
-            severity: {{ .Values.workloadAlerts.severity }}
+            severity: {{ .Values.workloadAlerts.severity | default "warning" }}
           annotations:
             summary: >-
               {{ "{{ $labels.namespace }}/{{ $labels.deployment }}" }} is crash looping
@@ -72,9 +72,9 @@ spec:
               kube_pod_owner{job="kube-state-metrics", owner_kind="StatefulSet"},
               "statefulset", "$1", "owner_name", "(.+)"
             ) >= 1
-          for: {{ .Values.workloadAlerts.crashLoopFor }}
+          for: {{ .Values.workloadAlerts.crashLoopFor | default "15m" }}
           labels:
-            severity: {{ .Values.workloadAlerts.severity }}
+            severity: {{ .Values.workloadAlerts.severity | default "warning" }}
           annotations:
             summary: >-
               {{ "{{ $labels.namespace }}/{{ $labels.statefulset }}" }} is crash looping
@@ -102,9 +102,9 @@ spec:
               kube_pod_owner{job="kube-state-metrics", owner_kind="ReplicaSet"},
               "deployment", "$1", "owner_name", "(.+)-[^-]+$"
             ) >= 1
-          for: {{ .Values.workloadAlerts.oomFor }}
+          for: {{ .Values.workloadAlerts.oomFor | default "5m" }}
           labels:
-            severity: {{ .Values.workloadAlerts.severity }}
+            severity: {{ .Values.workloadAlerts.severity | default "warning" }}
           annotations:
             summary: >-
               {{ "{{ $labels.namespace }}/{{ $labels.deployment }}" }} is being OOM killed

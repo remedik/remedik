@@ -1,4 +1,4 @@
-{{- if .Values.pause.create }}
+{{- if eq (include "remedik.pauseCreate" .) "true" }}
 {{- /*
   The kill switch, created with the chart so the command that flips it works
   without anybody having to create an object first.
@@ -15,7 +15,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ .Values.pause.configMapName }}
+  name: {{ include "remedik.pauseConfigMapName" . }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "remedik.labels" . | nindent 4 }}
@@ -25,7 +25,7 @@ data:
   # "true", "yes", "on" or "1" all pause. Anything else runs: a switch that
   # stopped remediation because of a typo would be worse than one that ignored
   # it, and the operator logs which state is in force either way.
-  paused: {{ .Values.pause.paused | quote }}
+  paused: {{ (.Values.pause).paused | default false | quote }}
   # Optional. Ends up on every record made while paused, so somebody reading
   # the audit trail next week learns why rather than only that.
   reason: ""

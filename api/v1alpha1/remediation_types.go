@@ -6,7 +6,7 @@ import (
 
 // RemediationState is the lifecycle state of one execution.
 //
-// +kubebuilder:validation:Enum=Pending;Running;Succeeded;Failed;Simulated
+// +kubebuilder:validation:Enum=Pending;AwaitingApproval;Running;Succeeded;Failed;Simulated
 type RemediationState string
 
 const (
@@ -22,6 +22,16 @@ const (
 	// RemediationStateSimulated means dry-run was active: the plan was
 	// produced and recorded, and nothing was mutated.
 	RemediationStateSimulated RemediationState = "Simulated"
+	// RemediationStateAwaitingApproval means a person has to decide.
+	//
+	// Nothing has been resolved, planned or executed. That is deliberate: a
+	// remediation waiting for approval must not already have worked out what it
+	// would do to a cluster that has since moved on, so the plan is produced
+	// after the decision.
+	//
+	// It is deliberately not Running, so that a record found in Running
+	// continues to mean only one thing: the process died.
+	RemediationStateAwaitingApproval RemediationState = "AwaitingApproval"
 )
 
 // IsTerminal reports whether no further work will happen in this state.
@@ -29,7 +39,8 @@ func (s RemediationState) IsTerminal() bool {
 	switch s {
 	case RemediationStateSucceeded, RemediationStateFailed, RemediationStateSimulated:
 		return true
-	case RemediationStatePending, RemediationStateRunning:
+	case RemediationStatePending, RemediationStateRunning,
+		RemediationStateAwaitingApproval:
 		return false
 	default:
 		return false
@@ -57,6 +68,16 @@ const (
 	// excluded from every guard, because counting a decision as an action
 	// would extend the window that produced it.
 	ReasonGaveUp = "GaveUp"
+
+	// ReasonApprovalTimeout means nobody decided in time. It escalates,
+	// because the failure mode of a human gate is that nobody looks, and a
+	// gate that quietly drops what nobody looked at turns an alert into
+	// silence.
+	ReasonApprovalTimeout = "ApprovalTimeout"
+
+	// ReasonDenied means somebody looked and said no. It does not escalate:
+	// telling them again is not information.
+	ReasonDenied = "Denied"
 	// ReasonUnknownAction means a step referenced an action the operator
 	// does not implement.
 	ReasonUnknownAction = "UnknownAction"
@@ -130,6 +151,34 @@ type RemediationSpec struct {
 	// +kubebuilder:validation:Enum=all;firstSuccess
 	// +optional
 	EscalationMode EscalationMode `json:"escalationMode,omitempty"`
+
+	// Mode is the strategy's execution mode, copied at creation for the same
+	// reason the steps are: an in-flight remediation keeps the behaviour it
+	// started with, and the record still explains itself after the strategy is
+	// edited or deleted.
+	//
+	// +kubebuilder:default=auto
+	// +optional
+	Mode ExecutionMode `json:"mode,omitempty"`
+
+	// ApprovalDeadline is when an approval-mode remediation stops waiting.
+	//
+	// Absolute rather than a duration, and set when the record is created: a
+	// duration would restart on every reconcile, so a remediation would wait
+	// for ever as long as anything requeued it.
+	//
+	// +optional
+	ApprovalDeadline *metav1.Time `json:"approvalDeadline,omitempty"`
+
+	// Approval is the human decision. Empty means nobody has decided yet.
+	//
+	// It is in the spec rather than the status because it is an input, made by
+	// a person, not an observation made by the controller — and because a
+	// person patching a spec is the ordinary way to tell a Kubernetes object
+	// something.
+	//
+	// +optional
+	Approval *Approval `json:"approval,omitempty"`
 
 	// DryRun records the posture this execution ran under, resolved from
 	// the target's namespace when the record was created.
@@ -254,6 +303,45 @@ type EscalationStatus struct {
 	// +optional
 	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
 }
+
+// Approval is a human decision on a remediation.
+//
+//	kubectl -n remedik patch remediation <name> --type merge \
+//	  -p '{"spec":{"approval":{"decision":"approve","by":"dana"}}}'
+type Approval struct {
+	// Decision is "approve" or "deny".
+	//
+	// +kubebuilder:validation:Enum=approve;deny
+	Decision ApprovalDecision `json:"decision"`
+
+	// By is who claims to have decided.
+	//
+	// remedik does not verify it and does not present it as verified: it cannot
+	// authenticate a patch without an admission webhook. The cluster's audit log
+	// is the authority on who issued the write; this is a useful cross-check and
+	// the thing a reader of the record sees first.
+	//
+	// +optional
+	By string `json:"by,omitempty"`
+
+	// Note is why, in the decider's words. It survives on the record, which is
+	// the point: "denied, we are already rolling forward" is worth more to the
+	// next person than the decision alone.
+	//
+	// +optional
+	Note string `json:"note,omitempty"`
+}
+
+// ApprovalDecision is approve or deny.
+type ApprovalDecision string
+
+const (
+	// ApprovalApprove lets the remediation run.
+	ApprovalApprove ApprovalDecision = "approve"
+	// ApprovalDeny ends it without running anything, and without escalating:
+	// somebody looked and said no, and telling them again is not information.
+	ApprovalDeny ApprovalDecision = "deny"
+)
 
 // StepPhase is the outcome of a single step.
 //

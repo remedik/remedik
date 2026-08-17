@@ -199,9 +199,9 @@ func buildOverview(
 		{
 			Label:  "In flight",
 			Value:  fmt.Sprint(counts.inFlight),
-			Detail: "pending or running",
+			Detail: inFlightDetail(counts),
 			Tone:   toneRunning,
-			URL:    Filter{State: string(v1alpha1.RemediationStatePending)}.Path(),
+			URL:    inFlightURL(counts),
 		},
 	}
 
@@ -220,8 +220,14 @@ func buildOverview(
 }
 
 // stateCounts is the headline tally.
+//
+// awaiting is counted apart from inFlight although it is included in it,
+// because the two are in flight for opposite reasons: one is waiting on
+// remedik, the other is waiting on a person. A number labelled "pending or
+// running" that silently included an approval queue would describe a busy
+// operator when the truth is a queue nobody has emptied.
 type stateCounts struct {
-	succeeded, failed, simulated, inFlight int
+	succeeded, failed, simulated, inFlight, awaiting int
 }
 
 func tally(remediations []*v1alpha1.Remediation) stateCounts {
@@ -234,6 +240,9 @@ func tally(remediations []*v1alpha1.Remediation) stateCounts {
 			counts.failed++
 		case v1alpha1.RemediationStateSimulated:
 			counts.simulated++
+		case v1alpha1.RemediationStateAwaitingApproval:
+			counts.awaiting++
+			counts.inFlight++
 		case v1alpha1.RemediationStatePending, v1alpha1.RemediationStateRunning:
 			counts.inFlight++
 		default:
@@ -244,6 +253,30 @@ func tally(remediations []*v1alpha1.Remediation) stateCounts {
 		}
 	}
 	return counts
+}
+
+// inFlightDetail says what the number is made of, because "in flight" covers
+// two situations a reader would act on differently.
+func inFlightDetail(counts stateCounts) string {
+	working := counts.inFlight - counts.awaiting
+
+	switch {
+	case counts.awaiting == 0:
+		return "pending or running"
+	case working == 0:
+		return "waiting for a person"
+	default:
+		return fmt.Sprintf("%d waiting for a person, %d pending or running",
+			counts.awaiting, working)
+	}
+}
+
+// inFlightURL points at whichever half a reader can do something about.
+func inFlightURL(counts stateCounts) string {
+	if counts.awaiting > 0 {
+		return Filter{State: string(v1alpha1.RemediationStateAwaitingApproval)}.Path()
+	}
+	return Filter{State: string(v1alpha1.RemediationStatePending)}.Path()
 }
 
 func buildPosturePanel(posture Posture) PosturePanel {
@@ -287,9 +320,13 @@ func buildPosturePanel(posture Posture) PosturePanel {
 }
 
 func buildAttention(remediations []*v1alpha1.Remediation) AttentionPanel {
-	var failed, unheard, untold, interrupted int
+	var failed, unheard, untold, interrupted, waiting int
 
 	for _, rem := range remediations {
+		if rem.Status.State == v1alpha1.RemediationStateAwaitingApproval {
+			waiting++
+			continue
+		}
 		if rem.Status.State != v1alpha1.RemediationStateFailed {
 			continue
 		}
@@ -309,7 +346,25 @@ func buildAttention(remediations []*v1alpha1.Remediation) AttentionPanel {
 	var panel AttentionPanel
 	failedURL := Filter{State: string(v1alpha1.RemediationStateFailed)}.Path()
 
-	// Ordered by how much silence each represents.
+	// First, ahead of anything that already happened: these are the only
+	// entries where somebody doing something changes the outcome. Everything
+	// below is a report; this is a request.
+	//
+	// An approval gate that silently accumulates is worse than none — it looks
+	// like remediation working — so a queue nobody can see is the failure this
+	// entry exists to prevent.
+	if waiting > 0 {
+		panel.Items = append(panel.Items, AttentionItem{
+			Count: waiting,
+			Label: plural(waiting, "remediation-remediations") + " waiting for you",
+			Detail: "Nothing will run until somebody approves or denies them, and " +
+				"they escalate if nobody does.",
+			Tone: toneWaiting,
+			URL:  Filter{State: string(v1alpha1.RemediationStateAwaitingApproval)}.Path(),
+		})
+	}
+
+	// Then, ordered by how much silence each represents.
 	if unheard > 0 {
 		panel.Items = append(panel.Items, AttentionItem{
 			Count: unheard,
@@ -351,6 +406,22 @@ func buildAttention(remediations []*v1alpha1.Remediation) AttentionPanel {
 	return panel
 }
 
+// ranAt is when a remediation acted, which is what a panel called Activity is
+// about. It is within seconds of when the record was made for anything remedik
+// created itself, and it is the honest answer for anything that did not arrive
+// in real time — a record restored from a backup, or a cluster seeded for a
+// demonstration, would otherwise pile a day of work into the minute it was
+// written and flatten every other hour to nothing.
+//
+// A record that has not run has no start, so it counts where it exists: created
+// is the only time it has.
+func ranAt(rem *v1alpha1.Remediation) time.Time {
+	if rem.Status.StartedAt != nil {
+		return rem.Status.StartedAt.Time
+	}
+	return rem.CreationTimestamp.Time
+}
+
 func buildActivity(remediations []*v1alpha1.Remediation, now time.Time) ActivityPanel {
 	panel := ActivityPanel{
 		Bars:   make([]ActivityBar, activityHours),
@@ -365,11 +436,11 @@ func buildActivity(remediations []*v1alpha1.Remediation, now time.Time) Activity
 	}
 
 	for _, rem := range remediations {
-		created := rem.CreationTimestamp.Time
-		if created.Before(start) {
+		when := ranAt(rem)
+		if when.Before(start) {
 			continue
 		}
-		bucket := int(created.Sub(start) / time.Hour)
+		bucket := int(when.Sub(start) / time.Hour)
 		if bucket < 0 || bucket >= len(panel.Bars) {
 			continue
 		}

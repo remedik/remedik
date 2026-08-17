@@ -8,6 +8,7 @@ package dashboard
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/remedik/remedik/api/v1alpha1"
@@ -44,6 +45,24 @@ type RemediationView struct {
 	// Failed is the terminal state, kept as a bool because the page asks the
 	// question more than once and State is a display string.
 	Failed bool
+	// Approval is the pair of commands that decide a waiting remediation, and
+	// nil for every other record.
+	//
+	// The dashboard cannot write and is not going to: an approve button needs
+	// an identity model it does not have, and a button whose audit trail cannot
+	// say who asked is worse than no button. But a page that cannot act can
+	// still say exactly what to type, and somebody reading this page is
+	// precisely the person about to go and look for that command.
+	Approval *ApprovalView
+}
+
+// ApprovalView is the decision, as two commands to copy.
+type ApprovalView struct {
+	Approve string
+	Deny    string
+	// Deadline is when silence becomes an escalation.
+	Deadline string
+	Left     string
 }
 
 // EscalationView is the onFailure plan and what became of it.
@@ -90,6 +109,12 @@ func (v RemediationView) NobodyWasTold() bool { return v.Failed && v.Escalation 
 // same thing twice makes a page look like it is padding.
 func (v RemediationView) ShowRawMessage() bool {
 	if v.Message == "" {
+		return false
+	}
+	// The general rule, which the reason list below predates: if the summary
+	// already contains it, printing it again is padding. A record waiting for
+	// approval showed the same sentence twice for exactly this reason.
+	if strings.Contains(v.Summary, v.Message) {
 		return false
 	}
 	return v.Reason != v1alpha1.ReasonStepFailed && v.Reason != v1alpha1.ReasonUnknownAction
@@ -193,7 +218,34 @@ func buildRemediation(rem *v1alpha1.Remediation, now time.Time) RemediationView 
 	}
 	view.Failed = rem.Status.State == v1alpha1.RemediationStateFailed
 	view.Escalation = buildEscalation(rem)
+	view.Approval = buildApproval(rem, now)
 	view.Summary = summarise(rem, view.Steps)
+	return view
+}
+
+// buildApproval is the decision as two commands, for a record that is waiting
+// for one. Every other record gets nil.
+func buildApproval(rem *v1alpha1.Remediation, now time.Time) *ApprovalView {
+	if rem.Status.State != v1alpha1.RemediationStateAwaitingApproval {
+		return nil
+	}
+
+	// The namespace is the record's own, so the command works when pasted
+	// rather than after somebody remembers to change it.
+	patch := func(decision string) string {
+		return fmt.Sprintf(
+			`kubectl -n %s patch remediation %s --type merge \
+  -p '{"spec":{"approval":{"decision":"%s","by":"YOUR-NAME"}}}'`,
+			rem.Namespace, rem.Name, decision)
+	}
+
+	view := &ApprovalView{Approve: patch("approve"), Deny: patch("deny")}
+	if deadline := rem.Spec.ApprovalDeadline; deadline != nil {
+		view.Deadline = FormatTimestamp(deadline.Time)
+		if left := deadline.Sub(now); left > 0 {
+			view.Left = FormatDuration(left)
+		}
+	}
 	return view
 }
 
@@ -315,6 +367,14 @@ func summarise(rem *v1alpha1.Remediation, steps []StepView) string {
 
 	case v1alpha1.RemediationStateRunning:
 		return fmt.Sprintf("Attempt %d is running.", rem.Status.Attempt)
+
+	case v1alpha1.RemediationStateAwaitingApproval:
+		if rem.Status.Message != "" {
+			return rem.Status.Message
+		}
+		return "Waiting for somebody to approve or deny it. Nothing has been " +
+			"resolved or planned yet: that happens when it is approved, against " +
+			"the cluster as it is then."
 
 	case v1alpha1.RemediationStatePending:
 		if rem.Status.Attempt > 0 {

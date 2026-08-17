@@ -21,6 +21,7 @@ suit your alerts, and start with the operator in dry-run.
 | [drain-a-dead-node.yaml](drain-a-dead-node.yaml) | `KubeNodeUnreachable` | Drains it, honouring disruption budgets |
 | [volume-filling-up.yaml](volume-filling-up.yaml) | `KubePersistentVolumeFillingUp` | Expands the claim, where the class allows |
 | [escalate-on-failure.yaml](escalate-on-failure.yaml) | `KubePodCrashLooping`, `KubeNodeNotReady` | Remediates, and pages somebody when that does not work |
+| [ask-before-draining.yaml](ask-before-draining.yaml) | `KubeNodeNotReady` | Waits for a person before draining a node, and escalates if nobody looks. Plus the red-button `manual` mode |
 | [give-up-and-say-so.yaml](give-up-and-say-so.yaml) | `KubePodCrashLooping` | Stops remediating a workload that keeps breaking, and pages, because the restarts were succeeding and the problem was not |
 | [escalate-into-alertmanager.yaml](escalate-into-alertmanager.yaml) | `KubePodCrashLooping` | Raises `RemediationFailed` in Alertmanager, so the routing you already have decides who is woken |
 | [replace-a-node.yaml](replace-a-node.yaml) | `KubeNodeUnreachable` | Drains it here, lets a pipeline terminate the instance |

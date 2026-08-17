@@ -26,3 +26,9 @@ Thumbs.db
 
 # Local scratch files
 *.local.*
+
+# npm is only ever used to run the openspec CLI here, and a stray `npm i`
+# followed by `git add -A` would commit thousands of files nobody reviewed.
+node_modules/
+package.json
+package-lock.json

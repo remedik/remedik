@@ -1,0 +1,107 @@
+# Ask a person before draining a node.
+#
+#   alert → remedik → cordon (reversible, immediate)
+#                  → "may I drain this?" → waits
+#                     ├ approved → drains
+#                     ├ denied   → stops, quietly
+#                     └ nobody   → escalates after 15 minutes
+#
+# This is the mode the original design called the default for destructive
+# actions: `auto` should be an explicit choice, not what happens because nobody
+# picked. A node drain moves every pod on a machine, and a person looking at it
+# for ten seconds catches the cases a guard cannot — "that is the node the
+# database is pinned to".
+#
+# ---------------------------------------------------------------------------
+# Approving is a kubectl patch. There is no bot to install.
+# ---------------------------------------------------------------------------
+#
+#   kubectl -n remedik get remediations
+#   NAME                    STRATEGY         TARGET                STATE
+#   drain-safely-x7k2q      drain-safely     node/aks-np1-0003     AwaitingApproval
+#
+#   kubectl -n remedik patch remediation drain-safely-x7k2q --type merge \
+#     -p '{"spec":{"approval":{"decision":"approve","by":"dana"}}}'
+#
+# Deny the same way with "deny", and add a note — it stays on the record, which
+# is the point: "denied, we are already rolling forward" is worth more to the
+# next person than the decision alone.
+#
+# Four things worth knowing:
+#
+#   1. Nothing is resolved or planned while it waits. The plan is produced when
+#      you approve, against the cluster as it is then — not as it was when the
+#      alert arrived, which may have been an hour ago.
+#   2. Silence escalates. No decision within approvalTimeout and the remediation
+#      fails as ApprovalTimeout and runs onFailure.steps. The failure mode of a
+#      human gate is that nobody looks, and a gate that quietly drops what
+#      nobody looked at turns an alert into silence. So configure the escalation.
+#   3. A denial does not escalate. Somebody looked and said no; telling them
+#      again is not information.
+#   4. `by` is what you claim. remedik cannot authenticate a patch, so the
+#      cluster's audit log is the authority on who issued it. The field is a
+#      useful cross-check and the thing a reader of the record sees first.
+#
+# The dashboard puts waiting remediations at the top of its attention panel,
+# ahead of everything that already happened, because they are the only entries
+# where somebody doing something changes the outcome.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: drain-safely
+spec:
+  enabled: true
+  trigger:
+    match:
+      alertname: KubeNodeNotReady
+
+  execution:
+    mode: approval
+    # Long enough that somebody paged has time to look; short enough that an
+    # incident is not still waiting for a decision when the next shift starts.
+    approvalTimeout: 15m
+
+  guards:
+    cooldown: 30m
+    maxPerHour: 2
+
+  steps:
+    # Cordon first, and notice that it is inside the approved plan rather than
+    # before the gate: waiting to stop new pods landing on a bad node costs
+    # nothing to undo, so if you want it to happen immediately and unattended,
+    # put it in a separate auto-mode strategy on the same alert.
+    - action: node.cordon
+    - action: node.drain
+      with:
+        gracePeriod: "120"
+        ignoreDaemonSets: "true"
+
+  onFailure:
+    retries: 0
+    steps:
+      # Runs for a failed drain AND for nobody approving in time, which is why
+      # it is not optional in this mode.
+      - action: webhook.call
+        with:
+          url: http://monitoring-kube-prometheus-alertmanager.monitoring.svc:9093/api/v2/alerts
+          format: alertmanager
+---
+# And the red button: never starts from an alert, only when somebody asks.
+#
+# For the strategy you want to exist, tested and reviewed in git, without any
+# chance of it firing on its own. Run it by creating a Remediation yourself, or
+# by flipping the mode when you decide to trust it.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: replace-node-by-hand-only
+spec:
+  enabled: true
+  trigger:
+    match:
+      alertname: KubeNodeUnreachable
+  execution:
+    mode: manual
+  steps:
+    - action: node.cordon
+    - action: node.drain

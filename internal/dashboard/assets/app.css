@@ -701,6 +701,24 @@ a.stat:hover {
   padding: 16px 18px 18px;
 }
 
+/* A panel for the one thing on a page that is waiting on the reader. Warn
+   rather than fail: nothing is wrong, somebody just has to decide. */
+.panel-warn {
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+}
+
+.panel-warn .panel-head h2 {
+  color: var(--warn);
+}
+
+.panel-warn .code {
+  /* The surface, not the warn background, so the command stays as readable as
+     every other command on the site. */
+  background: var(--surface);
+  border: 1px solid var(--warn-border);
+}
+
 .panel-head {
   display: flex;
   align-items: center;

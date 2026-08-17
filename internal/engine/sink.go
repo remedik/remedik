@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -122,12 +124,23 @@ func (s *Sink) consumeOne(
 	rule, ok := matching.Select(a, rules)
 	if !ok {
 		s.metrics().Unmatched()
-		log.Info("no strategy matches this alert")
+		log.Info("no strategy matches this alert", "labels", labelsOf(a))
+		explainNoMatch(log, a, rules)
 		return nil
 	}
 
 	strategy := byName[rule.Name]
 	log = log.With("strategy", rule.Name)
+
+	// A manual strategy never starts from an alert. Refused before the target
+	// is resolved and before any guard is consulted, because the answer does
+	// not depend on either.
+	if strategy.Spec.Execution.Mode == v1alpha1.ExecutionModeManual {
+		s.metrics().GuardRejected(rule.Name, reasonManual)
+		log.Info("strategy is manual; alerts never start it")
+		s.recordManualRefusal(strategy, a)
+		return nil
+	}
 
 	// A target that cannot be resolved is a misconfiguration for this
 	// alert. The execution is still created, with an empty target: the
@@ -257,8 +270,13 @@ func (s *Sink) create(
 			Retries:         strategy.Spec.OnFailure.Retries,
 			EscalationSteps: strategy.Spec.OnFailure.Steps,
 			EscalationMode:  escalationMode(strategy),
+			Mode:            executionMode(strategy),
 			DryRun:          s.Posture.DryRunFor(target.Namespace) || s.Pause.Paused(),
 		},
+	}
+
+	if rem.Spec.Mode == v1alpha1.ExecutionModeApproval {
+		rem.Spec.ApprovalDeadline = approvalDeadline(strategy, s.now())
 	}
 
 	// Why it only simulated, on the record rather than only in a log line: a
@@ -338,6 +356,7 @@ func (s *Sink) recordGiveUp(
 			// the entire content of this record.
 			EscalationSteps: strategy.Spec.OnFailure.Steps,
 			EscalationMode:  escalationMode(strategy),
+			Mode:            executionMode(strategy),
 			// Never a dry run. Giving up is a report, and the escalation is
 			// the one thing that runs for real during a trial anyway.
 			DryRun: false,
@@ -380,6 +399,55 @@ func (s *Sink) gaveUpRecently(
 		}
 	}
 	return false, nil
+}
+
+// reasonManual labels the refusal of an alert for a manual strategy. It goes
+// through the guard-rejection metric because it is the same question — "why did
+// nothing happen" — and an operator should not have to know that this particular
+// no came from somewhere else.
+const reasonManual = "manual"
+
+// executionMode reads the strategy's mode, defaulting for a resource created
+// before the field had more than one value.
+func executionMode(strategy *v1alpha1.RemediationStrategy) v1alpha1.ExecutionMode {
+	switch strategy.Spec.Execution.Mode {
+	case v1alpha1.ExecutionModeApproval:
+		return v1alpha1.ExecutionModeApproval
+	case v1alpha1.ExecutionModeManual:
+		return v1alpha1.ExecutionModeManual
+	default:
+		return v1alpha1.ExecutionModeAuto
+	}
+}
+
+// approvalDeadline is when an approval-mode remediation stops waiting.
+//
+// Absolute and set once, at creation. A duration would restart on every
+// reconcile, so a remediation would wait for ever as long as anything requeued
+// it — which is the bug this shape exists to make impossible.
+func approvalDeadline(strategy *v1alpha1.RemediationStrategy, now time.Time) *metav1.Time {
+	timeout := v1alpha1.DefaultApprovalTimeout
+	if d := strategy.Spec.Execution.ApprovalTimeout; d != nil && d.Duration > 0 {
+		timeout = d.Duration
+	}
+	deadline := metav1.NewTime(now.Add(timeout))
+	return &deadline
+}
+
+// EventReasonManualStrategy is the reason on the event published when an alert
+// matches a manual strategy.
+const EventReasonManualStrategy = "ManualStrategy"
+
+// recordManualRefusal publishes the refusal on the strategy, so that
+// `kubectl describe remediationstrategy` answers "why did nothing happen?" for
+// this case in the same place it answers it for a guard.
+func (s *Sink) recordManualRefusal(strategy *v1alpha1.RemediationStrategy, a alert.Alert) {
+	if s.Events == nil {
+		return
+	}
+	s.Events.Eventf(strategy, nil, corev1.EventTypeNormal, EventReasonManualStrategy,
+		"manual", "did not start %s: this strategy is manual and never runs from an alert",
+		a.String())
 }
 
 // EventReasonGuardRejected is the reason on the event published when a
@@ -457,4 +525,46 @@ func escalationMode(strategy *v1alpha1.RemediationStrategy) v1alpha1.EscalationM
 		return v1alpha1.EscalationModeFirstSuccess
 	}
 	return v1alpha1.EscalationModeAll
+}
+
+// explainNoMatch says, per strategy, why it was not the one — at debug level,
+// because on a busy cluster this is one line per strategy per unmatched alert.
+//
+// "no strategy matches this alert" is true and unhelpful when nine strategies
+// exist and one was meant to handle it. The cause is nearly always a label: a
+// strategy matching `namespace` against an alert that carries
+// `exported_namespace`, or a value with a trailing space that YAML shows and
+// nobody sees. This is the answer to "why did nothing happen", which is the
+// question this product gets asked most.
+func explainNoMatch(log *slog.Logger, a alert.Alert, rules []matching.Rule) {
+	if !log.Enabled(context.Background(), slog.LevelDebug) {
+		return
+	}
+	for _, rule := range rules {
+		if why := matching.WhyNot(a, rule); why != "" {
+			log.Debug("a strategy did not match", "strategy", rule.Name, "why", why)
+		}
+	}
+}
+
+// labelsOf renders an alert's labels in a stable order, so the line that says
+// nothing matched carries what to compare a strategy against. Without it, the
+// next step is always "go and find the alert in Alertmanager".
+func labelsOf(a alert.Alert) string {
+	keys := make([]string, 0, len(a.Labels))
+	for key := range a.Labels {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	var b strings.Builder
+	for i, key := range keys {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString(key)
+		b.WriteByte('=')
+		b.WriteString(a.Labels[key])
+	}
+	return b.String()
 }

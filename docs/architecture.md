@@ -39,15 +39,13 @@ follow-up changes.
 
 ## Execution modes (per strategy)
 
-- `auto` — remediate without asking; notify per `notify.level`
-  (`none` / `onCompletion` / `verbose`); everything lands in the audit trail.
-- `approval` — post a Slack card with Approve/Deny; no answer within the
-  timeout → escalate. Default for destructive actions.
-- `manual` — never triggered by alerts; runs only via explicit command.
+- `auto` — remediate without asking. The default.
+- `approval` — wait for a person; escalate if nobody looks.
+- `manual` — never triggered by an alert.
 
-`auto` is the only mode implemented today. The enum rejects the others on
-purpose: a manifest written for a newer remedik fails loudly on an older
-one, rather than quietly remediating without the approval it asked for.
+All three work. [How the gate is built, and why it needs no bot](#execution-modes)
+is further down; `notify.level` (`none` / `onCompletion` / `verbose`) is the part
+still planned.
 
 ## The execution state machine
 
@@ -61,6 +59,23 @@ one, rather than quietly remediating without the approval it asked for.
              +------------+-----> Pending         (retry, after backoff)
           Running on entry -----> Failed/Interrupted
 ```
+
+In `approval` mode the record waits before any of that, and nothing is resolved
+or planned while it does:
+
+```
+(new) --> AwaitingApproval --+-- approved --> Running   (resolved and planned now,
+                             |                           against the cluster as
+                             |                           it is at this moment)
+                             +-- denied ----> Failed/Denied   (no escalation:
+                             |                                 somebody looked)
+                             +-- deadline --> Failed/ApprovalTimeout
+                                                      |
+                                                      +--> onFailure.steps
+```
+
+`AwaitingApproval` is a state the process can legitimately be found in, exactly
+as `Pending` is, so `Running`-means-interrupted below is untouched.
 
 One attempt runs to completion inside a single reconcile, so a Remediation
 found in `Running` can only mean the operator died mid-execution. It is
@@ -121,6 +136,66 @@ could not be installed with ordinary tooling. A standby is ready because it
 is doing its job. The consequence is worth stating: a ready replica is not
 proof that alerts are being accepted, so anything that needs to know should
 ask the gateway, which is what `hack/e2e.sh` does.
+
+## Execution modes
+
+A strategy chooses how much autonomy it has, per strategy.
+
+| | |
+| --- | --- |
+| `auto` | remediates without asking |
+| `approval` | waits for a person; escalates if nobody looks |
+| `manual` | never starts from an alert |
+
+**Approving is a `kubectl patch`, and that is the design rather than a
+placeholder:**
+
+```bash
+kubectl -n remedik patch remediation drain-safely-x7k2q --type merge \
+  -p '{"spec":{"approval":{"decision":"approve","by":"dana"}}}'
+```
+
+Approval was scoped with a Slack bot for a long time, which is why it went
+unbuilt: the bot is a large piece of work against a service that cannot be
+tested from a checkout. But the gate does not need one. A patch is attributable
+in the cluster's audit log, expressible from a terminal, a runbook, a GitOps
+commit or a bot, and needs nothing outside the cluster — so Slack becomes a
+nicer front end for the same gate rather than a prerequisite for having one.
+
+Four properties, each chosen against an obvious alternative:
+
+- **Nothing is resolved or planned while waiting.** A remediation waiting for
+  approval must not already have worked out what it would do to a cluster that
+  has since moved on, so the plan is produced *after* the decision — against the
+  cluster as it is then, not as it was when the alert arrived an hour ago.
+- **`AwaitingApproval` is its own state, and not `Running`.** Waiting is a state
+  the process can legitimately be found in, exactly as `Pending` is, so
+  `Running`-means-interrupted is untouched.
+- **Silence escalates.** No decision within `approvalTimeout` and the
+  remediation fails as `ApprovalTimeout` and runs `onFailure.steps`. The failure
+  mode of a human gate is that nobody looks, and a gate that quietly drops what
+  nobody looked at is worse than no gate: it turns an alert into silence. A
+  *denial* does not escalate — somebody looked and said no, and telling them
+  again is not information.
+- **The deadline is absolute and set at creation.** A duration would restart on
+  every reconcile, so a remediation would wait for ever as long as anything
+  requeued it.
+
+Waiting is not a poll. The controller already watches `Remediation`, so a patch
+is a watch event and a decision is acted on in about a second; the requeue exists
+only so that a missed event cannot hold a remediation open past its deadline.
+
+`by` is what the patcher claims. remedik cannot authenticate a write without an
+admission webhook, so it records the claim and does not present it as verified —
+the cluster's audit log is the authority on who issued the patch. Omitting
+attribution until it could be trusted would have been worse: it leaves the audit
+trail with no answer at all to "who approved this".
+
+Waiting records come first on the dashboard's attention panel, ahead of
+everything that already happened, because they are the only entries where
+somebody doing something changes the outcome. A queue nobody can see is a queue
+nobody empties, and an approval gate that silently accumulates looks like
+remediation working.
 
 ## The kill switch
 

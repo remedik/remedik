@@ -26,6 +26,46 @@
 <p class="callout callout-muted"><strong>{{.Reason}}</strong> &mdash; {{.Message}}</p>
 {{end}}
 
+{{if .Approval}}
+{{/*
+  The page cannot write, and is not going to: an approve button needs an
+  identity model this dashboard does not have, and a button whose audit trail
+  cannot say who asked is worse than no button. What it can do is save somebody
+  the trip to the docs, since a reader of this page is exactly the person about
+  to go and look for this command.
+*/}}
+<section class="panel panel-warn" aria-labelledby="decide-heading">
+  <div class="panel-head">
+    <h2 id="decide-heading">Nothing runs until somebody decides</h2>
+    {{if .Approval.Left}}
+    <span class="panel-meta">{{.Approval.Left}} left</span>
+    {{end}}
+  </div>
+
+  <p class="panel-foot">
+    Approve it:
+  </p>
+  <pre class="code"><code>{{.Approval.Approve}}</code></pre>
+
+  <p class="panel-foot">
+    Or deny it, with a note the next reader will thank you for
+    (<code>"note":"we are rolling forward instead"</code>):
+  </p>
+  <pre class="code"><code>{{.Approval.Deny}}</code></pre>
+
+  <p class="panel-foot dim">
+    {{if .Approval.Deadline}}
+    Nobody deciding by {{.Approval.Deadline}} ends this as
+    <code>ApprovalTimeout</code> and runs the strategy&rsquo;s escalation, so
+    the alert still reaches a person.
+    {{else}}
+    This record carries no deadline, so it will be treated as expired rather
+    than waiting for ever.
+    {{end}}
+  </p>
+</section>
+{{end}}
+
 <section class="grid-2">
   <div class="card">
     <h2 class="card-title">Execution</h2>

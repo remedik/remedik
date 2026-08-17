@@ -427,14 +427,26 @@ helm template remedik charts/remedik --namespace "$NAMESPACE" \
 	--set gateway.auth.token=lint >/dev/null
 info "chart renders and lints"
 
+# The isolated kubeconfig is created before the cluster, so that `kind create`
+# writes into it and never touches the developer's.
+#
+# It used to be filled in afterwards with `kind get kubeconfig`, which left
+# `kind create cluster` to do what it does by default: write the new cluster
+# into ~/.kube/config and make it the current context. The run itself was
+# unaffected, but every kubectl in the terminal that started it was now pointed
+# at a throwaway cluster — which is precisely how one debugging session in this
+# project drew a conclusion from the wrong cluster's logs.
+E2E_KUBECONFIG="$(mktemp -t remedik-e2e-kubeconfig.XXXXXX)"
+
 step "Creating the kind cluster '$CLUSTER'"
 if kind get clusters 2>/dev/null | grep -qx "$CLUSTER"; then
 	info "cluster already exists, reusing it"
+	kind get kubeconfig --name "$CLUSTER" > "$E2E_KUBECONFIG"
 else
-	kind create cluster --config hack/e2e/kind.yaml >/dev/null
+	kind create cluster --config hack/e2e/kind.yaml \
+		--kubeconfig "$E2E_KUBECONFIG" >/dev/null
 fi
-# An isolated kubeconfig containing only this cluster, exported for the rest of
-# the run.
+# The isolated kubeconfig, exported for the rest of the run.
 #
 # Setting the current context is not enough: a kubeconfig is global state, so
 # anything else on the machine that switches context mid-run redirects every
@@ -445,8 +457,6 @@ fi
 # A kubeconfig with one cluster in it makes that impossible rather than
 # unlikely, and a suite that patches and deletes should not be able to reach a
 # cluster it was not pointed at. helm reads KUBECONFIG too.
-E2E_KUBECONFIG="$(mktemp -t remedik-e2e-kubeconfig.XXXXXX)"
-kind get kubeconfig --name "$CLUSTER" > "$E2E_KUBECONFIG"
 export KUBECONFIG="$E2E_KUBECONFIG"
 info "using an isolated kubeconfig; this run cannot reach another cluster"
 
@@ -1844,6 +1854,137 @@ kubectl -n "$NAMESPACE" patch configmap remedik-pause --type merge \
 sleep 8
 info "switch released"
 
+step "10f. A person approves, denies, and fails to look"
+
+# The gate the original design put at the centre, and the mechanism that makes
+# it need no bot: approving is a kubectl patch.
+kubectl apply -f hack/e2e/strategy-approval.yaml >/dev/null
+
+# --- approved -------------------------------------------------------------
+send_alert "E2EApprove" "approve-1" "api2" >/dev/null
+
+rem=""
+for _ in $(seq 1 30); do
+	rem=$(kubectl -n "$NAMESPACE" get remediations -l "remedik.dev/strategy=e2e-approve" \
+		-o jsonpath='{range .items[?(@.status.state=="AwaitingApproval")]}{.metadata.name}{end}' 2>/dev/null || true)
+	[ -n "$rem" ] && break
+	sleep 2
+done
+
+if [ -n "$rem" ]; then
+	pass "the remediation is waiting for a person: ${rem}"
+else
+	fail "no remediation reached AwaitingApproval"
+fi
+
+if [ -n "$rem" ]; then
+	# Nothing may have run yet. That is the whole promise of the gate.
+	steps=$(kubectl -n "$NAMESPACE" get remediation "$rem" -o jsonpath='{.status.steps}' 2>/dev/null || true)
+	if [ -z "$steps" ] || [ "$steps" = "null" ] || [ "$steps" = "[]" ]; then
+		pass "and nothing has been planned or executed while it waits"
+	else
+		fail "steps already ran before anybody approved: ${steps}"
+	fi
+
+	message=$(kubectl -n "$NAMESPACE" get remediation "$rem" -o jsonpath='{.status.message}' 2>/dev/null || true)
+	if grep -q "escalates" <<<"$message"; then
+		pass "and it says what happens if nobody looks"
+	else
+		fail "the waiting record does not say it will escalate: ${message}"
+	fi
+
+	kubectl -n "$NAMESPACE" patch remediation "$rem" --type merge \
+		-p '{"spec":{"approval":{"decision":"approve","by":"e2e","note":"looks fine"}}}' >/dev/null
+
+	if wait_for_strategy_state e2e-approve Succeeded 90; then
+		pass "approving it with a kubectl patch ran it"
+	else
+		fail "the approved remediation did not run"
+	fi
+fi
+
+# --- denied ---------------------------------------------------------------
+send_alert "E2EDeny" "deny-1" "api2" >/dev/null
+
+denied=""
+for _ in $(seq 1 30); do
+	denied=$(kubectl -n "$NAMESPACE" get remediations -l "remedik.dev/strategy=e2e-deny" \
+		-o jsonpath='{range .items[?(@.status.state=="AwaitingApproval")]}{.metadata.name}{end}' 2>/dev/null || true)
+	[ -n "$denied" ] && break
+	sleep 2
+done
+
+if [ -n "$denied" ]; then
+	kubectl -n "$NAMESPACE" patch remediation "$denied" --type merge \
+		-p '{"spec":{"approval":{"decision":"deny","by":"e2e","note":"rolling forward instead"}}}' >/dev/null
+	sleep 8
+
+	reason=$(kubectl -n "$NAMESPACE" get remediation "$denied" -o jsonpath='{.status.reason}' 2>/dev/null || true)
+	esc=$(kubectl -n "$NAMESPACE" get remediation "$denied" -o jsonpath='{.status.escalation}' 2>/dev/null || true)
+	msg=$(kubectl -n "$NAMESPACE" get remediation "$denied" -o jsonpath='{.status.message}' 2>/dev/null || true)
+
+	if [ "$reason" = "Denied" ]; then
+		pass "denying it ends the remediation"
+	else
+		fail "reason = ${reason:-<none>}, want Denied"
+	fi
+	if [ -z "$esc" ] || [ "$esc" = "null" ]; then
+		pass "and does not escalate, because somebody already looked"
+	else
+		fail "a denial escalated: ${esc}"
+	fi
+	if grep -q "rolling forward instead" <<<"$msg"; then
+		pass "and the note survives on the record"
+	else
+		fail "the denial note is not on the record: ${msg}"
+	fi
+else
+	fail "no remediation to deny"
+fi
+
+# --- nobody looks ---------------------------------------------------------
+# A one-second timeout, because the failure mode of a human gate is that
+# nobody looks and that has to reach somebody.
+send_alert "E2EIgnore" "ignore-1" "api2" >/dev/null
+
+if wait_for_strategy_state e2e-ignore Failed 90; then
+	pass "a remediation nobody decided on stopped waiting"
+else
+	fail "the ignored remediation never timed out"
+fi
+
+ignored=$(kubectl -n "$NAMESPACE" get remediations -l "remedik.dev/strategy=e2e-ignore" \
+	-o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+if [ -n "$ignored" ]; then
+	reason=$(kubectl -n "$NAMESPACE" get remediation "$ignored" -o jsonpath='{.status.reason}' 2>/dev/null || true)
+	esc=$(kubectl -n "$NAMESPACE" get remediation "$ignored" -o jsonpath='{.status.escalation.phase}' 2>/dev/null || true)
+	if [ "$reason" = "ApprovalTimeout" ]; then
+		pass "and says why: reason=ApprovalTimeout"
+	else
+		fail "reason = ${reason:-<none>}, want ApprovalTimeout"
+	fi
+	if [ "$esc" = "Succeeded" ]; then
+		pass "and somebody was told, because silence must not be the outcome"
+	else
+		fail "escalation = ${esc:-<none>} -- nobody looking has to reach somebody"
+	fi
+fi
+
+# --- the red button -------------------------------------------------------
+before=$(remediation_count)
+send_alert "E2EManual" "manual-1" "api2" >/dev/null
+sleep 6
+if [ "$(remediation_count)" = "$before" ]; then
+	pass "a manual strategy did not start from an alert"
+else
+	fail "a manual strategy ran from an alert"
+fi
+if wait_for_event ManualStrategy "never runs from an alert" 30; then
+	pass "and said so where a guard refusal is recorded"
+else
+	fail "no event explaining why the manual strategy did nothing"
+fi
+
 step "11. Live in one namespace, reporting in another"
 
 helm upgrade remedik charts/remedik \
@@ -1919,12 +2060,17 @@ else
 	fail "the records do not carry their posture (simulated=${simulated_flag}, live=${live_flag})"
 fi
 
-# And the operator says so where somebody would look for it.
-if kubectl -n "$NAMESPACE" logs deploy/remedik 2>/dev/null | grep -q 'posture is mixed'; then
-	pass "the operator warns that the default does not describe the cluster"
-else
-	fail "no mixed-posture warning was logged"
-fi
+# That the operator warns about a mixed posture at startup is not asserted here.
+#
+# It was, and it failed twice for a reason that had nothing to do with the
+# warning: a helm upgrade that changes nothing does not restart the pod, so the
+# startup line belongs to a process whose posture was different. A log line
+# emitted once, by whichever process happens to be running, is the most fragile
+# thing this suite could assert.
+#
+# The property it stood for -- that a mixed posture is reported rather than left
+# for a reader to infer -- is asserted below from remedik_namespace_posture,
+# which is live state and answers the same question at any moment.
 
 # Port-forwarded from the host rather than probed from a pod: pulling a curl
 # image would need registry access this cluster does not have.
@@ -2046,6 +2192,73 @@ helm upgrade remedik charts/remedik \
 	--set replicaCount=1 \
 	--set actions.deploymentRestart.enabled=true \
 	--wait --timeout 3m >/dev/null
+
+# --------------------------------------------------------------------------
+# Test 13 — an upgrade whose CRDs the cluster does not have is refused
+#
+# `helm upgrade` never upgrades CRDs: Helm applies a chart's crds/ directory
+# on first install and never again. So a field added since somebody's install
+# is pruned silently by the API server rather than rejected, and a strategy
+# that asks for human approval can lose the field that makes it wait.
+#
+# The chart compares a stamp in each generated CRD with the cluster's. This is
+# the only place that comparison can be exercised: Helm's `lookup` returns
+# nothing during `helm template` and `--dry-run`, by design, so `make
+# helm-lint` cannot see this guard at all.
+# --------------------------------------------------------------------------
+step "13. An upgrade is refused when the cluster's CRDs are older"
+
+upgrade_with_current_crds() {
+	helm upgrade remedik charts/remedik \
+		--namespace "$NAMESPACE" \
+		--set image.repository="${IMAGE%%:*}" \
+		--set image.tag="${IMAGE##*:}" \
+		--set image.pullPolicy=IfNotPresent \
+		--set gateway.auth.token="$TOKEN" \
+		--set replicaCount=1 \
+		--set actions.deploymentRestart.enabled=true \
+		"$@"
+}
+
+# Exactly what an older release looks like: a CRD whose stamp is not this
+# chart's. Annotated rather than replaced, so no custom resource is touched.
+kubectl annotate crd remediations.remedik.dev \
+	remedik.dev/schema-hash=0000000000000000 --overwrite >/dev/null
+
+if refusal=$(upgrade_with_current_crds --wait --timeout 3m 2>&1); then
+	fail "the upgrade went ahead with a CRD this chart did not ship"
+else
+	pass "the upgrade is refused rather than silently pruning the new fields"
+
+	# Both halves of the instruction, because the first version of this
+	# assertion pinned only the prefix and stayed green when the command it
+	# checked lost the flag that makes it work.
+	if grep -q -- "--server-side" <<<"$refusal" &&
+		grep -q -- "--force-conflicts" <<<"$refusal"; then
+		pass "the refusal carries the command that fixes it, flags included"
+	else
+		fail "the refusal does not say how to fix it: $refusal"
+	fi
+fi
+
+# And it is escapable, because a guard nobody can turn off is an outage
+# waiting for the case its author did not think of.
+if upgrade_with_current_crds --set crdCheck.enabled=false --wait --timeout 3m >/dev/null 2>&1; then
+	pass "somebody who manages CRDs themselves can say so and proceed"
+else
+	fail "crdCheck.enabled=false did not let the upgrade through"
+fi
+
+# Restore the real stamp, the way the message tells a user to -- including
+# --force-conflicts, which the first version of this left out and which is
+# exactly why the instruction needed testing: helm owns these fields.
+kubectl apply --server-side --force-conflicts -f charts/remedik/crds/ >/dev/null
+
+if upgrade_with_current_crds --wait --timeout 3m >/dev/null 2>&1; then
+	pass "applying the CRDs is all it takes, and the upgrade proceeds"
+else
+	fail "the upgrade still fails after applying the chart's CRDs"
+fi
 
 # --------------------------------------------------------------------------
 # Summary

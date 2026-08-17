@@ -16,10 +16,21 @@ a bug, whatever the impact looks like.
 
 ## Reporting a vulnerability
 
-Email **daniel.vechiu1@gmail.com** with details and reproduction steps. You
-will get an acknowledgement within 72 hours. Please do not open public
-issues for suspected vulnerabilities. Coordinated disclosure is appreciated;
-credit is given unless you prefer otherwise.
+Use GitHub's private vulnerability reporting:
+**[Report a vulnerability](https://github.com/remedik/remedik/security/advisories/new)**.
+It is private, it keeps the report, the discussion and the eventual advisory in
+one place, and it is the channel that works if the maintainers change.
+
+It is the only channel, deliberately: an address in a security policy is worth
+no more than the mailbox behind it, and a published address nobody reads is
+worse than none.
+
+**Please do not describe a suspected vulnerability in a public issue.** If the
+form is unavailable to you, an issue asking a maintainer to get in touch — with
+nothing about the finding in it — is the way to reach one.
+
+You will get an acknowledgement within 72 hours. Coordinated disclosure is
+appreciated; credit is given unless you prefer otherwise.
 
 ## Supported versions
 

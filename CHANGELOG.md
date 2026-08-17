@@ -9,6 +9,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **A waiting remediation's page carries the command that decides it.** The
+  dashboard still cannot write and is not going to — an approve button needs an
+  identity model it does not have — but a page that cannot act can say exactly
+  what to type, with the record's own namespace and name already in it, and the
+  reader of that page is precisely the person about to go looking for it. It also
+  says when silence becomes an escalation.
+
+- **[docs/managed-kubernetes.md](docs/managed-kubernetes.md)** — EKS, GKE and
+  AKS. The useful answer is that remedik needs no cloud credentials at all,
+  structurally: the only outbound connection in the binary is to the API server.
+  What actually differs is the alerts (managed rule packages, and
+  `exported_namespace` where a strategy expects `namespace`) and the nodes (a
+  drained node in a managed pool stays cordoned until something replaces the
+  instance, and remedik deliberately cannot). The page marks what has not been
+  tested on a real managed cluster rather than implying it has.
+
+- **remedik explains why a strategy did *not* match.** "no strategy matches this
+  alert" was the whole answer, which is true and useless when nine strategies
+  exist and one of them was meant to. The line now carries the alert's labels, and
+  at `logLevel=debug` each strategy says what it wanted instead:
+
+  ```
+  DEBUG a strategy did not match  strategy=pod-crashloop
+        why=alertname is KubeDeploymentReplicasMismatch, the strategy wants KubePodCrashLooping
+  ```
+
+  The cause is nearly always a label — `exported_namespace` where a strategy
+  wanted `namespace`, or a value with a trailing space that YAML shows and nobody
+  sees. Debug-only, because it is a line per strategy per unmatched alert.
+
+- **[docs/troubleshooting.md](docs/troubleshooting.md)**, which answers the
+  question this product gets asked most. Six gates an alert passes — arrived,
+  matched, resolved, allowed by the guards, allowed by the posture, not paused or
+  waiting for a person — each with the command that answers it, what every
+  terminal reason means, and the gateway's status codes. Every command in it was
+  run against a cluster; one had to be rewritten because `--field-selector` does
+  not work on a custom resource's status.
+
+- **`execution.mode: approval` and `manual`.** The largest gap between remedik
+  and its own design: the field existed, was documented, and accepted one value,
+  so a team that wanted a person to look at a node drain had to leave the
+  strategy disabled and work by hand.
+
+  It went unbuilt because approval was scoped with a Slack bot. The gate does not
+  need one — a human approves with `kubectl patch`:
+
+  ```bash
+  kubectl -n remedik patch remediation drain-safely-x7k2q --type merge \
+    -p '{"spec":{"approval":{"decision":"approve","by":"dana"}}}'
+  ```
+
+  which is attributable in the cluster's audit log, works from a terminal, a
+  runbook, a GitOps commit or a bot, and needs nothing outside the cluster.
+  Slack becomes a nicer front end for the same gate rather than a prerequisite
+  for having one.
+
+  Nothing is resolved or planned while waiting, so an approved plan describes
+  the cluster as it is then rather than as it was when the alert arrived.
+  Silence escalates after `approvalTimeout`, because the failure mode of a human
+  gate is that nobody looks; a denial does not, because somebody did. Waiting
+  records are first on the dashboard's attention panel — a queue nobody can see
+  is a queue nobody empties.
+
+  `manual` never starts from an alert, and says so where a guard refusal is
+  recorded.
+
 - **A kill switch.** One command stops remediation on every replica within
   seconds, with no restart and no rollout:
 
@@ -185,6 +251,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **The README describes the product rather than a release note.** Human
+  approval and the kill switch were the two features the front page's whole
+  argument rests on — a robot with cluster write access you can actually trust —
+  and both were missing from it, one of them listed as a future release while it
+  shipped.
+
 - **Remediations for different resources now run concurrently.** One worker
   meant one remediation at a time, cluster-wide, for as long as it took — and
   the values the CRD already permits put that at fifteen hours in the worst
@@ -251,6 +323,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   the chip with the pattern stated once above. Nine rows fit where four did.
 
 ### Fixed
+
+- **An upgrade could silently drop the fields it was shipping.** `helm upgrade`
+  does not upgrade CRDs — Helm applies a chart's `crds/` once and never again —
+  so a field added since somebody's install is *pruned* by the API server rather
+  than rejected. A strategy asking for human approval would lose the field that
+  makes it wait and remediate unattended, with nothing anywhere saying so.
+
+  Found the way it would find a user: `execution.approvalTimeout` would not
+  apply to a cluster running this operator, because the chart had it and the
+  CRD did not.
+
+  Each generated CRD now carries a hash of itself, and the chart compares it
+  with the cluster's before upgrading, refusing with the `kubectl apply` that
+  fixes it. `--set crdCheck.enabled=false` for anybody who manages CRDs
+  themselves. Helm's `lookup` is inert during `helm template` and `--dry-run`,
+  so `make e2e` is the only place this can be exercised, and it is: the stamp is
+  moved on a live cluster, the upgrade is refused, the escape hatch works, and
+  applying the CRDs is shown to be all it takes.
+
+- **The Grafana panel that says whether anybody found out reported zero when
+  nobody had been told.** It subtracts escalations from failures, and PromQL's
+  vector matching yields nothing when one side has no series at all — so with
+  escalation never recorded, the panel read as reassuring at exactly the moment
+  it should not. Both sides are now padded to zero independently. Confirmed
+  against a cluster where the honest answer was one.
+
+- **`helm upgrade --reuse-values` failed on the kill switch.** `--reuse-values`
+  replays the previous release's values and does not merge the new chart's
+  defaults, so `pause` was absent and the template dereferenced it. The second
+  time this family of bug has broken an upgrade, so `hack/reuse-values.sh` now
+  renders the chart against the last release's values on every `make verify` —
+  including each new feature switched on with a single `--set`, which is what
+  somebody does after reading release notes. It reproduces both halves: the
+  render that fails and the field that renders empty.
+
+- **Retention had no dashboard.** Two metrics were exported and appeared in no
+  panel and no alert; `remedik_records_held_by_guards` staying high is how you
+  find out the retention you configured is not the retention in force. Found by
+  a test that now holds the dashboard and the alert rules to the metrics the
+  process actually serves, in both directions.
 - **The namespace filter's dropdown never worked, and the cause was the
   dashboard's own security policy.** `form-action 'none'` blocked every form
   submission on the page. The markup was a correct GET form, the handler was

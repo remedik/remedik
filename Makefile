@@ -60,6 +60,10 @@ generate: $(CONTROLLER_GEN) ## Regenerate DeepCopy methods for the API types
 
 manifests: $(CONTROLLER_GEN) ## Regenerate CRD manifests into the chart
 	$(CONTROLLER_GEN) crd paths="./api/..." output:crd:artifacts:config=charts/remedik/crds
+	@# Each CRD carries a hash of itself, which is how the chart notices that a
+	@# cluster's CRDs are older than the one being upgraded to. `helm upgrade`
+	@# never upgrades CRDs, so that difference is otherwise silent.
+	./hack/stamp-crds.sh
 
 ##@ Lint & docs
 
@@ -103,6 +107,10 @@ helm-lint: ## Lint the Helm chart (requires helm)
 		&& { echo "the chart rendered an unauthenticated dashboard without being asked"; exit 1; } \
 		|| echo "chart refuses an unauthenticated dashboard, as intended"
 	./hack/rbac-unchanged.sh
+	@# And that an existing release can still upgrade. `--reuse-values` does not
+	@# merge the new chart's defaults, so every key added since the last release
+	@# is absent; that has broken this chart twice.
+	./hack/reuse-values.sh
 
 helm-docs: $(HELMDOCS) ## Regenerate chart README.md from values.yaml annotations
 	$(HELMDOCS) --chart-search-root charts

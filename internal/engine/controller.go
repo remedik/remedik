@@ -110,6 +110,9 @@ func (r *RemediationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	case rem.Labels[v1alpha1.LabelGaveUp] == "true":
 		return ctrl.Result{}, r.markGaveUp(ctx, &rem, log)
 
+	case awaitsApproval(&rem):
+		return r.awaitApproval(ctx, &rem, log)
+
 	default:
 		return r.runAttempt(ctx, &rem, log)
 	}
