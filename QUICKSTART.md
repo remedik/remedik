@@ -14,6 +14,13 @@ does not scrape anything itself.
 
 ### 1. Install the chart
 
+> **Not published yet.** The chart and image referenced below live in a
+> package registry that is private until this repository is, so these
+> commands will not resolve today. The tags that exist are release
+> candidates (`v0.1.0-rc.3`); `v0.1.0` is the first one meant to be
+> installed. Until then, `make dev-up && make dev-deploy` builds and runs it
+> from a checkout.
+
 **Dry-run is the default.** remedik will match alerts, evaluate guards and
 record what it would have done, changing nothing.
 

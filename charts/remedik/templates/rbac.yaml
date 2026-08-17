@@ -82,6 +82,13 @@ rules:
   - apiGroups: ["remedik.dev"]
     resources: ["remediations/status"]
     verbs: ["get", "update", "patch"]
+  # Leader election. Granted because exactly one instance may accept alerts
+  # and reconcile: the guards hold their state in memory, so two instances
+  # would each enforce a cooldown the other cannot see. In this namespace
+  # only, and only on the operator's own lease.
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
 {{- $catalogue := .Files.Get "action-rbac.yaml" | fromYaml }}
 {{- range $feature, $scopes := $catalogue }}
 {{- $config := include "remedik.featureConfig" (dict "root" $ "key" $feature) | fromYaml }}

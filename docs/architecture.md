@@ -78,6 +78,50 @@ Terminal records are pruned per strategy (200 by default), and the record
 that just finished is never a pruning candidate whatever the timestamps
 say.
 
+## One instance acts
+
+The operator holds a lease in its own namespace and only the holder
+reconciles or accepts alerts. Every other replica keeps listening and answers
+`503` with a `Retry-After`.
+
+The reason is the guards. They keep their state in memory — which is why
+`internal/guards` has no Kubernetes dependency and its tests are the fastest
+here — so two instances would each enforce a cooldown the other cannot see.
+The alert storm remedik exists to absorb would be amplified rather than
+absorbed. `replicaCount: 2` is therefore failover, never throughput, and it
+is safe: more replicas cannot mean more remediation.
+
+Every HTTP server — gateway, dashboard, metrics — declares that it does not
+need the lease. That is load-bearing rather than tidy: controller-runtime
+starts a runnable that says nothing only once the lease is won, so without it
+a standby has no listener at all and refuses the connection. Which replica
+*accepts* is the gateway's own decision, made per request, and that is the
+only place leadership belongs.
+
+The gateway does not stop listening on a standby. A Service has one set of
+endpoints, so a replica with no listener refuses the connection, and
+Alertmanager cannot tell "wrong pod" from "remedik is down" — the one thing
+a gateway must never be mistaken for. A 503 is a normal outcome: the sender
+retries, the Service picks a pod again, and the alert lands a moment later.
+It sits beside the rule that the gateway answers 200 to anything it
+understood, and both are about being honest with the sender: 200 means "I
+have it", 503 means "ask again".
+
+The guards are replayed when the lease is taken, not when the process
+starts. A standby that loaded at boot and took over six hours later would be
+enforcing six-hour-old cooldowns, which is the mistake leader election
+exists to prevent arriving through a side door. An instance that cannot
+replay them stops rather than remediating without them.
+
+Readiness is deliberately not leadership. Gating the probe on "would this
+instance accept an alert" was tried and reverted: a standby then never
+becomes ready, so `helm --wait` and `kubectl rollout status` never finish on
+a deployment with more than one replica — the failover this exists to allow
+could not be installed with ordinary tooling. A standby is ready because it
+is doing its job. The consequence is worth stating: a ready replica is not
+proof that alerts are being accepted, so anything that needs to know should
+ask the gateway, which is what `hack/e2e.sh` does.
+
 ## Posture
 
 `dryRun` is the default and `namespacePosture` overrides it per namespace,
@@ -345,7 +389,7 @@ refusals says more about an automation than another verb does:
 
 ## The dashboard
 
-Off by default. When enabled it serves four pages on its own port and
+Off by default. When enabled it serves five pages on its own port and
 answers the questions that are painful through kubectl: *what would this
 have done* during a dry-run trial, *why did nothing happen* during an
 incident, and *is anything wrong right now*.
@@ -358,14 +402,25 @@ version got wrong by putting all of them on one:
 | `/` | Is anything wrong right now? Posture, what needs attention, activity over the last day, where remediation is happening |
 | `/remediations` | What happened, and to what? The full list, with the filters |
 | `/remediations/{name}` | What did this one do, step by step |
+| `/namespaces` | Where is this going badly? One row per namespace, ordered by what needs attention |
 | `/strategies` | What could happen, and under what guards |
 
 The overview is panels. Each is a claim with a link to its evidence, and
-each is one struct, one builder and one template block — so adding
-"namespace health" later is an addition rather than a rearrangement. The
-"needs attention" panel orders by how much silence each entry represents: a
-failed escalation, which means nobody was told, outranks a failure somebody
-has already seen.
+each is one struct, one builder and one template block, which is why
+`/namespaces` was an addition rather than a rearrangement. The "needs
+attention" panel orders by how much silence each entry represents: a failed
+escalation, which means nobody was told, outranks a failure somebody has
+already seen.
+
+`/namespaces` applies that same ordering across namespaces, and is careful
+about one thing: it is not a health page. remedik knows the remediations it
+ran, not whether the workloads in a namespace are well, and a page implying
+otherwise would be the dashboard being authoritative about something it
+never measured. So every column is remedik's own record — executions, how
+they ended, how many failures nobody was told about — and every row states
+its posture, because a namespace where remedik only reports and one where it
+acts are not comparable, and two identical failure counts under different
+postures mean opposite things.
 
 Read-only is structural rather than promised. The handler is constructed
 from a `client.Reader`, so it holds no method that writes; a method

@@ -91,6 +91,7 @@ echo "==> Capturing"
 shoot overview     "/"                          "1400,1180"
 shoot remediations "/remediations"              "1400,900"
 shoot detail       "/remediations/${DETAIL}"    "1400,1250"
+shoot namespaces   "/namespaces"                "1400,900"
 shoot strategies   "/strategies"                "1400,900"
 
 echo "==> Done — docs/screenshots/"

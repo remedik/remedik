@@ -21,6 +21,7 @@ const (
 	navNone         = ""
 	navOverview     = "overview"
 	navRemediations = "remediations"
+	navNamespaces   = "namespaces"
 	navStrategies   = "strategies"
 )
 
@@ -33,7 +34,11 @@ const (
 	toneDryRun  = "dryrun"
 	toneRunning = "running"
 	toneWaiting = "waiting"
-	toneMuted   = "muted"
+	// toneWarn is a problem somebody already knows about, which is not the
+	// same as one nobody was told about — the whole point of the namespaces
+	// page is that those two do not look alike.
+	toneWarn  = "warn"
+	toneMuted = "muted"
 )
 
 // Posture is what remedik is allowed to do, as the pages need to say it.

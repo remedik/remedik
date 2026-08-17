@@ -32,6 +32,7 @@ TOKEN="${TOKEN:-e2e-token}"
 DASHBOARD_TOKEN="${DASHBOARD_TOKEN:-e2e-dashboard-token}"
 DASHBOARD_PORT="${DASHBOARD_PORT:-18082}"
 METRICS_PORT="${METRICS_PORT:-18080}"
+LEADER_PORT="${LEADER_PORT:-18091}"
 KEEP_CLUSTER="${KEEP_CLUSTER:-0}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -67,7 +68,28 @@ cleanup() {
 	done
 	if [ "$exit_code" -ne 0 ] || [ "$FAILED" -ne 0 ]; then
 		step "Diagnostics"
-		kubectl -n "$NAMESPACE" logs deploy/remedik --tail=60 2>/dev/null || true
+		# Sixty lines was never enough: a failure here is almost always
+		# something the operator said several restarts ago, and the reason a
+		# remediation ended where it did is in its own status rather than in
+		# the log.
+		info "--- why each non-terminal or failed remediation ended there ---"
+		kubectl -n "$NAMESPACE" get remediations \
+			-o custom-columns='NAME:.metadata.name,STATE:.status.state,REASON:.status.reason,MESSAGE:.status.message' \
+			--no-headers 2>/dev/null | grep -vE '[[:space:]](Succeeded|Simulated)[[:space:]]' || true
+
+		info "--- pods, and whether any container restarted ---"
+		kubectl -n "$NAMESPACE" get pods \
+			-o custom-columns='NAME:.metadata.name,READY:.status.containerStatuses[0].ready,RESTARTS:.status.containerStatuses[0].restartCount,REASON:.status.containerStatuses[0].lastState.terminated.reason' \
+			--no-headers 2>/dev/null || true
+
+		info "--- events that are not Normal ---"
+		kubectl -n "$NAMESPACE" get events --field-selector type!=Normal \
+			--sort-by=.lastTimestamp -o custom-columns='REASON:.reason,OBJECT:.involvedObject.name,MESSAGE:.message' \
+			--no-headers 2>/dev/null | tail -10 || true
+
+		info "--- operator log ---"
+		kubectl -n "$NAMESPACE" logs deploy/remedik --tail=250 2>/dev/null || true
+		kubectl -n "$NAMESPACE" logs deploy/remedik --previous --tail=80 2>/dev/null || true
 		kubectl -n "$NAMESPACE" get remediations -o wide 2>/dev/null || true
 	fi
 	if [ "$KEEP_CLUSTER" = "1" ]; then
@@ -222,6 +244,53 @@ restart_annotation_in() {
 		-o jsonpath='{.spec.template.metadata.annotations.kubectl\.kubernetes\.io/restartedAt}' 2>/dev/null || true
 }
 
+# wait_for_settled [expected-endpoints] waits until the rollout is really over.
+#
+# `helm --wait` and `rollout status` return when the new pod is Ready, and at
+# that moment the old one is often still a Service endpoint and still holds
+# the lease. An alert sent then can land on a process that is about to be
+# killed, and its remediation is cut in half — recorded honestly as
+# Interrupted, and a failed assertion here. Waiting for the endpoint set to
+# match the replica count is waiting for the handover to be finished rather
+# than merely started.
+wait_for_settled() {
+	local want="${1:-1}" timeout="${2:-90}" elapsed=0
+	while [ "$elapsed" -lt "$timeout" ]; do
+		local n
+		n=$(kubectl -n "$NAMESPACE" get endpointslices \
+			-l "kubernetes.io/service-name=remedik-gateway" \
+			-o jsonpath='{range .items[*]}{range .endpoints[*]}{.conditions.ready}{"\n"}{end}{end}' 2>/dev/null \
+			| grep -c true || true)
+		[ "$n" = "$want" ] && return 0
+		sleep 2
+		elapsed=$((elapsed + 2))
+	done
+	return 1
+}
+
+# wait_for_accepting blocks until the gateway stops answering 503.
+#
+# Readiness is not leadership — a standby is ready and refuses with 503 —
+# so a ready pod is not yet proof that alerts are being taken. With leader
+# election the leader accepts only after it has won the lease and replayed
+# the guards, which is a second or two after the process is up. Firing an
+# alert before that would fail a test for a reason the product is entitled
+# to: the sender is supposed to retry.
+wait_for_accepting() {
+	local timeout="${1:-60}" elapsed=0 code
+	while [ "$elapsed" -lt "$timeout" ]; do
+		code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+			-H "Authorization: Bearer ${TOKEN}" \
+			-H 'Content-Type: application/json' \
+			--data '{"alerts":[]}' \
+			"http://127.0.0.1:${LOCAL_PORT}/webhooks/alertmanager" 2>/dev/null || echo 000)
+		[ "$code" != "503" ] && [ "$code" != "000" ] && return 0
+		sleep 2
+		elapsed=$((elapsed + 2))
+	done
+	return 1
+}
+
 # start_port_forward (re)opens the tunnel to the gateway service.
 start_port_forward() {
 	if [ -n "$PORT_FORWARD_PID" ]; then
@@ -344,6 +413,7 @@ helm upgrade --install remedik charts/remedik \
 	--set guards.blastRadius.enabled=true \
 	--wait --timeout 3m >/dev/null
 kubectl -n "$NAMESPACE" rollout status deploy/remedik --timeout=120s >/dev/null
+wait_for_settled 1 || info "the gateway endpoints did not settle to one; continuing"
 info "operator is running"
 
 step "Creating the test workload and strategy"
@@ -355,6 +425,7 @@ kubectl -n e2e-payments rollout status deploy/api2 --timeout=120s >/dev/null
 # The gateway is a ClusterIP service; reach it through a port-forward.
 LOCAL_PORT="${LOCAL_PORT:-18090}"
 start_port_forward
+wait_for_accepting || info "the gateway is still refusing; continuing and letting the assertions say why"
 info "gateway reachable on 127.0.0.1:${LOCAL_PORT}"
 
 # --------------------------------------------------------------------------
@@ -473,6 +544,7 @@ helm upgrade remedik charts/remedik \
 	--set dryRun=false \
 	--wait --timeout 3m >/dev/null
 kubectl -n "$NAMESPACE" rollout status deploy/remedik --timeout=120s >/dev/null
+wait_for_settled 1 || info "the gateway endpoints did not settle to one; continuing"
 start_port_forward
 
 status=$(send_alert E2ECrashLooping real-1 api2)
@@ -588,6 +660,7 @@ fi
 step "6. The cooldown still holds after the operator restarts"
 kubectl -n "$NAMESPACE" rollout restart deploy/remedik >/dev/null
 kubectl -n "$NAMESPACE" rollout status deploy/remedik --timeout=120s >/dev/null
+wait_for_settled 1 || info "the gateway endpoints did not settle to one; continuing"
 start_port_forward
 
 if kubectl -n "$NAMESPACE" logs deploy/remedik --tail=200 2>/dev/null \
@@ -640,6 +713,7 @@ helm upgrade remedik charts/remedik \
 	--set clusterName=e2e-cluster \
 	--wait --timeout 3m >/dev/null
 kubectl -n "$NAMESPACE" rollout status deploy/remedik --timeout=120s >/dev/null
+wait_for_settled 1 || info "the gateway endpoints did not settle to one; continuing"
 start_dashboard_forward
 
 # Read-only is the guarantee that has to hold in a real cluster, not just in
@@ -660,7 +734,7 @@ else
 	fail "the dashboard answered $status without a token, want 401"
 fi
 
-for path in / /remediations /strategies; do
+for path in / /remediations /namespaces /strategies; do
 	status=$(dashboard_status "$path")
 	if [ "$status" = "200" ]; then
 		pass "GET $path rendered"
@@ -815,6 +889,33 @@ else
 	fail "the page has no asset fingerprint for the refresh to compare"
 fi
 
+# The namespaces page is remedik's own record per namespace, and it is the
+# one page whose ordering is the point: a namespace where a failure was
+# never escalated has to come before one where somebody was already told.
+namespaces=$(dashboard_body /namespaces)
+if grep -q 'e2e-payments' <<<"$namespaces"; then
+	pass "the namespaces page lists the namespace remediation ran in"
+else
+	fail "the namespaces page does not list e2e-payments"
+fi
+if grep -q 'Nobody told' <<<"$namespaces"; then
+	pass "and counts the failures nobody was told about"
+else
+	fail "the namespaces page does not report unheard failures"
+fi
+if grep -qE 'Reporting|Live' <<<"$namespaces"; then
+	pass "and says what remedik is allowed to do there"
+else
+	fail "the namespaces page does not name each namespace's posture"
+fi
+# Every row links to that namespace's executions: a page that judges without
+# offering the evidence is a page somebody has to leave to act on.
+if grep -q 'href="/remediations?namespace=e2e-payments"' <<<"$namespaces"; then
+	pass "and each row links to that namespace's executions"
+else
+	fail "a namespace row does not link to its own records"
+fi
+
 empty=$(dashboard_body "/remediations?namespace=no-such-namespace")
 if grep -q "Nothing matches this filter" <<<"$empty"; then
 	pass "a filter that matches nothing says so, rather than looking like an empty cluster"
@@ -870,6 +971,7 @@ helm upgrade remedik charts/remedik \
 	--set actions.podDelete.enabled=true \
 	--wait --timeout 3m >/dev/null
 kubectl -n "$NAMESPACE" rollout status deploy/remedik --timeout=120s >/dev/null
+wait_for_settled 1 || info "the gateway endpoints did not settle to one; continuing"
 start_port_forward
 
 if kubectl -n "$NAMESPACE" logs deploy/remedik --tail=200 2>/dev/null \
@@ -1002,6 +1104,7 @@ helm upgrade remedik charts/remedik \
 	--set guards.blastRadius.enabled=true \
 	--wait --timeout 3m >/dev/null
 kubectl -n "$NAMESPACE" rollout status deploy/remedik --timeout=120s >/dev/null
+wait_for_settled 1 || info "the gateway endpoints did not settle to one; continuing"
 start_port_forward
 
 # --- blastRadius ----------------------------------------------------------
@@ -1125,6 +1228,7 @@ helm upgrade remedik charts/remedik \
 	--set actions.jobRun.enabled=true \
 	--wait --timeout 3m >/dev/null
 kubectl -n "$NAMESPACE" rollout status deploy/remedik --timeout=120s >/dev/null
+wait_for_settled 1 || info "the gateway endpoints did not settle to one; continuing"
 start_port_forward
 
 # --- job.delete -----------------------------------------------------------
@@ -1370,6 +1474,7 @@ helm upgrade remedik charts/remedik \
 	--set actions.deploymentRestart.enabled=true \
 	--wait --timeout 3m >/dev/null
 kubectl -n "$NAMESPACE" rollout status deploy/remedik --timeout=120s >/dev/null
+wait_for_settled 1 || info "the gateway endpoints did not settle to one; continuing"
 start_port_forward
 
 if kubectl -n "$NAMESPACE" get deploy remedik \
@@ -1462,6 +1567,102 @@ if grep -q '^remedik_dry_run 1' <<<"$metrics_body"; then
 else
 	fail "remedik_dry_run does not report the default"
 fi
+
+
+# --------------------------------------------------------------------------
+# Test 12 — two replicas, one leader
+#
+# The guards are in memory, so two instances would each enforce a cooldown
+# the other cannot see. `kubectl scale --replicas=2` must therefore be
+# failover rather than double remediation: one pod holds the lease and
+# answers, the other refuses with 503 and records nothing.
+# --------------------------------------------------------------------------
+step "12. Scaling to two replicas does not double the remediation"
+
+helm upgrade remedik charts/remedik \
+	--namespace "$NAMESPACE" \
+	--set image.repository="${IMAGE%%:*}" \
+	--set image.tag="${IMAGE##*:}" \
+	--set image.pullPolicy=IfNotPresent \
+	--set gateway.auth.token="$TOKEN" \
+	--set replicaCount=2 \
+	--set dryRun=true \
+	--set actions.deploymentRestart.enabled=true \
+	--wait --timeout 3m >/dev/null
+kubectl -n "$NAMESPACE" rollout status deploy/remedik --timeout=180s >/dev/null
+wait_for_settled 2 || info "the gateway endpoints did not settle to two; continuing"
+
+ready=$(kubectl -n "$NAMESPACE" get deploy remedik -o jsonpath='{.status.readyReplicas}')
+if [ "$ready" = "2" ]; then
+	pass "both replicas are ready"
+else
+	fail "readyReplicas=${ready}, want 2"
+fi
+
+# Exactly one lease, held by one of them.
+holder=$(kubectl -n "$NAMESPACE" get lease remedik.remedik.dev \
+	-o jsonpath='{.spec.holderIdentity}' 2>/dev/null || true)
+if [ -n "$holder" ]; then
+	pass "one lease, held by ${holder%%_*}"
+else
+	fail "no lease was taken; leader election is not running"
+fi
+
+# Ask each pod directly, bypassing the Service, so both answers are seen.
+leaders=0
+refusers=0
+for pod in $(kubectl -n "$NAMESPACE" get pods -l app.kubernetes.io/name=remedik \
+	-o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'); do
+	kubectl -n "$NAMESPACE" port-forward "pod/$pod" "${LEADER_PORT}:8090" >/dev/null 2>&1 &
+	pf=$!
+
+	# The tunnel takes a moment, and a curl that cannot connect exits
+	# non-zero — which under `set -e` would end the run rather than report
+	# anything. Every request here is allowed to fail and say so.
+	code=000
+	for _ in $(seq 1 25); do
+		code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+			-X POST "http://127.0.0.1:${LEADER_PORT}/webhooks/alertmanager" \
+			-H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
+			-d '{"version":"4","alerts":[]}' 2>/dev/null || true)
+		# curl already writes 000 through -w when it cannot connect; adding
+		# another 000 of our own made the guard below never match, so the
+		# loop broke on its first attempt and the tunnel never had its second.
+		[ -n "$code" ] && [ "$code" != "000" ] && break
+		sleep 1
+	done
+	kill "$pf" 2>/dev/null || true
+	wait "$pf" 2>/dev/null || true
+
+	case "$code" in
+		200) leaders=$((leaders + 1)) ;;
+		503) refusers=$((refusers + 1)) ;;
+		000|"") fail "pod ${pod} could not be reached through a port-forward" ;;
+		*)   fail "pod ${pod} answered ${code}, want 200 or 503" ;;
+	esac
+done
+
+if [ "$leaders" = "1" ]; then
+	pass "exactly one replica accepts alerts"
+else
+	fail "${leaders} replicas accept alerts, want exactly 1"
+fi
+if [ "$refusers" = "1" ]; then
+	pass "and the other refuses with 503 rather than going quiet"
+else
+	fail "${refusers} replicas refused with 503, want exactly 1"
+fi
+
+# Back to one, so the summary reflects a normal deployment.
+helm upgrade remedik charts/remedik \
+	--namespace "$NAMESPACE" \
+	--set image.repository="${IMAGE%%:*}" \
+	--set image.tag="${IMAGE##*:}" \
+	--set image.pullPolicy=IfNotPresent \
+	--set gateway.auth.token="$TOKEN" \
+	--set replicaCount=1 \
+	--set actions.deploymentRestart.enabled=true \
+	--wait --timeout 3m >/dev/null
 
 # --------------------------------------------------------------------------
 # Summary

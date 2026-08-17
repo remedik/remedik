@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/remedik/remedik/internal/alert"
@@ -69,6 +70,15 @@ type Config struct {
 	Metrics Recorder
 	// Logger is used for request logging; defaults to slog.Default().
 	Logger *slog.Logger
+
+	// Accepting reports whether this instance may take alerts. It is the
+	// leader-election gate: a replica that does not hold the lease has no
+	// guard state of its own worth trusting, so it must not create a
+	// remediation somebody else has already cooled down.
+	//
+	// Optional. Nil means always accepting, which is what a single-instance
+	// deployment and every unit test want.
+	Accepting func() bool
 }
 
 // Handler serves the Alertmanager webhook endpoint.
@@ -79,6 +89,8 @@ type Handler struct {
 	maxBodyBytes int64
 	metrics      Recorder
 	logger       *slog.Logger
+	accepting    func() bool
+	instance     string
 }
 
 // New validates cfg and returns a Handler.
@@ -94,6 +106,8 @@ func New(cfg Config) (*Handler, error) {
 		maxBodyBytes: cfg.MaxBodyBytes,
 		metrics:      cfg.Metrics,
 		logger:       cfg.Logger,
+		accepting:    cfg.Accepting,
+		instance:     os.Getenv("HOSTNAME"),
 	}
 	if h.path == "" {
 		h.path = DefaultPath
@@ -146,6 +160,24 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"remote_addr", r.RemoteAddr, "path", r.URL.Path)
 		w.Header().Set("WWW-Authenticate", `Bearer realm="remedik"`)
 		writeError(w, http.StatusUnauthorized, "missing or invalid bearer token")
+		return
+	}
+
+	// After authentication, before anything is recorded: a replica that does
+	// not hold the lease has no guard state worth trusting, so accepting
+	// here would create a remediation the leader has already cooled down.
+	//
+	// 503 rather than silence. Alertmanager retries a non-2xx and the
+	// Service picks a pod again, so the alert lands on the leader a moment
+	// later. Not listening at all would look identical to remedik being
+	// down, which is the one thing a gateway must never be mistaken for.
+	if h.accepting != nil && !h.accepting() {
+		h.metrics.IngestError(reasonNotLeader)
+		h.logger.Info("refused an alert: this instance does not hold the lease",
+			"instance", h.instance, "remote_addr", r.RemoteAddr)
+		w.Header().Set("Retry-After", "5")
+		writeError(w, http.StatusServiceUnavailable,
+			"this replica is not the leader; retry and the service will route to the one that is")
 		return
 	}
 

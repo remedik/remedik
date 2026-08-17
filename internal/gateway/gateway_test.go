@@ -416,3 +416,60 @@ func TestNopRecorder_IsSafeToCall(_ *testing.T) {
 	r.IngestError("x")
 	r.Unauthorized()
 }
+
+// A replica that does not hold the lease must record nothing.
+//
+// The guards live in memory, so a standby's view of what has already been
+// remediated is whatever it last loaded — which is why it must not accept.
+// The answer is 503 rather than silence: Alertmanager retries a non-2xx and
+// the Service picks a pod again, whereas not listening at all is
+// indistinguishable from remedik being down.
+func TestHandler_RefusesAlertsWhenNotTheLeader(t *testing.T) {
+	leader := false
+	h := newHarness(t, Config{Token: testToken, Accepting: func() bool { return leader }})
+
+	resp := h.post(t, DefaultPath, testToken, firingPayload)
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 from a replica without the lease", resp.StatusCode)
+	}
+	if calls, _ := h.sink.snapshot(); calls != 0 {
+		t.Errorf("the sink was called %d times; a non-leader must record nothing", calls)
+	}
+	if resp.Header.Get("Retry-After") == "" {
+		t.Error("no Retry-After: the sender is told to retry without being told when")
+	}
+	if h.recorder.errors[reasonNotLeader] != 1 {
+		t.Errorf("not_leader count = %d, want 1", h.recorder.errors[reasonNotLeader])
+	}
+
+	// And the moment it takes the lease, the same delivery is accepted.
+	leader = true
+	if resp := h.post(t, DefaultPath, testToken, firingPayload); resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d after taking the lease, want 200", resp.StatusCode)
+	}
+	if calls, _ := h.sink.snapshot(); calls != 1 {
+		t.Errorf("sink called %d times after election, want 1", calls)
+	}
+}
+
+// Authentication still comes first: an unauthenticated sender must not learn
+// which replica holds the lease.
+func TestHandler_AuthenticationIsCheckedBeforeLeadership(t *testing.T) {
+	h := newHarness(t, Config{Token: testToken, Accepting: func() bool { return false }})
+
+	resp := h.post(t, DefaultPath, "wrong-token", firingPayload)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401 before any leadership check", resp.StatusCode)
+	}
+}
+
+// With no predicate configured the gateway accepts, which is what a
+// single-instance deployment and every other test rely on.
+func TestHandler_AcceptsWhenNoLeadershipPredicateIsSet(t *testing.T) {
+	h := newHarness(t, Config{Token: testToken})
+
+	if resp := h.post(t, DefaultPath, testToken, firingPayload); resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+}

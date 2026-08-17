@@ -21,6 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -202,6 +203,11 @@ func run(logger *slog.Logger, opts options) error {
 
 	metrics.MustRegister()
 
+	// Established before anything is built, because the gateway consults it:
+	// the moment a SIGTERM arrives this process stops accepting alerts, even
+	// though it keeps its lease and keeps working until the runnables finish.
+	signalCtx := ctrl.SetupSignalHandler()
+
 	restConfig := ctrl.GetConfigOrDie()
 
 	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
@@ -220,11 +226,20 @@ func run(logger *slog.Logger, opts options) error {
 				},
 			},
 		},
-		// Single replica by design in this version: the state machine
-		// treats a Remediation found Running as interrupted, which is only
-		// sound while one process reconciles it. Leader election arrives
-		// with multi-replica support.
-		LeaderElection: false,
+		// The state machine treats a Remediation found Running as
+		// interrupted, which is only sound while one process reconciles it —
+		// and the guards hold their state in memory, so two instances would
+		// each enforce a cooldown the other cannot see. A lease makes that
+		// design correct rather than merely assumed: `kubectl scale
+		// --replicas=2` is now failover, not double remediation.
+		LeaderElection:             true,
+		LeaderElectionID:           "remedik.remedik.dev",
+		LeaderElectionNamespace:    opts.namespace,
+		LeaderElectionResourceLock: resourcelock.LeasesResourceLock,
+		// The gateway keeps listening on every replica and answers 503 when
+		// it is not the leader, so releasing on shutdown makes the handover
+		// quick rather than waiting out the lease.
+		LeaderElectionReleaseOnCancel: true,
 	})
 	if err != nil {
 		return fmt.Errorf("create manager: %w", err)
@@ -290,21 +305,26 @@ func run(logger *slog.Logger, opts options) error {
 	}
 
 	// Guards live in memory; without replaying what is already in the
-	// cluster, a restart would forget every cooldown and hourly count.
+	// cluster, a remediation cooled down a minute ago would run again.
 	//
-	// This runs before the manager starts, deliberately: the guards must be
-	// warm before the gateway can accept its first alert, and a runnable
-	// added to the manager would race the listener.
-	loadCtx, cancelLoad := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancelLoad()
-	loader := &engine.HistoryLoader{
-		Reader:    mgr.GetAPIReader(),
-		History:   history,
-		Namespace: opts.namespace,
-		Logger:    logger.With("component", "history"),
+	// The replay is tied to winning the lease, not to the process starting.
+	// A standby replica that loaded at boot and took over six hours later
+	// would be enforcing six-hour-old cooldowns — which is exactly the
+	// mistake leader election is supposed to prevent, arriving through the
+	// side door.
+	warm := make(chan struct{})
+	warmer := &guardWarmer{
+		loader: &engine.HistoryLoader{
+			Reader:    mgr.GetAPIReader(),
+			History:   history,
+			Namespace: opts.namespace,
+			Logger:    logger.With("component", "history"),
+		},
+		ready:  warm,
+		logger: logger.With("component", "history"),
 	}
-	if err := loader.Load(loadCtx); err != nil {
-		return fmt.Errorf("rebuild guard history: %w", err)
+	if err := mgr.Add(warmer); err != nil {
+		return fmt.Errorf("register the guard warmer: %w", err)
 	}
 
 	sink := &engine.Sink{
@@ -319,12 +339,37 @@ func run(logger *slog.Logger, opts options) error {
 		Logger:    logger.With("component", "sink"),
 	}
 
+	// The gateway accepts once the guards are warm — which happens only
+	// after this instance holds the lease — and stops the moment shutdown
+	// begins.
+	//
+	// The second half matters more than it looks. During a rolling update
+	// the old pod is still a Service endpoint and still holds the lease, so
+	// an alert can land on a process that is about to be killed and have its
+	// remediation cut in half. The record is honest about it — Running can
+	// only mean the process died, so it is failed as Interrupted — but
+	// losing a remediation on every upgrade is not a good trade. Refusing
+	// with 503 while the replacement is already serving costs the sender one
+	// retry.
 	handler, err := gateway.New(gateway.Config{
 		Sink:    sink,
 		Path:    opts.gatewayPath,
 		Token:   os.Getenv(tokenEnvVar),
 		Metrics: metrics.Gateway{},
 		Logger:  logger.With("component", "gateway"),
+		Accepting: func() bool {
+			select {
+			case <-signalCtx.Done():
+				return false
+			default:
+			}
+			select {
+			case <-warm:
+				return true
+			default:
+				return false
+			}
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("configure gateway: %w", err)
@@ -366,12 +411,23 @@ func run(logger *slog.Logger, opts options) error {
 	if err := mgr.AddHealthzCheck("ping", healthz.Ping); err != nil {
 		return fmt.Errorf("register the health check: %w", err)
 	}
+	// Readiness is deliberately not leadership.
+	//
+	// Gating it on "would this instance accept an alert" was tried and
+	// reverted: a standby then never becomes ready, so `helm --wait` and
+	// `kubectl rollout status` never finish on a deployment with more than
+	// one replica, and the failover this change exists to allow cannot be
+	// installed with ordinary tooling.
+	//
+	// A standby is ready because it is doing its job — waiting, and answering
+	// 503 with Retry-After so a sender retries onto the leader. That is the
+	// contract stated above, and readiness is not where it is enforced.
 	if err := mgr.AddReadyzCheck("ping", healthz.Ping); err != nil {
 		return fmt.Errorf("register the readiness check: %w", err)
 	}
 
 	logger.Info("remedik is running")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(signalCtx); err != nil {
 		return fmt.Errorf("run manager: %w", err)
 	}
 	return nil
@@ -516,6 +572,21 @@ func newHTTPServer(name, addr string, handler http.Handler, logger *slog.Logger)
 	}
 }
 
+// NeedLeaderElection implements manager.LeaderElectionRunnable.
+//
+// False, and this is load-bearing. controller-runtime starts a runnable that
+// says nothing only after the lease is won, so without this the gateway,
+// the dashboard and the metrics endpoint would not exist on a standby at
+// all — the connection would be refused rather than answered with 503, and
+// that is precisely the outcome the design rejects: a Service has one set of
+// endpoints, so a replica with no listener is indistinguishable from remedik
+// being down.
+//
+// Every server here listens on every replica. Which of them accepts alerts
+// is the gateway's own decision, made per request, and it is the only place
+// leadership belongs.
+func (s *httpServer) NeedLeaderElection() bool { return false }
+
 // Start implements manager.Runnable.
 func (s *httpServer) Start(ctx context.Context) error {
 	errCh := make(chan error, 1)
@@ -536,6 +607,40 @@ func (s *httpServer) Start(ctx context.Context) error {
 		defer cancel()
 		return s.server.Shutdown(shutdownCtx)
 	}
+}
+
+// guardWarmer replays the guard history when this instance becomes the
+// leader.
+//
+// It needs the lease, so a standby does no work and — more to the point —
+// does not hold state that will be stale by the time it is used. The gateway
+// waits on its ready channel, so no alert is accepted before the cooldowns
+// that should stop it are known.
+type guardWarmer struct {
+	loader *engine.HistoryLoader
+	ready  chan struct{}
+	logger *slog.Logger
+}
+
+// NeedLeaderElection implements manager.LeaderElectionRunnable.
+func (g *guardWarmer) NeedLeaderElection() bool { return true }
+
+// Start implements manager.Runnable.
+func (g *guardWarmer) Start(ctx context.Context) error {
+	loadCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	if err := g.loader.Load(loadCtx); err != nil {
+		// Returning stops the manager, which is right: a leader that cannot
+		// rebuild its guards would remediate without them.
+		return fmt.Errorf("rebuild guard history: %w", err)
+	}
+
+	g.logger.Info("guards are warm; the gateway is accepting alerts")
+	close(g.ready)
+
+	<-ctx.Done()
+	return nil
 }
 
 // historyPruner keeps the in-memory guard history bounded. Pruning is

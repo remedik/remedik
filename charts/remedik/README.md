@@ -140,6 +140,7 @@ what the operator already reads.
 | prometheusRule.namespace | string | `""` | Namespace for the PrometheusRule; defaults to the release namespace |
 | prometheusRule.severity.critical | string | `"critical"` | Severity label for the rule that fires when remedik is not scraped |
 | prometheusRule.severity.warning | string | `"warning"` | Severity label for the rest |
+| replicaCount | int | `1` | How many operator replicas to run. One is enough: exactly one instance holds the lease, accepts alerts and reconciles, and the others wait. Two buys a faster handover when a node goes away — a standby that already has its caches warm, rather than a pod that has to be scheduled and started.  It is safe to raise. A replica without the lease answers the gateway with 503 and reconciles nothing, so more replicas can never mean more remediation. |
 | resources.limits.memory | string | `"128Mi"` |  |
 | resources.requests.cpu | string | `"50m"` |  |
 | resources.requests.memory | string | `"64Mi"` |  |

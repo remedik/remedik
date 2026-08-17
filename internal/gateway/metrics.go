@@ -24,6 +24,10 @@ type Recorder interface {
 const (
 	reasonMalformedPayload = "malformed_payload"
 	reasonBodyTooLarge     = "body_too_large"
+	// reasonNotLeader is a replica refusing an alert because it does not
+	// hold the lease. A steady rate of these is normal on a deployment with
+	// more than one replica; a rate with no leader behind it is not.
+	reasonNotLeader = "not_leader"
 )
 
 // NopRecorder discards all telemetry. It is the default when no Recorder is

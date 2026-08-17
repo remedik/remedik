@@ -172,6 +172,9 @@ figure img {
   box-shadow: 0 20px 50px -24px rgb(0 0 0 / 70%);
 }
 figcaption { margin-top: 12px; color: var(--ink-3); font-size: 0.88rem; }
+.fineprint { margin-top: 14px; color: var(--ink-3); font-size: 0.9rem; }
+.code-label-spaced { margin-top: 20px; }
+.cta-row { margin-top: 26px; display: flex; flex-wrap: wrap; gap: 12px; }
 
 /* ---------------------------------------------------------------- footer */
 
@@ -337,16 +340,21 @@ footer a:hover { color: var(--green); }
 <span class="c"># have read a week of this:</span>
 <span class="k">kubectl get</span> remediations -n remedik</code></pre>
 
-        <p class="code-label" style="margin-top:20px">verify what you are running</p>
+        <p class="code-label code-label-spaced">verify what you are running</p>
 <pre><code><span class="k">cosign verify</span> ghcr.io/remedik/remedik:v0.1.0 \
   --certificate-identity-regexp \
     <span class="s">'^https://github.com/remedik/remedik/'</span> \
   --certificate-oidc-issuer \
     https://token.actions.githubusercontent.com</code></pre>
-        <p style="margin-top:14px; color:var(--ink-3); font-size:0.9rem">
+        <p class="fineprint">
         Multi-arch images signed with cosign keyless, an SBOM attested to the
         image, every CI action pinned to a commit SHA. No key to protect and
         nothing to take on trust.</p>
+        <p class="fineprint">
+        <strong>Not published yet.</strong> The tags that exist are release
+        candidates and their packages are private. <code>v0.1.0</code> is the
+        first one meant to be installed; until then it builds and runs from a
+        checkout.</p>
       </div>
     </div>
   </div>
@@ -408,7 +416,7 @@ footer a:hover { color: var(--green); }
       </div>
     </div>
 
-    <p style="margin-top:26px">
+    <p class="cta-row">
       <a class="btn btn-primary" href="https://github.com/remedik/remedik">Star it on GitHub</a>
       <a class="btn" href="https://github.com/remedik/remedik/blob/main/docs/funding.md">Read the funding page</a>
     </p>

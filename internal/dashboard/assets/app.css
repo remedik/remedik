@@ -49,6 +49,10 @@
   --running-bg: #fdf6ec;
   --running-border: #f3d9ab;
 
+  --warn: #8a5300;
+  --warn-bg: #fdf1de;
+  --warn-border: #f0d5a4;
+
   --waiting: #4a4d47;
   --waiting-bg: #eef0ea;
   --waiting-border: #d8dbd3;
@@ -102,6 +106,10 @@
     --running: #f5b449;
     --running-bg: #2a1e09;
     --running-border: #5c4014;
+
+    --warn: #e8b25e;
+    --warn-bg: #2a1f0c;
+    --warn-border: #5a4418;
 
     --waiting: #b0b4ad;
     --waiting-bg: #1a1e1b;
@@ -388,11 +396,16 @@ code {
 }
 
 .mode-muted,
-.mode-failed,
 .mode-off {
   color: var(--muted);
   background: var(--muted-bg);
   border-color: var(--muted-border);
+}
+
+.mode-failed {
+  color: var(--failed);
+  background: var(--failed-bg);
+  border-color: var(--failed-border);
 }
 
 .refresh {
@@ -1214,6 +1227,12 @@ a.stat:hover {
   color: var(--waiting);
   background: var(--waiting-bg);
   border-color: var(--waiting-border);
+}
+
+.pill-warn {
+  color: var(--warn);
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
 }
 
 .pill-plain {
@@ -2092,4 +2111,139 @@ a.stat:hover {
   .stat-value {
     font-size: 1.55rem;
   }
+}
+
+/* Namespaces — one row per namespace remedik has touched.
+   The left border carries the row's tone, so the page can be skimmed by
+   colour and still read by anybody who cannot: every row also names its
+   posture and says in words what its note means. */
+.ns-hint {
+  margin: 0 0 16px;
+  max-width: 72ch;
+}
+
+.ns-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ns-row {
+  border-left: 3px solid var(--muted-border);
+}
+
+.ns-ok {
+  border-left-color: var(--ok);
+}
+
+.ns-failed {
+  border-left-color: var(--failed);
+}
+
+.ns-warn {
+  border-left-color: var(--warn);
+}
+
+.ns-dryrun {
+  border-left-color: var(--dryrun);
+}
+
+.ns-muted {
+  border-left-color: var(--muted-border);
+}
+
+.ns-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin-bottom: 14px;
+}
+
+.ns-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ns-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px 32px;
+}
+
+.ns-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 28px;
+  margin: 0;
+}
+
+.ns-count dt {
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.ns-count dd {
+  margin: 2px 0 0;
+}
+
+.ns-number {
+  font-size: 1.25rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.ns-number-ok {
+  color: var(--ok);
+}
+
+.ns-number-failed {
+  color: var(--failed);
+}
+
+.ns-rate {
+  flex: 1 1 200px;
+  min-width: 180px;
+  max-width: 280px;
+}
+
+.ns-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--muted-bg);
+  overflow: hidden;
+}
+
+.ns-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--ok);
+  width: var(--pct, 0%);
+}
+
+.ns-rate-label {
+  margin: 6px 0 0;
+  font-size: 0.78rem;
+}
+
+/* The "Where" panel counts activity; /namespaces judges it. The link says
+   which question the other page answers, rather than repeating the word. */
+.panel-subtitle-link {
+  float: right;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-muted);
+}
+
+.panel-subtitle-link:hover {
+  color: var(--accent);
 }

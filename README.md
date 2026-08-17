@@ -36,6 +36,11 @@ radius before anything runs, and an LLM never sits in the execution path.
 | **When it fails, somebody is told** | `onFailure.steps` is a second plan. If that fails too, the record says so, because "we tried to tell you and could not" is the thing you need to find later. |
 | **The supply chain is checkable** | Multi-arch images signed with cosign keyless, an SBOM attested to the image, every GitHub Action pinned to a commit SHA, and `govulncheck` in the gate. |
 
+Nothing is published yet: the tags that exist are release candidates and
+their packages are private until this repository is. `v0.1.0` is the first
+one meant to be installed. Until then, `make dev-up && make dev-deploy`
+builds and runs it from a checkout.
+
 ```console
 # Verify a release before you trust it — no key required.
 cosign verify ghcr.io/remedik/remedik:v0.1.0 \
@@ -168,7 +173,9 @@ over the last day, and where remediation is happening — and each panel links
 into the list behind it. `/remediations` is that list, filtered by
 namespace, strategy or state. Every filter control is a link, so a narrowed
 view is a URL you can paste to whoever is on call, and it works with
-JavaScript off.
+JavaScript off. `/namespaces` answers the question a platform team with
+fifty of them actually has — where is this going badly — with one row per
+namespace, ordered by failures nobody was told about rather than by name.
 
 ## Try it in five minutes
 

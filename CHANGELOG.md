@@ -7,7 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **Exactly one instance acts.** `replicas: 1` was in the chart and nothing
+  enforced it: `kubectl scale deploy/remedik --replicas=2` succeeded, and the
+  second instance served the same Service and reconciled the same resources.
+  The guards keep their state in memory, so the two would each enforce a
+  cooldown the other could not see — the alert storm remedik exists to absorb
+  would have been amplified. Nothing said so anywhere either, so somebody
+  scaling for availability was doing the reasonable thing.
+
+  A lease in the operator's namespace settles it. More than one replica is
+  now failover, never additional throughput.
+
+  A standby keeps listening and answers `503` with `Retry-After`, because not
+  listening at all is indistinguishable from remedik being down — the one
+  thing a gateway must never be mistaken for. The sender retries and the
+  Service routes it to the leader.
+
+  The guards are replayed when the lease is taken, not when the process
+  starts: a standby that loaded at boot and took over six hours later would
+  enforce six-hour-old cooldowns, which is the same mistake through a side
+  door. An instance that cannot replay them stops.
+
+  Three things were got wrong on the way, each found by the end-to-end test
+  and each recorded in the change's proposal. The first version left every
+  HTTP server needing the lease, which is controller-runtime's default for a
+  runnable that says nothing — so a standby had no listener and refused the
+  connection instead of answering 503, defeating the whole point. Retrying the status write on conflict, which corrupts
+  records — see the note below. And gating readiness on leadership, which
+  makes a standby never ready, so `helm --wait` never finishes and the
+  failover cannot be installed with ordinary tooling.
+
+- **The gateway stops accepting the moment shutdown begins.** During a
+  rolling update the outgoing pod is still an endpoint and still holds the
+  lease, so an alert could land on a process about to be killed and have its
+  remediation cut in half. The record was honest about it — `Running` can
+  only mean the process died — but losing a remediation on every upgrade is
+  not a good trade. It now refuses with `503` on SIGTERM while finishing what
+  it already holds.
+
+- **A namespaces page** (`/namespaces`). One row per namespace remedik has
+  remediated in: its posture, its outcomes, how many of its failures nobody
+  was told about, and when it was last active. Ordered by what needs
+  attention rather than by name, because a list somebody has to read all of
+  does not answer "where is this going badly".
+
+  It is deliberately not called health. remedik knows the remediations it
+  ran, not whether the workloads in a namespace are well.
+
+  No new permission and no new read: the page is an arrangement of records
+  the dashboard already listed.
+
+### Fixed
+
+- The dashboard's `mode-failed` badge rendered in the muted palette, so a
+  count meant to stand out did not.
 
 ## [0.1.0-rc.3] - 2026-08-16
 
@@ -52,6 +107,28 @@ Every OpenSpec change is archived, so `openspec/specs/` is the current
 contract rather than a proposal.
 
 ### Added
+
+- **Leader election** (`add-leader-election`). `replicas: 1` was in the chart
+  and nothing enforced it: `kubectl scale --replicas=2` succeeded, and the
+  second instance served the same Service and reconciled the same resources.
+  The guards keep their state in memory, so the two would each enforce a
+  cooldown the other could not see — the alert storm remedik exists to absorb
+  would have been amplified. The requirement was not written down anywhere
+  either, so somebody scaling for availability would have been doing the
+  reasonable thing.
+
+  Exactly one instance now holds a lease, reconciles, and accepts alerts. A
+  standby keeps listening and answers 503 with a `Retry-After` rather than
+  refusing the connection: a Service has one set of endpoints, so a replica
+  with no listener is indistinguishable from remedik being down.
+  Alertmanager retries a non-2xx, the Service routes it, and the alert
+  lands. `replicaCount` is now a value, defaulting to one, and raising it is
+  failover rather than a hazard.
+
+  The guards are replayed when the lease is taken, not when the process
+  starts — a standby that loaded at boot and took over six hours later would
+  have enforced six-hour-old cooldowns, which is the same mistake through a
+  side door. An instance that cannot replay them stops.
 
 - **The dashboard holds up at any cluster size** (`scale-the-dashboard`).
   Measured on 150 namespaces, 40 strategies and 10,000 records — a mid-sized
@@ -563,6 +640,44 @@ contract rather than a proposal.
   generated chart docs.
 - `make versions`: reports every pinned version against the latest upstream
   release, so drift is visible without hunting through files.
+
+### Known
+
+- **~~A conflict on the terminal status write rewrites a success as
+  interrupted.~~ Explained, and it was not a defect.**
+
+  The conflict is the check. `Reconcile` reads through the manager's cache,
+  which is eventually consistent, so a second reconcile — triggered by the
+  first one's own status write — can read a copy that still says `Running`
+  after the first has already recorded `Succeeded`. By this operator's rule,
+  `Running` means the process died, so that stale read decides the
+  remediation was interrupted. Its write carries the old `resourceVersion`
+  and is refused; the work is requeued; the next pass reads a fresh copy,
+  finds a terminal state and stops. Nothing is lost, and the refusal is
+  guaranteed rather than lucky: the stale object's version is by definition
+  older than the one just written.
+
+  So the two reverted attempts to retry the write were removing the only
+  thing protecting the record. The second one, which re-read from the API
+  server and re-applied the status the reconciler had already built, let the
+  false `Interrupted` overwrite a `Succeeded` — a remediation whose every
+  step worked, recorded as failed.
+
+  It was caught by re-running the reverted change against `make e2e` with
+  the richer diagnostics: three log lines, twenty-four milliseconds apart,
+  reading "remediation finished, state=Succeeded", then "remediation was
+  interrupted", then "status write needed more than one attempt".
+
+  `internal/engine/staleread_test.go` now holds it: a reconciler whose reads
+  are behind its writes must not be able to overwrite a terminal record. The
+  test was confirmed to fail when the retry is reintroduced, with the same
+  `Failed/Interrupted` corruption the cluster produced.
+
+  A retry here would only ever be safe if it re-decided after re-reading,
+  rather than re-applying a decision made from data since overtaken. The
+  separate, real hazard — two operator replicas each enforcing guards the
+  other cannot see — is unaffected and still open, in
+  `openspec/changes/add-leader-election`.
 
 ### Fixed
 

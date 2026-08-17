@@ -52,6 +52,9 @@ const DefaultBindAddress = ":8082"
 // every panel on the overview that counts something links to the view of it.
 const remediationsPath = "/remediations"
 
+// namespacesPath is where remediation is going badly, if it is.
+const namespacesPath = "/namespaces"
+
 // pageSize is how many executions the list draws at once.
 //
 // History is already bounded by pruning, so this is not what keeps the page
@@ -177,6 +180,8 @@ func New(cfg Config) (*Handler, error) {
 	h.mux.HandleFunc(remediationsPath, h.remediations)
 	h.mux.HandleFunc(remediationsPath+"/{$}", h.remediations)
 	h.mux.HandleFunc("/remediations/{name}", h.remediation)
+	h.mux.HandleFunc(namespacesPath, h.namespaces)
+	h.mux.HandleFunc(namespacesPath+"/{$}", h.namespaces)
 	h.mux.HandleFunc("/strategies", h.strategies)
 	h.mux.Handle("/static/", http.StripPrefix("/static/", staticHandler()))
 	h.mux.HandleFunc("/", h.notFound)
@@ -375,6 +380,26 @@ func (h *Handler) remediation(w http.ResponseWriter, r *http.Request) {
 	view := buildRemediation(&rem, h.now())
 	view.Page = h.page(rem.Name, navRemediations)
 	h.render(w, r, remediationTemplate, view)
+}
+
+// namespaces answers "where is this going badly".
+//
+// It reads the same records the list page does. There is no new permission
+// and no new read: the page is an arrangement of what the dashboard already
+// had, which is why it costs nothing to serve.
+func (h *Handler) namespaces(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), readTimeout)
+	defer cancel()
+
+	var remediations v1alpha1.RemediationList
+	if err := h.reader.List(ctx, &remediations, client.InNamespace(h.namespace)); err != nil {
+		h.unavailable(w, r, "list remediations", err)
+		return
+	}
+
+	view := buildNamespaces(remediations.Items, h.posture, h.now())
+	view.Page = h.page("Namespaces", navNamespaces)
+	h.render(w, r, namespacesTemplate, view)
 }
 
 func (h *Handler) strategies(w http.ResponseWriter, r *http.Request) {

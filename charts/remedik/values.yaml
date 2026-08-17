@@ -14,6 +14,16 @@ image:
   # -- Image pull policy
   pullPolicy: IfNotPresent
 
+# -- How many operator replicas to run. One is enough: exactly one instance
+# holds the lease, accepts alerts and reconciles, and the others wait. Two
+# buys a faster handover when a node goes away — a standby that already has
+# its caches warm, rather than a pod that has to be scheduled and started.
+#
+# It is safe to raise. A replica without the lease answers the gateway with
+# 503 and reconciles nothing, so more replicas can never mean more
+# remediation.
+replicaCount: 1
+
 # -- Default execution posture. The install default is dry-run: remedik
 # matches alerts, evaluates guards and records Simulated remediations,
 # changing nothing. Turn it off once the reports look right.

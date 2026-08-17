@@ -14,7 +14,7 @@ decide, the engine executes, and the outcome is a `Remediation` resource.
 
 This repository explains itself. Read these before proposing changes:
 
-- **`openspec/specs/`** — the current behaviour contract, eleven
+- **`openspec/specs/`** — the current behaviour contract, sixteen
   capabilities. This is authoritative; code that disagrees with it is a bug
   in one of them. `make specs` checks the workflow was followed.
 - **`openspec/changes/archive/`** — what was proposed and why, including the
@@ -37,6 +37,11 @@ This repository explains itself. Read these before proposing changes:
    single reconcile, so a `Remediation` found in `Running` can only mean the
    process died. It is failed as `Interrupted`, never resumed. Waiting for a
    retry is `Pending`. Changing this breaks crash safety.
+
+   Its corollary: **never retry the status write on conflict.** Reconcile
+   reads through the cache, so a second pass can see `Running` after the
+   first recorded `Succeeded`; the conflict is what refuses that stale
+   verdict. `internal/engine/staleread_test.go` guards it and explains it.
 4. **RBAC follows features.** The chart grants a permission only because a
    named, enabled feature needs it. If you add a permission, add the feature
    that justifies it, or remove the permission.
@@ -93,7 +98,7 @@ internal/guards/     Cooldown and rate limiting                 (stdlib only)
 internal/action/     The Resolve/Plan/Execute contract + registry
 internal/engine/     Sink (alert → record) and the reconciler
 internal/metrics/    Prometheus adapters behind the Recorder interfaces
-internal/dashboard/  Read-only web UI; templates and CSS embedded in the binary
+internal/dashboard/  Read-only web UI, five pages; templates and CSS embedded
 internal/action/external/  webhook.call, job.run, script.run — the widest trust surface
 charts/remedik/      Helm chart; RBAC assembled from enabled actions
 hack/e2e.sh          The end-to-end test
@@ -104,46 +109,48 @@ most are the ones that must be easiest to test. Keep them that way.
 
 ## Open work
 
-Nothing is open. Eleven changes were implemented and archived on 2026-08-16
-— the read-only dashboard, the action contract's second version, the
-workload actions, the observability bundle, launch readiness, the escape
-hatches, the `blastRadius` guard, scaling and rollback, the node actions,
-and failure escalation.
+Nothing is open. `add-leader-election` and `add-namespace-health` were
+implemented and archived on 2026-08-17.
 
-Fourteen actions across four groups, three guards, sixteen capabilities in
-`openspec/specs/`.
+The first one's history is worth two minutes before you touch the reconciler, because
+three separate mistakes hid in it and none was visible without running the
+whole loop:
 
-The loop closes with `onFailure.steps`: a remediation that fails for good
-runs a second plan, which is how somebody gets told. It never changes the
-outcome, it is never retried, and it is the one thing that runs for real
-during a dry run — read the reasoning in `docs/architecture.md` before
-changing any of those three.
+1. **Never retry the status write on conflict.** `Reconcile` reads through
+   the manager's cache, so a second pass can see `Running` after the first
+   recorded `Succeeded` and, by invariant 3, decide it was interrupted. The
+   conflict on that write is what refuses the stale verdict.
+   `internal/engine/staleread_test.go` guards it.
+2. **`NeedLeaderElection() == false` on every HTTP server is load-bearing.**
+   controller-runtime starts a runnable that says nothing only after the
+   lease is won, so without it a standby has no listener and refuses the
+   connection rather than answering 503.
+3. **Readiness is not leadership.** Gating it made a standby never ready, so
+   `helm --wait` never finished with two replicas.
 
-### Before this can go online
+The method is the transferable part: reapply on a branch, instrument, run
+`make e2e`, read the operator log rather than theorising. It is deterministic
+and it found all three.
 
-Neither of these is a code change, and neither can be done from here:
+### Proven since
 
-1. **`release.yml` has never run.** Multi-arch image, cosign keyless
-   signing, SBOM attestation and the chart push to OCI all look right and
-   none of them is proven. A `v0.1.0-rc.1` tag is the test.
-2. **There is no GitHub remote.** The CI badges, the chart's `icon:` URL and
-   the security-advisory link in the issue templates all assume
-   `github.com/remedik/remedik` exists.
+`release.yml` has run. `v0.1.0-rc.3` produced a multi-arch image, a cosign
+keyless signature, an SBOM attestation and the chart pushed to OCI. The
+repository exists at `github.com/remedik/remedik`, so the badges, the
+chart's `icon:` and the advisory links resolve.
 
-### Asked for by the owner, not yet designed
+### Asked for by the owner
 
-Recorded here so they survive a cold pickup. None has a change written yet.
+Recorded here so they survive a cold pickup.
 
-- **Per-namespace posture.** `dryRun` is global today: one flag on the
-  operator. The owner wants the combination — act in some namespaces, only
-  report in others. This is probably the most valuable item on the list,
-  because it is how people actually adopt a tool that holds write access:
-  live in `staging`, dry-run in `prod`, until the reports earn the change.
-  It needs a decision about where the setting lives — the chart, the
-  strategy, or a `Namespace` label — and each answer has a different failure
-  mode when the setting and the RBAC disagree.
-- **Namespace filtering in the dashboard.** Straightforward; the pages
-  already read everything they would filter.
+**Delivered.** *Per-namespace posture* is `add-namespace-posture`, archived
+2026-08-16: the posture is resolved once when the record is created and
+written onto `spec.dryRun`, so every `Remediation` says which posture it ran
+under and a later config change cannot rewrite history. *Namespace filtering
+in the dashboard* is `add-dashboard-filters`, and `/namespaces` compares them.
+
+**Still open, no change written:**
+
 - **Cluster filtering in the dashboard.** Implies hub/spoke, which is
   "Later" on the roadmap: today's operator sees one cluster because it runs
   in one.
@@ -155,3 +162,17 @@ Recorded here so they survive a cold pickup. None has a change written yet.
   what it measures. The nearest existing art is the Kubernetes e2e suite and
   synthetic monitoring; the interesting part is making the results a service
   level rather than a pass/fail.
+
+### Not a code change, and not doable from here
+
+1. **2FA on the owner's GitHub account**, which is what blocks requiring it
+   org-wide. `hack/github-setup.sh` reports it on every run.
+2. **The repository's social preview image.** `docs/brand/remedik-banner.png`
+   is 1280x640 and ready; it can only be uploaded through Settings.
+3. **Making the repository public**, which unlocks rulesets, secret
+   scanning, CodeQL, Scorecard and Pages. `hack/github-setup.sh` applies all
+   of them on a re-run.
+4. **A funding destination.** `.github/FUNDING.yml` is committed fully
+   commented out, deliberately: a sponsor button leading nowhere is worse
+   than none on a project asking to be trusted with cluster write access.
+   `docs/funding.md` already says what the money would be for.

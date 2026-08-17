@@ -11,7 +11,7 @@ spec:
   # Remediation found Running as interrupted, which is only sound while a
   # single process reconciles it. Leader election arrives with
   # multi-replica support.
-  replicas: 1
+  replicas: {{ .Values.replicaCount }}
   strategy:
     type: Recreate
   selector:
