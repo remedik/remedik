@@ -181,10 +181,21 @@ for item in doc.get("items", []):
     if not esc:
         continue
     name = item["metadata"]["name"]
-    print(f"    {name}  escalation={esc.get(\"phase\", \"?\")}  {esc.get(\"message\", \"\")}")
+    # Values pulled out first because this program is wrapped in shell single
+    # quotes, so it cannot contain a single quote -- and a backslash-escaped
+    # double quote inside an f-string expression is a syntax error. That is
+    # what this block used to be, and being diagnostics, it only ran when
+    # something had already failed: the suite printed a Python traceback in
+    # place of the escalation it was asked about.
+    phase = esc.get("phase", "?")
+    message = esc.get("message", "")
+    print(f"    {name}  escalation={phase}  {message}")
     for step in esc.get("steps", []):
-        print(f"      channel {step.get(\"index\")} {step.get(\"action\")}: "
-              f"{step.get(\"phase\")}  {step.get(\"message\") or step.get(\"plan\") or \"\"}")
+        index = step.get("index")
+        action = step.get("action")
+        step_phase = step.get("phase")
+        detail = step.get("message") or step.get("plan") or ""
+        print(f"      channel {index} {action}: {step_phase}  {detail}")
 '
 }
 
@@ -437,6 +448,13 @@ info "chart renders and lints"
 # at a throwaway cluster — which is precisely how one debugging session in this
 # project drew a conclusion from the wrong cluster's logs.
 E2E_KUBECONFIG="$(mktemp -t remedik-e2e-kubeconfig.XXXXXX)"
+# Exported before the cluster exists rather than after it. A failure during
+# creation still runs the cleanup diagnostics, and with the ambient kubeconfig
+# still in effect those dumped a completely different cluster's remediations
+# under the heading "why each one ended there" -- which is worse than printing
+# nothing, and is the second time in this project that reading the wrong
+# cluster cost real time.
+export KUBECONFIG="$E2E_KUBECONFIG"
 
 step "Creating the kind cluster '$CLUSTER'"
 if kind get clusters 2>/dev/null | grep -qx "$CLUSTER"; then
@@ -446,7 +464,7 @@ else
 	kind create cluster --config hack/e2e/kind.yaml \
 		--kubeconfig "$E2E_KUBECONFIG" >/dev/null
 fi
-# The isolated kubeconfig, exported for the rest of the run.
+# The isolated kubeconfig, now filled in.
 #
 # Setting the current context is not enough: a kubeconfig is global state, so
 # anything else on the machine that switches context mid-run redirects every

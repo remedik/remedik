@@ -32,3 +32,13 @@ Thumbs.db
 node_modules/
 package.json
 package-lock.json
+
+# Owner tooling for this one GitHub account, not part of the product.
+#
+# `github-setup.sh` applies rulesets, secret scanning and CodeQL to
+# github.com/remedik/remedik and reports the settings no API can change. It is
+# useful to exactly one person and would read to everybody else as if the
+# project expected them to run it. Kept on disk, out of the clone.
+/hack/github-setup.sh
+/.github/rulesets/
+

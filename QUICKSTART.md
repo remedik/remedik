@@ -4,13 +4,43 @@ Two paths: install remedik into a cluster, or work on remedik itself.
 
 ---
 
+## See it first, on a cluster you can throw away
+
+If you have not watched it work yet, do that before installing it anywhere you
+care about. One command, nothing simulated, about ten minutes:
+
+```bash
+./hack/try.sh
+```
+
+It creates a kind cluster, installs Prometheus and Alertmanager, installs
+remedik, breaks a workload for real, and shows you the remediation it *would*
+have run. It keeps its own kubeconfig, so your own `kubectl` context is not
+touched, and `./hack/try.sh --clean` deletes the cluster.
+
+Everything it does is what the rest of this page does by hand.
+
 ## Install it
 
-### Prerequisites
+### What you need
 
-A Kubernetes cluster (1.30+), [helm](https://helm.sh/docs/intro/install/),
-and Prometheus with Alertmanager. remedik reads alerts from Alertmanager; it
-does not scrape anything itself.
+- **A Kubernetes cluster**, 1.30 or newer, and `kubectl` pointed at it.
+- **[helm](https://helm.sh/docs/intro/install/)** v3.
+- **Prometheus and Alertmanager, already running in it.** remedik has no
+  monitoring of its own: it reads alerts from Alertmanager and scrapes nothing.
+  If you do not have them, [kube-prometheus-stack][kps] is the usual answer and
+  what this page assumes.
+- **Permission to install a cluster-scoped CRD**, because a strategy is
+  cluster-scoped. If somebody else runs your clusters, that is the one thing
+  they have to agree to.
+
+[kps]: https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack
+
+You do not need to be fluent in Kubernetes to get through this. Every step below
+says what it does, what to check afterwards, and what it looks like when it goes
+wrong. If something does not happen,
+[docs/troubleshooting.md](docs/troubleshooting.md) walks the six gates an alert
+passes and gives you the command for each one.
 
 ### 1. Install the chart
 
@@ -18,8 +48,8 @@ does not scrape anything itself.
 > package registry that is private until this repository is, so these
 > commands will not resolve today. The tags that exist are release
 > candidates (`v0.1.0-rc.3`); `v0.1.0` is the first one meant to be
-> installed. Until then, `make dev-up && make dev-deploy` builds and runs it
-> from a checkout.
+> installed. Until then, `./hack/try.sh` runs the whole loop from a checkout on
+> a throwaway cluster.
 
 **Dry-run is the default.** remedik will match alerts, evaluate guards and
 record what it would have done, changing nothing.
@@ -66,8 +96,78 @@ In production, manage the Secret yourself and use
 remedik has one input: an Alertmanager webhook. It does not scrape anything and
 has no other way in.
 
-**If you run kube-prometheus-stack** — which most people do — this goes in your
-values file, under `alertmanager.config`:
+This is the step that goes wrong most, so there are two ways to do it and the
+first one does not touch your monitoring stack at all.
+
+#### Two commands, if you run the Prometheus Operator
+
+Most people do — it is what kube-prometheus-stack installs. Then routing is an
+object you apply, not a values file you edit and a monitoring release you
+upgrade.
+
+First, put the gateway's token where Alertmanager can read it, **in the
+Alertmanager's own namespace**:
+
+```bash
+kubectl -n monitoring create secret generic remedik-gateway-token \
+  --from-literal=token="<the token from step 1>"
+```
+
+Then the route and the receiver:
+
+```yaml
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: remedik
+  namespace: monitoring        # the namespace your Alertmanager runs in
+spec:
+  route:
+    receiver: remedik
+    groupWait: 30s
+    matchers:
+      - name: alertname
+        value: RemedikWorkloadCrashLooping
+  receivers:
+    - name: remedik
+      webhookConfigs:
+        - url: http://remedik-gateway.remedik.svc:8090/webhooks/alertmanager
+          sendResolved: false
+          httpConfig:
+            authorization:
+              type: Bearer
+              credentials:
+                name: remedik-gateway-token
+                key: token
+```
+
+**There is one trap here, and it is silent.** The Prometheus Operator adds a
+`namespace="<the AlertmanagerConfig's namespace>"` matcher to every route it
+generates, so the route above would only ever match alerts *about* the
+`monitoring` namespace — and a crash-loop in `payments` would never reach
+remedik. Nothing reports this: the object is accepted, the receiver appears in
+Alertmanager's UI, and no alert arrives.
+
+One patch turns it off, cluster-wide, with no `helm upgrade`:
+
+```bash
+kubectl -n monitoring patch alertmanager \
+  "$(kubectl -n monitoring get alertmanagers -o jsonpath='{.items[0].metadata.name}')" \
+  --type merge -p '{"spec":{"alertmanagerConfigMatcherStrategy":{"type":"None"}}}'
+```
+
+Check that it worked by reading the config Alertmanager is actually running —
+the matcher should be gone:
+
+```bash
+kubectl -n monitoring get secret \
+  "alertmanager-$(kubectl -n monitoring get alertmanagers -o jsonpath='{.items[0].metadata.name}')-generated" \
+  -o jsonpath='{.data.alertmanager\.yaml\.gz}' | base64 -d | gunzip | grep -A4 remedik
+```
+
+#### Or edit your monitoring values, if you would rather
+
+**kube-prometheus-stack**, under `alertmanager.config`:
 
 ```yaml
 alertmanager:
@@ -95,19 +195,20 @@ alertmanager:
                 credentials: <the token from step 1>
 ```
 
-then `helm upgrade` your monitoring release.
+then `helm upgrade` your monitoring release. **If you manage `alertmanager.yml`
+yourself**, the same two entries go into it directly.
 
-**If you manage `alertmanager.yml` yourself**, the same `receivers` and
-`routes` entries go in it directly.
+#### Routing broadly is safe
 
-Routing broadly is safe: remedik answers `200` to anything it understood,
-including "no strategy matched", so an alert it has no opinion about is
-recorded as unmatched and nothing happens.
+remedik answers `200` to anything it understood, including "no strategy
+matched", so an alert it has no opinion about is recorded as unmatched and
+nothing happens. Alertmanager retries non-2xx responses, so a normal outcome
+must not look like a failure.
 
 If the point is that on-call is only woken when remediation did not work, read
 [docs/routing.md](docs/routing.md) before you route anything: it is three
-routes rather than one, and the third is the one that keeps remedik out of
-your paging path's critical section.
+routes rather than one, and the third is the one that keeps remedik out of your
+paging path's critical section.
 
 ### 3. Check that it is actually receiving alerts
 

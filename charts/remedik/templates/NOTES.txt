@@ -43,6 +43,12 @@ Add this receiver to your Alertmanager configuration:
 {{- end }}
 
 Route the alerts you want remediated to that receiver.
+
+If you run the Prometheus Operator, an AlertmanagerConfig object does this
+without touching your monitoring release — QUICKSTART.md has it, including the
+part that catches everybody: the operator adds a namespace= matcher to every
+route it generates, so a route defined in the monitoring namespace only ever
+matches alerts about that namespace, and nothing arrives.
 {{ if .Values.gateway.auth.disabled }}
 WARNING: gateway authentication is disabled. Anything that can reach the
 service can ask remedik to act. Use this for local development only.

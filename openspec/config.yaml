@@ -3,10 +3,11 @@ schema: spec-driven
 context: |
   Project: remedik — a Kubernetes auto-remediation operator ("predictably boring").
   It turns Alertmanager alerts into safe, audited remediations: strategies are CRDs,
-  every execution is a Remediation resource, destructive actions require human
-  approval (Slack), and AI/LLM features are read-only and optional by construction.
+  every execution is a Remediation resource, a strategy can require human approval
+  (a kubectl patch on the record, no bot involved), and AI/LLM features are
+  read-only and optional by construction.
 
-  Tech: Go >= 1.24, module github.com/remedik/remedik, controller-runtime for the
+  Tech: Go >= 1.26, module github.com/remedik/remedik, controller-runtime for the
   operator, Helm for install, API group remedik.dev (v1alpha1).
 
   Conventions: English everywhere (code, comments, docs, commits). Conventional

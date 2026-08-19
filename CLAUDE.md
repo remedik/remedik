@@ -177,16 +177,3 @@ Recorded so they survive a cold pickup.
   seeing what people actually ask for, not before: a plugin mechanism inside
   something holding cluster write access is a trust surface, and guessing at
   it is how that surface ends up wider than anybody wanted.
-
-## Repository settings, which are not code
-
-`hack/github-setup.sh` applies what the API allows and reports the rest on
-every run, so the state is checkable rather than remembered. Two things it
-cannot do:
-
-- **Requiring two-factor authentication.** The org endpoint accepts the field
-  and silently ignores it — it is documented as a response, not a parameter —
-  so it is a UI setting at
-  `https://github.com/organizations/remedik/settings/security`.
-- **The social preview image.** `docs/brand/remedik-banner.png` is 1280x640
-  and ready; Settings is the only way to upload one.

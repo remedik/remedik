@@ -200,6 +200,12 @@ e2e: ## Run the end-to-end test on a throwaway kind cluster
 
 ##@ Dev cluster (kind + Prometheus/Alertmanager/Grafana)
 
+try: ## See the whole loop on a throwaway cluster (./hack/try.sh)
+	@# The first thing to run, and the one a reader should not have to find in a
+	@# contributor section. Its own kubeconfig, so it cannot touch the cluster
+	@# somebody actually works with.
+	./hack/try.sh
+
 dev-up: ## Create the kind dev cluster and install the monitoring stack
 	@command -v docker >/dev/null || { echo "docker not found — dev cluster needs Docker (Docker Desktop with WSL integration, or docker-ce in WSL)"; exit 1; }
 	@command -v kind >/dev/null || { echo "kind not found — install: https://kind.sigs.k8s.io/docs/user/quick-start/#installation"; exit 1; }

@@ -177,7 +177,10 @@ workloadAlerts:
   enabled: false
   # -- Namespace for the PrometheusRule; defaults to the release namespace
   namespace: ""
-  # -- Labels the PrometheusRule needs to be selected, as for the ServiceMonitor
+  # -- Labels this PrometheusRule needs to be selected. Defaults to
+  # `prometheusRule.additionalLabels`, because it is the same label for the same
+  # reason and setting it twice is how a rule file ends up created and never
+  # loaded — with nothing anywhere reporting it.
   additionalLabels: {}
   # -- Severity label on the rules
   severity: warning
@@ -185,6 +188,26 @@ workloadAlerts:
   # rollout in progress is not mistaken for one, short enough to be worth
   # remediating.
   crashLoopFor: 10m
+  # -- The window the restart count is measured over.
+  #
+  # The crash-loop rules count restarts rather than reading
+  # `kube_pod_container_status_waiting_reason`, which is the obvious metric and
+  # the wrong one to depend on: kube-state-metrics 2.20 stopped publishing it,
+  # so a rule written on it cannot fire at all on a current cluster and nothing
+  # anywhere says so. Restarts have been in every version and are not going
+  # away.
+  #
+  # Do not shorten this below 10m without also dropping the threshold to 1.
+  # Kubernetes backs a crash loop off exponentially, capped at five minutes
+  # between restarts, so a settled CrashLoopBackOff produces very few restarts
+  # per window. Measured on a workload that had been failing for thirteen
+  # minutes: 0 restarts in the last 3m, 1 in 5m, 2 in 10m. A 3m window with a
+  # threshold of 2 can therefore never fire, which looks exactly like remedik
+  # being broken.
+  crashLoopWindow: 10m
+  # -- How many restarts inside that window count as a crash loop. Two is a
+  # container that died twice, which no healthy workload does.
+  crashLoopThreshold: 2
   # -- How long an OOM kill must hold before it fires
   oomFor: 5m
 

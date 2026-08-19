@@ -24,7 +24,17 @@ metadata:
   namespace: {{ .Values.workloadAlerts.namespace | default .Release.Namespace }}
   labels:
     {{- include "remedik.labels" . | nindent 4 }}
-    {{- with .Values.workloadAlerts.additionalLabels }}
+    {{- /*
+    Falls back to prometheusRule.additionalLabels when this is unset.
+
+    Both values mean the same thing -- the label the Prometheus Operator's
+    ruleSelector matches -- and having to set it twice in one chart produced the
+    quietest possible failure: the rule file is created, the operator ignores it,
+    Prometheus loads nothing, and no alert is ever raised. Nothing reports that.
+    Somebody who has already told this chart which label their Prometheus wants
+    has said it once, and once is enough.
+  */}}
+  {{- with (.Values.workloadAlerts.additionalLabels | default .Values.prometheusRule.additionalLabels) }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
 spec:
@@ -32,17 +42,42 @@ spec:
     - name: remedik.workloads
       rules:
         - alert: RemedikWorkloadCrashLooping
+          {{- /*
+            Counted from restarts, not from
+            kube_pod_container_status_waiting_reason.
+
+            That metric is the obvious one and the wrong one to depend on:
+            kube-state-metrics 2.20 stopped publishing it. A rule written on it
+            produces no series at all on a current cluster, so it never fires,
+            and nothing anywhere reports that -- the rule is loaded, the alert
+            is simply never raised. This was found by running the demo against a
+            fresh kube-prometheus-stack and watching a genuinely crash-looping
+            workload raise nothing.
+
+            Restarts have been published by every version of kube-state-metrics
+            and are not going away. OOM kills are excluded, because they restart
+            too and want more memory rather than another restart -- which is
+            what RemedikWorkloadOOMKilling is for.
+          */}}
           expr: |
+            max by (namespace, deployment) (
             label_replace(
-              max_over_time(
-                kube_pod_container_status_waiting_reason{
-                  job="kube-state-metrics", reason="CrashLoopBackOff"
-                }[5m]
+              (
+                increase(
+                  kube_pod_container_status_restarts_total{job="kube-state-metrics"}[{{ .Values.workloadAlerts.crashLoopWindow | default "10m" }}]
+                ) >= {{ .Values.workloadAlerts.crashLoopThreshold | default 2 }}
+                unless on (namespace, pod, container)
+                max_over_time(
+                  kube_pod_container_status_last_terminated_reason{
+                    job="kube-state-metrics", reason="OOMKilled"
+                  }[{{ .Values.workloadAlerts.crashLoopWindow | default "10m" }}]
+                ) >= 1
               )
               * on (namespace, pod) group_left (owner_name)
               kube_pod_owner{job="kube-state-metrics", owner_kind="ReplicaSet"},
               "deployment", "$1", "owner_name", "(.+)-[^-]+$"
             ) >= 1
+            )
           for: {{ .Values.workloadAlerts.crashLoopFor | default "15m" }}
           labels:
             severity: {{ .Values.workloadAlerts.severity | default "warning" }}
@@ -62,16 +97,24 @@ spec:
             workload's name — no hash to strip, and no label_replace.
           */}}
           expr: |
-            max_over_time(
-              kube_pod_container_status_waiting_reason{
-                job="kube-state-metrics", reason="CrashLoopBackOff"
-              }[5m]
+            max by (namespace, statefulset) (
+            (
+              increase(
+                kube_pod_container_status_restarts_total{job="kube-state-metrics"}[{{ .Values.workloadAlerts.crashLoopWindow | default "10m" }}]
+              ) >= {{ .Values.workloadAlerts.crashLoopThreshold | default 2 }}
+              unless on (namespace, pod, container)
+              max_over_time(
+                kube_pod_container_status_last_terminated_reason{
+                  job="kube-state-metrics", reason="OOMKilled"
+                }[{{ .Values.workloadAlerts.crashLoopWindow | default "10m" }}]
+              ) >= 1
             )
             * on (namespace, pod) group_left (statefulset)
             label_replace(
               kube_pod_owner{job="kube-state-metrics", owner_kind="StatefulSet"},
               "statefulset", "$1", "owner_name", "(.+)"
             ) >= 1
+            )
           for: {{ .Values.workloadAlerts.crashLoopFor | default "15m" }}
           labels:
             severity: {{ .Values.workloadAlerts.severity | default "warning" }}
@@ -90,6 +133,7 @@ spec:
             remediation — more memory rather than another restart.
           */}}
           expr: |
+            max by (namespace, deployment) (
             label_replace(
               (
                 max_over_time(
@@ -102,6 +146,7 @@ spec:
               kube_pod_owner{job="kube-state-metrics", owner_kind="ReplicaSet"},
               "deployment", "$1", "owner_name", "(.+)-[^-]+$"
             ) >= 1
+            )
           for: {{ .Values.workloadAlerts.oomFor | default "5m" }}
           labels:
             severity: {{ .Values.workloadAlerts.severity | default "warning" }}

@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`./hack/try.sh` (`make try`) — the whole loop on your laptop, with nothing
+  simulated.** A throwaway cluster, a real Prometheus, a workload that really
+  crash-loops, a real alert through a real Alertmanager, and remedik recording
+  what it would do about it. Same chart and same values a real install uses; no
+  alert is posted by hand.
+
+  It exists because "install an operator that has write access to your cluster"
+  is a large first step and a README is not evidence. It keeps its own
+  kubeconfig, so it cannot touch the cluster somebody actually works with, and it
+  ends by printing where to look, the one flag that lets remedik act, and the
+  command that stops it again.
+
+- **QUICKSTART's Alertmanager step is now two `kubectl` commands** for anybody
+  running the Prometheus Operator, instead of an edit to the monitoring stack's
+  values and an upgrade of that release. It also documents the trap that makes
+  the object silently useless: the operator adds a `namespace=` matcher to every
+  route it generates, so a route defined in `monitoring` only ever matches alerts
+  about `monitoring` — and a crash-loop in `payments` never reaches remedik.
+  Verified against a live cluster, both broken and fixed.
+
 - **A waiting remediation's page carries the command that decides it.** The
   dashboard still cannot write and is not going to — an approve button needs an
   identity model it does not have — but a page that cannot act can say exactly
@@ -323,6 +343,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   the chip with the pattern stated once above. Nine rows fit where four did.
 
 ### Fixed
+
+- **The first image in the README was a screenshot of a browser error page.**
+  Chrome reached the dashboard's port before the port-forward was answering, and
+  wrote a perfectly valid PNG of "This page isn't working". The script printed
+  the file size, it dropped from 120K to 16K, and a human read that number
+  without noticing.
+
+  `hack/screenshots.sh` now waits until *the browser* can fetch a page with
+  content in it — not until curl can, which on WSL is a different question and is
+  what made this possible — and refuses to finish if any shot is small enough to
+  be an error page. It also prefers a record whose timestamps make sense for the
+  detail page: a seeded fixture reads "started eleven days before it was
+  created", which is true of the fixture and nonsense to a reader.
+
+- **The shipped crash-loop alert rules could not fire on a current cluster.**
+  They read `kube_pod_container_status_waiting_reason`, which kube-state-metrics
+  stopped publishing in 2.20 — so on any cluster with that version or newer, the
+  rules load, look healthy, and never raise anything. Nothing reports this. It is
+  the exact failure that makes somebody conclude the tool does not work.
+
+  They now count restarts, which every version of kube-state-metrics publishes,
+  excluding OOM kills because those want more memory rather than another restart.
+  Found by running the new demo against a fresh kube-prometheus-stack and
+  watching a genuinely crash-looping workload raise nothing.
+
+  Two things came out of measuring it on a real crash loop, both now in
+  `values.yaml`: Kubernetes backs a crash loop off exponentially, capped at five
+  minutes, so a settled `CrashLoopBackOff` produces 0 restarts in 3 minutes, 1 in
+  5 and 2 in 10 — a short window with a threshold of 2 can never fire. And the
+  rules now aggregate per workload, so a three-replica crash loop is one alert
+  and one remediation rather than three alerts, one remediation and two guard
+  refusals that look like something being wrong.
+
+- **`workloadAlerts.additionalLabels` now falls back to
+  `prometheusRule.additionalLabels`.** Both mean the same thing — the label the
+  Prometheus Operator's `ruleSelector` matches — and having to set it twice in one
+  chart produced the quietest possible failure: the rule file is created, the
+  operator ignores it, and no alert is ever raised.
 
 - **An upgrade could silently drop the fields it was shipping.** `helm upgrade`
   does not upgrade CRDs — Helm applies a chart's `crds/` once and never again —
