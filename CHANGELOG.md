@@ -9,6 +9,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **The dashboard can be asked questions, not just read.** Three filter axes,
+  and the two that matter most are reached by clicking a value that was
+  already on the page:
+
+  - **`escalation`** — `failed`, `none` or `succeeded`, over failures. This
+    is also a fix: the overview's two failure cards both linked to
+    `state=Failed`, so clicking "64 escalations failed" opened a list of 213.
+    Each card now links to the set it counted, and the counts match.
+  - **`target`** — the target on any row is a link now. "What has remedik
+    done to `deployment/payments/api`?" was a question the pages displayed
+    the answer to and could not be asked.
+  - **`alert`** — the same for an alertname, across the cluster.
+
+  Clauses with no control of their own appear as a removable "Showing only"
+  chip, so a page is never narrowed by something it does not show. Every
+  choice stays a link, so a filtered view is still a URL to paste to whoever
+  is on call.
+
+- **The strategies page can show only what cannot run**, or only what is
+  disabled. The counts beside the control are of every strategy whatever is
+  shown, because a filter that moves the numbers next to itself cannot be
+  reasoned about.
+
+- **A Copy button on every command the pages print** — the patch that
+  approves a remediation, and the `kubectl` each step would have been. At
+  03:00 nobody retypes a patch correctly.
+
+  It is built by the page's script rather than written into the markup, so it
+  cannot exist where it would not work: clipboard access needs a secure
+  context, and a button that silently does nothing is worse than none.
+
+### Changed
+
+- **The overview leads with the alarm rather than the totals.** The attention
+  counts were smaller than the run totals below them, so the loudest number on
+  a page asking "is anything wrong" was the count of everything that had ever
+  run.
+- **A quiet day no longer draws a wall.** The activity chart scaled every hour
+  against the busiest one, so a peak of one execution rendered twenty-four
+  full-height bars. It scales against a floor now; above it, the real peak.
+- **The "where" bars carry their failures.** Rows at the top of that panel are
+  nearly always within a few percent of each other, so a bar encoding volume
+  alone drew identical tracks. The tail is the share that failed.
+- **The posture panel says the namespaces once** — named in the sentence when
+  there are few, counted there and listed as chips when there are many, never
+  both.
+- **A step that never ran no longer reports `0ms`.** Timestamps have second
+  granularity, so a step that failed before it did anything starts and ends at
+  the same instant; the pages already render a missing duration as an em dash.
+- **The strategies page says its rules once**, not once per card — with seven
+  strategies that was fourteen identical sentences.
+- **A remediation's breadcrumb points at the list it belongs to**, not at the
+  overview.
+
 - **A strategy now says whether remedik can run it.** `kubectl get
   remediationstrategies` has a `READY` column, and a strategy naming an action
   this build does not have — a typo, or one of the thirteen the chart does not

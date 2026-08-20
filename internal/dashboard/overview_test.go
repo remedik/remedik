@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -459,5 +460,220 @@ func TestActivity_ARecordThatHasNotRunCountsWhereItExists(t *testing.T) {
 		// It is in a bar, but it contributes to none of the three outcomes, so
 		// the total counts nothing it did not do.
 		t.Logf("total = %d", panel.Total)
+	}
+}
+
+// A quiet day must not draw a wall. The chart scales against the busiest
+// hour, and with a peak of one that made every occupied hour a full-height
+// bar — twenty-four of them, which reads as a crisis and is a quiet night.
+func TestActivity_AQuietDayDoesNotLookLikeAWall(t *testing.T) {
+	now := testNow()
+
+	// One execution in each of three different hours: peak is 1.
+	records := []v1alpha1.Remediation{
+		failedRemediation("a", 5),
+		failedRemediation("b", 65),
+		failedRemediation("c", 125),
+	}
+	panel := buildActivity(ptrs(records), now)
+
+	if panel.Busiest != 1 {
+		t.Fatalf("Busiest = %d, want 1 — the fixture puts one in each hour", panel.Busiest)
+	}
+	// The axis is labelled with what the top of the chart is worth, not with
+	// the peak: saying "1" above bars that draw a quarter of the height is
+	// the chart lying about its own scale.
+	if panel.Scale != activityScaleFloor {
+		t.Errorf("Scale = %d, want %d — the axis label must match the heights",
+			panel.Scale, activityScaleFloor)
+	}
+	for _, bar := range panel.Bars {
+		if bar.Total > 0 && bar.Percent > 100/activityScaleFloor {
+			t.Errorf("an hour with %d execution(s) drew at %d%%, want no more than %d%%: "+
+				"the peak is 1 and the chart still claimed a full bar",
+				bar.Total, bar.Percent, 100/activityScaleFloor)
+		}
+	}
+}
+
+// Above the floor the scale is the real peak, so a busy hour still fills the
+// chart and the comparison between hours is not compressed.
+func TestActivity_ABusyDayStillScalesToItsOwnPeak(t *testing.T) {
+	now := testNow()
+
+	records := make([]v1alpha1.Remediation, 0, 6)
+	for range 6 {
+		records = append(records, failedRemediation("busy", 5))
+	}
+
+	panel := buildActivity(ptrs(records), now)
+	if panel.Busiest != 6 {
+		t.Fatalf("Busiest = %d, want 6", panel.Busiest)
+	}
+
+	var tallest int
+	for _, bar := range panel.Bars {
+		if bar.Percent > tallest {
+			tallest = bar.Percent
+		}
+	}
+	if tallest != 100 {
+		t.Errorf("the busiest hour drew at %d%%, want 100 once the peak is above the floor", tallest)
+	}
+	if panel.Scale != panel.Busiest {
+		t.Errorf("Scale = %d, want the real peak of %d above the floor", panel.Scale, panel.Busiest)
+	}
+}
+
+// The bar encoded volume alone, and the rows at the top of this panel are
+// nearly always within a few percent of each other — so it drew five
+// identical tracks. The tail is the part that differs.
+func TestBreakdown_TheBarCarriesTheFailures(t *testing.T) {
+	records := []v1alpha1.Remediation{
+		succeededRemediation("a", 30),
+		succeededRemediation("b", 25),
+		failedRemediation("c", 20),
+		failedRemediation("d", 15),
+	}
+	for i := range records {
+		records[i].Spec.Target = "deployment/payments/api"
+	}
+
+	rows := buildBreakdown(ptrs(records), targetNamespaceOf, byNamespace)
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	if rows[0].FailedShare != 50 {
+		t.Errorf("FailedShare = %d, want 50 — two of four failed", rows[0].FailedShare)
+	}
+}
+
+// A row nothing failed in has no tail, rather than a zero-width one.
+func TestBreakdown_NoFailuresDrawsNoTail(t *testing.T) {
+	records := []v1alpha1.Remediation{succeededRemediation("a", 30)}
+	records[0].Spec.Target = "deployment/payments/api"
+
+	rows := buildBreakdown(ptrs(records), targetNamespaceOf, byNamespace)
+	if rows[0].FailedShare != 0 {
+		t.Errorf("FailedShare = %d, want 0", rows[0].FailedShare)
+	}
+}
+
+// The panel said the same list twice — once as a sentence and once as chips
+// under it — which made it twice as tall as the fact it carries. A few
+// namespaces belong in the sentence; many belong in the chips; neither case
+// wants both.
+func TestPosturePanel_NamesThemOrChipsThemNeverBoth(t *testing.T) {
+	few := buildPosturePanel(Posture{DryRun: true, Live: []string{"staging", "canary"}})
+	if !strings.Contains(few.Detail, "staging and canary") {
+		t.Errorf("Detail = %q, want it to name two namespaces", few.Detail)
+	}
+	if few.ShowNames {
+		t.Error("ShowNames = true, want false: the sentence already named them")
+	}
+
+	many := buildPosturePanel(Posture{DryRun: true, Live: []string{"a", "b", "c", "d", "e"}})
+	if !strings.Contains(many.Detail, "5 namespaces") {
+		t.Errorf("Detail = %q, want it to count them rather than list five names", many.Detail)
+	}
+	if !many.ShowNames {
+		t.Error("ShowNames = false, want true: the sentence only counted them")
+	}
+	if len(many.Live) != 5 {
+		t.Errorf("Live = %v, want all five for the chips to render", many.Live)
+	}
+}
+
+// The attention panel counts three sets and must link to the ones it
+// counted. Both failure cards used to point at state=Failed, so the page
+// offered a number of 64 and opened a list of 212.
+func TestAttention_EachCardLinksToWhatItCounted(t *testing.T) {
+	none := failedRemediation("no-escalation", 10)
+
+	tried := failedRemediation("not-told", 10)
+	tried.Status.Escalation = &v1alpha1.EscalationStatus{Phase: v1alpha1.StepPhaseFailed}
+
+	panel := buildAttention([]*v1alpha1.Remediation{&none, &tried})
+
+	seen := map[string]string{}
+	for _, item := range panel.Items {
+		seen[item.Label] = item.URL
+	}
+
+	unheard := seen["escalation failed"]
+	untold := seen["failure with no escalation"]
+	if unheard == "" || untold == "" {
+		t.Fatalf("the panel did not raise both cards: %+v", seen)
+	}
+	if unheard == untold {
+		t.Fatal("both cards still link to the same list")
+	}
+	if !strings.Contains(unheard, "escalation="+EscalationFailed) {
+		t.Errorf("the unheard card links to %q, want the escalation clause it counted", unheard)
+	}
+	if !strings.Contains(untold, "escalation="+EscalationNone) {
+		t.Errorf("the untold card links to %q, want the escalation clause it counted", untold)
+	}
+	// And each link has to reproduce the count, or it is a different lie.
+	for label, link := range map[string]string{"unheard": unheard, "untold": untold} {
+		query, err := url.ParseQuery(strings.TrimPrefix(link, remediationsPath+"?"))
+		if err != nil {
+			t.Fatalf("%s link %q does not parse: %v", label, link, err)
+		}
+		filter := ParseFilter(query)
+		var kept int
+		for _, rem := range []*v1alpha1.Remediation{&none, &tried} {
+			if filter.Matches(rem) {
+				kept++
+			}
+		}
+		if kept != 1 {
+			t.Errorf("%s link keeps %d records, want the 1 its card counted", label, kept)
+		}
+	}
+}
+
+// The tiles count every record the cluster still holds, which is a different
+// question from "how is it going right now" — and the one the page's own
+// heading asks. The window carries its own rate for that reason.
+func TestActivity_TheWindowCarriesItsOwnFailureRate(t *testing.T) {
+	now := testNow()
+	records := []v1alpha1.Remediation{
+		failedRemediation("bad-1", 5),
+		failedRemediation("bad-2", 20),
+		succeededRemediation("ok-1", 40),
+		succeededRemediation("ok-2", 70),
+		// Outside the window: it must not move the rate.
+		failedRemediation("old", 60*40),
+	}
+
+	panel := buildActivity(ptrs(records), now)
+
+	if panel.Total != 4 || panel.Failed != 2 {
+		t.Fatalf("window = %d executions, %d failed; want 4 and 2", panel.Total, panel.Failed)
+	}
+	if got := panel.FailureRate(); got != 50 {
+		t.Errorf("FailureRate() = %d, want 50", got)
+	}
+
+	// An empty window has no rate rather than a rate of zero, which reads as
+	// "nothing is failing" when the truth is "nothing has run".
+	if got := buildActivity(nil, now).FailureRate(); got != 0 {
+		t.Errorf("an empty window reports %d", got)
+	}
+}
+
+// The two tiles described the same ratio in two vocabularies: one a
+// percentage, the other an opinion. They cannot be compared that way.
+func TestFailedDetail_IsAShareLikeTheTileBesideIt(t *testing.T) {
+	if got := failedDetail(0, 0); got != "none" {
+		t.Errorf("failedDetail(0, 0) = %q, want none", got)
+	}
+	if got := failedDetail(3, 1); got != "25% of executed runs" {
+		t.Errorf("failedDetail(3, 1) = %q, want 25%% of executed runs", got)
+	}
+	// And it agrees with its neighbour rather than contradicting it.
+	if successRate(3, 1) != "75% of executed runs" {
+		t.Errorf("successRate(3, 1) = %q", successRate(3, 1))
 	}
 }

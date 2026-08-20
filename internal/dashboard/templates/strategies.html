@@ -7,6 +7,11 @@
       What remedik is allowed to do, and for which alerts. Strategies are cluster-scoped
       resources you keep in git; this page only reads them.
     </p>
+    <p class="dim hint">
+      Matchers are equality only, and the most specific matching strategy wins.
+      Both guards are opt-in: a strategy that sets neither may run as often as
+      its alert fires.
+    </p>
   </div>
   {{if .Total}}
   <div class="page-head-badges">
@@ -15,6 +20,51 @@
   </div>
   {{end}}
 </div>
+
+{{if .Total}}
+{{/*
+  The same rule the record list follows: every choice is a link, so there is
+  no state between choosing and submitting. The counts are of every strategy
+  whatever is shown, or the control would change the numbers beside itself.
+*/}}
+<section class="filters" aria-labelledby="show-heading">
+  <h2 id="show-heading" class="visually-hidden">Show</h2>
+  <div class="filter-row">
+    <span class="filter-label" id="filter-show">Show</span>
+    <ul class="filter-values" aria-labelledby="filter-show">
+      <li>
+        <a class="pill-link{{if not .Filtered}} is-on{{end}}" href="/strategies"
+           {{if not .Filtered}}aria-current="true"{{end}}>All<span class="pill-count">{{.Total}}</span></a>
+      </li>
+      {{if .NotReady}}
+      <li>
+        <a class="pill-link{{if eq .Show "not-ready"}} is-on{{end}}"
+           href="{{if eq .Show "not-ready"}}/strategies{{else}}/strategies?show=not-ready{{end}}"
+           {{if eq .Show "not-ready"}}aria-current="true" title="Click to stop filtering by this"{{end}}>
+          Cannot run<span class="pill-count">{{.NotReady}}</span>
+        </a>
+      </li>
+      {{end}}
+      {{if .Disabled}}
+      <li>
+        <a class="pill-link{{if eq .Show "disabled"}} is-on{{end}}"
+           href="{{if eq .Show "disabled"}}/strategies{{else}}/strategies?show=disabled{{end}}"
+           {{if eq .Show "disabled"}}aria-current="true" title="Click to stop filtering by this"{{end}}>
+          Disabled<span class="pill-count">{{.Disabled}}</span>
+        </a>
+      </li>
+      {{end}}
+    </ul>
+  </div>
+
+  {{if .Filtered}}
+  <p class="filter-summary">
+    Showing {{.Shown}} of {{.Total}}.
+    <a href="/strategies">Clear</a>
+  </p>
+  {{end}}
+</section>
+{{end}}
 
 {{if .Strategies}}
 <div class="strategy-list">
@@ -51,7 +101,6 @@
           <li class="chip"><span class="chip-key">{{.Key}}</span><span class="chip-value">{{.Value}}</span></li>
           {{end}}
         </ul>
-        <p class="dim hint">All matchers must be equal, exactly. The most specific matching strategy wins.</p>
       </div>
 
       <div class="strategy-col">
@@ -68,8 +117,7 @@
           {{end}}
         </dl>
         {{else}}
-        <p class="dim">None. Both guards are opt-in, and this strategy sets neither: a
-          matching alert may run it as often as the alert fires.</p>
+        <p class="dim">None &mdash; this strategy sets neither.</p>
         {{end}}
       </div>
 

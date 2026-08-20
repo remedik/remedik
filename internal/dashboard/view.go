@@ -173,9 +173,22 @@ type RemediationRow struct {
 	Name     string
 	URL      string
 	Strategy string
-	Target   string
-	Alert    string
+	// StrategyURL is the list narrowed to this strategy. Every value a row
+	// prints and the filter understands is a link, so filtering happens
+	// where the reader is already looking rather than only in the card
+	// above the table.
+	StrategyURL string
+	Target      string
+	// TargetURL is the list narrowed to this object — "what else has
+	// happened to deployment/payments/api". Empty when the target could not
+	// be resolved, because there is nothing to ask about.
+	TargetURL string
+	Alert     string
+	// AlertURL is the list narrowed to this alertname.
+	AlertURL string
 	State    string
+	// StateURL is the list narrowed to this outcome.
+	StateURL string
 	Tone     string
 	Age      string
 	AgeExact string

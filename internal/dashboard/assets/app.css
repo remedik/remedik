@@ -653,7 +653,11 @@ main.wrap {
 }
 
 .stat-value {
-  font-size: 1.85rem;
+  /* Quieter than the attention counts above them, and deliberately so: these
+     are the context, and those are the reason to be on this page. The first
+     version had it the other way round, and the loudest number on a page
+     asking "is anything wrong" was the count of everything that had ever run. */
+  font-size: 1.5rem;
   font-weight: 660;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
@@ -817,7 +821,7 @@ a.stat:hover {
 }
 
 .attention-count {
-  font-size: 1.6rem;
+  font-size: 2.05rem;
   font-weight: 680;
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
@@ -868,12 +872,50 @@ a.stat:hover {
    The same numbers are in a <details> table underneath.
    -------------------------------------------------------------------------- */
 
+/* The chart, with a scale beside it.
+   
+   Taller than it was: at 120px a peak of four drew bars a reader had to
+   compare by eye against nothing, and the panel ended a third of a screen
+   above its neighbour. Height is the resolution of this chart. */
+.chart-frame {
+  display: flex;
+  gap: 10px;
+}
+
+.chart-scale {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 200px;
+  padding: 4px 0;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+  text-align: right;
+  min-width: 1.5em;
+}
+
+/* The top of the scale is the busiest hour, and the line under it is what
+   makes a height readable as a number rather than as a shape. */
+.chart-scale-top {
+  border-top: 1px solid var(--border);
+  padding-top: 1px;
+}
+
+.chart-scale-zero {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 1px;
+}
+
 .chart {
+  flex: 1;
   display: flex;
   align-items: flex-end;
   gap: 3px;
-  height: 120px;
+  height: 200px;
   padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+  min-width: 0;
 }
 
 .chart-col {
@@ -911,6 +953,11 @@ a.stat:hover {
 
 .chart-dryrun {
   background: var(--dryrun);
+}
+
+/* A failure count in a sentence, loud enough to be the thing you read. */
+.rate-bad {
+  color: var(--failed);
 }
 
 .chart-axis {
@@ -1019,11 +1066,25 @@ a.stat:hover {
 }
 
 .breakdown-fill {
-  display: block;
+  /* The bar carries two facts: how much ran here, as its width, and how much
+     of that failed, as the tail at its end. Volume alone drew five identical
+     tracks whenever the top rows were within a few percent of each other,
+     which is most of the time. */
+  display: flex;
+  justify-content: flex-end;
   width: var(--pct, 0%);
   height: 100%;
-  background: var(--accent);
-  opacity: 0.55;
+  /* Mixed rather than set with opacity: a group opacity would mute the
+     failure tail with it, and that is the half nobody should have to squint
+     at. */
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: 3px;
+}
+
+.breakdown-fill-bad {
+  width: var(--pct, 0%);
+  height: 100%;
+  background: var(--failed);
   border-radius: 3px;
 }
 
@@ -1182,6 +1243,90 @@ a.stat:hover {
 }
 
 .row-link:hover code {
+  color: var(--accent);
+}
+
+/* A header that orders the table.
+   
+   The mark is empty until the column is either hovered or in force, so the
+   header row reads as headings rather than as seven arrows. aria-sort on the
+   th is what drives it, which means the styling and the announcement cannot
+   disagree. */
+.sort {
+  color: inherit;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.sort:hover,
+.sort:focus-visible {
+  color: var(--accent);
+}
+
+.sort-mark::after {
+  content: "\2195";
+  opacity: 0;
+  font-size: 0.85em;
+}
+
+th:hover .sort-mark::after,
+.sort:focus-visible .sort-mark::after {
+  opacity: 0.5;
+}
+
+th[aria-sort="ascending"] .sort-mark::after {
+  content: "\2191";
+  opacity: 1;
+}
+
+th[aria-sort="descending"] .sort-mark::after {
+  content: "\2193";
+  opacity: 1;
+}
+
+th[aria-sort] .sort {
+  color: var(--text);
+  font-weight: 700;
+}
+
+/* The absolute time under a relative age.
+   
+   Both, because they answer different questions: the age is what you scan,
+   the timestamp is what you paste into Grafana. It was a tooltip, which is
+   invisible exactly when somebody is correlating two systems. */
+.stamp {
+  display: block;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/* A value that is also a question: the target and the alert on a row both
+   narrow the list to themselves.
+   
+   Quiet until it is wanted. Underlining every target in a table of fifty
+   rows turns the column into a wall of rules, so the affordance arrives on
+   hover and on focus — where a keyboard reader needs it — and the value
+   reads as a value until then. */
+.pivot {
+  color: inherit;
+  text-decoration: none;
+  border-radius: 4px;
+}
+
+.pivot:hover,
+.pivot:focus-visible {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.pivot:hover code,
+.pivot:focus-visible code {
   color: var(--accent);
 }
 
@@ -1600,6 +1745,9 @@ a.stat:hover {
 .hint {
   margin-top: 8px;
   font-size: 0.76rem;
+  /* Same measure as the lede it sits under. A note that runs half again as
+     wide as the sentence above it reads as a different kind of text. */
+  max-width: 68ch;
 }
 
 .plan-list {
@@ -1705,6 +1853,43 @@ a.stat:hover {
 
 .checklist li::marker {
   color: var(--text-3);
+}
+
+/* A command with a Copy button beside it.
+   
+   The wrapper exists because both kinds of command scroll horizontally, and
+   a button placed inside a scrolling box travels out of reach with the text
+   it copies. app.js builds this, and only where the clipboard is actually
+   available. */
+.copyable {
+  position: relative;
+}
+
+.copyable .copy {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  padding: 3px 10px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text-2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.copyable .copy:hover,
+.copyable .copy:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Room for the button, so a long command never runs under it. */
+.copyable .code,
+.copyable .step-kubectl {
+  padding-right: 76px;
 }
 
 .code {

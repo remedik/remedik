@@ -16,7 +16,7 @@
     <span class="mode mode-{{.PosturePanel.Tone}}">{{.PosturePanel.Headline}}</span>
   </div>
   <p class="panel-lede">{{.PosturePanel.Detail}}</p>
-  {{if .PosturePanel.Mixed}}
+  {{if .PosturePanel.ShowNames}}
   <ul class="chips chips-sm">
     {{range .PosturePanel.Live}}
     <li class="chip"><span class="chip-key">acts in</span><span class="chip-value">{{.}}</span></li>
@@ -75,17 +75,29 @@
     </div>
 
     {{if .Activity.Any}}
-    <div class="chart" role="img"
-         aria-label="Executions per hour over the last day. The same numbers are in the table below.">
-      {{range .Activity.Bars}}
-      <div class="chart-col" title="{{.Label}} — {{.Total}} execution{{if ne .Total 1}}s{{end}}">
-        <div class="chart-bar {{pct .Percent}}">
-          {{if .Failed}}<span class="chart-seg chart-failed {{pct .FailedPct}}"></span>{{end}}
-          {{if .Succeeded}}<span class="chart-seg chart-ok {{pct .SucceededPct}}"></span>{{end}}
-          {{if .Simulated}}<span class="chart-seg chart-dryrun {{pct .SimulatedPct}}"></span>{{end}}
-        </div>
+    {{/*
+      The scale line exists because a bar's height meant nothing without it:
+      the reader had to find "peak N/h" under the chart and work backwards.
+      The tooltip carries the breakdown for the same reason — the shape of a
+      stacked bar says which colour is biggest, not how many.
+    */}}
+    <div class="chart-frame">
+      <div class="chart-scale" aria-hidden="true">
+        <span class="chart-scale-top">{{.Activity.Scale}}</span>
+        <span class="chart-scale-zero">0</span>
       </div>
-      {{end}}
+      <div class="chart" role="img"
+           aria-label="Executions per hour over the last day. The same numbers are in the table below.">
+        {{range .Activity.Bars}}
+        <div class="chart-col" title="{{.Label}} &mdash; {{if .Total}}{{.Total}} execution{{if ne .Total 1}}s{{end}}{{if .Failed}}, {{.Failed}} failed{{end}}{{if .Succeeded}}, {{.Succeeded}} succeeded{{end}}{{if .Simulated}}, {{.Simulated}} simulated{{else}}{{end}}{{else}}nothing ran{{end}}">
+          <div class="chart-bar {{pct .Percent}}">
+            {{if .Failed}}<span class="chart-seg chart-failed {{pct .FailedPct}}"></span>{{end}}
+            {{if .Succeeded}}<span class="chart-seg chart-ok {{pct .SucceededPct}}"></span>{{end}}
+            {{if .Simulated}}<span class="chart-seg chart-dryrun {{pct .SimulatedPct}}"></span>{{end}}
+          </div>
+        </div>
+        {{end}}
+      </div>
     </div>
     <div class="chart-axis">
       <span>{{(index .Activity.Bars 0).Label}}</span>
@@ -93,7 +105,8 @@
       <span>now</span>
     </div>
     <p class="panel-foot">
-      {{.Activity.Total}} execution{{if ne .Activity.Total 1}}s{{end}} in the {{.Activity.Window}}.
+      {{.Activity.Total}} execution{{if ne .Activity.Total 1}}s{{end}} in the {{.Activity.Window}}{{if .Activity.Failed}},
+      <strong class="rate-bad">{{.Activity.Failed}} failed</strong> &mdash; {{.Activity.FailureRate}}% of them{{end}}.
     </p>
 
     <details class="chart-table">
@@ -144,7 +157,9 @@
         <a class="breakdown-row" href="{{.URL}}">
           <span class="breakdown-name">{{.Name}}</span>
           <span class="breakdown-track" aria-hidden="true">
-            <span class="breakdown-fill {{pct .Share}}"></span>
+            <span class="breakdown-fill {{pct .Share}}">
+              {{if .FailedShare}}<span class="breakdown-fill-bad {{pct .FailedShare}}"></span>{{end}}
+            </span>
           </span>
           <span class="breakdown-count">{{.Total}}</span>
           {{if .Failed}}<span class="breakdown-bad">{{.Failed}} failed</span>{{end}}
@@ -162,7 +177,9 @@
         <a class="breakdown-row" href="{{.URL}}">
           <span class="breakdown-name">{{.Name}}</span>
           <span class="breakdown-track" aria-hidden="true">
-            <span class="breakdown-fill {{pct .Share}}"></span>
+            <span class="breakdown-fill {{pct .Share}}">
+              {{if .FailedShare}}<span class="breakdown-fill-bad {{pct .FailedShare}}"></span>{{end}}
+            </span>
           </span>
           <span class="breakdown-count">{{.Total}}</span>
           {{if .Failed}}<span class="breakdown-bad">{{.Failed}} failed</span>{{end}}
@@ -263,8 +280,16 @@
         {{range .Recent}}
         <tr>
           <th scope="row"><a class="row-link" href="{{.URL}}"><code>{{.Name}}</code></a></th>
-          <td>{{if .Target}}<code class="dim">{{.Target}}</code>{{else}}<span class="dim">&mdash;</span>{{end}}</td>
-          <td>{{if .Alert}}{{.Alert}}{{else}}<span class="dim">&mdash;</span>{{end}}</td>
+          <td>
+            {{if .TargetURL}}<a class="pivot" href="{{.TargetURL}}" title="Everything remedik has done to this object"><code>{{.Target}}</code></a>
+            {{else if .Target}}<code class="dim">{{.Target}}</code>
+            {{else}}<span class="dim">&mdash;</span>{{end}}
+          </td>
+          <td>
+            {{if .AlertURL}}<a class="pivot" href="{{.AlertURL}}" title="Everything this alert has caused">{{.Alert}}</a>
+            {{else if .Alert}}{{.Alert}}
+            {{else}}<span class="dim">&mdash;</span>{{end}}
+          </td>
           <td>
             <span class="pill pill-{{.Tone}}">{{.State}}</span>
             {{if eq .Escalated "sent"}}

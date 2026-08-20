@@ -31,6 +31,14 @@ type RemediationsView struct {
 	// Filter is what is in force, and Groups are the controls.
 	Filter Filter
 	Groups []FilterGroup
+	// Sort is the order in force, and Columns are the headers that set it.
+	Sort    Sort
+	Columns []Column
+	// Clauses are the narrowings that have no control of their own — a
+	// target or an alert somebody clicked in the table. Without them the
+	// page would be filtered by something it never shows, and the only way
+	// out would be to clear everything.
+	Clauses []AppliedClause
 	// Paging is where the reader is in the filtered set.
 	Paging Paging
 
@@ -42,8 +50,44 @@ type RemediationsView struct {
 	InFlight  int
 }
 
+// AppliedClause is one such narrowing, with the link that lifts it.
+type AppliedClause struct {
+	// Label names the dimension, in the words the table's column uses.
+	Label string
+	// Value is what it was narrowed to.
+	Value string
+	// RemoveURL is the same view without this clause.
+	RemoveURL string
+	// Mono asks for the monospace treatment, because a target is an
+	// identifier and an alertname is a word.
+	Mono bool
+}
+
+// appliedClauses lists the narrowings that no control offers.
+func appliedClauses(f Filter, order Sort) []AppliedClause {
+	var out []AppliedClause
+	if f.Target != "" {
+		without := f
+		without.Target = ""
+		out = append(out, AppliedClause{
+			Label: "Target", Value: f.Target, RemoveURL: sortedPath(without, order), Mono: true,
+		})
+	}
+	if f.Alert != "" {
+		without := f
+		without.Alert = ""
+		out = append(out, AppliedClause{
+			Label: "Alert", Value: f.Alert, RemoveURL: sortedPath(without, order),
+		})
+	}
+	return out
+}
+
 // Filtered reports whether the page is showing a subset.
 func (v RemediationsView) Filtered() bool { return v.Filter.Active() }
+
+// Ordering is the order in words, for the table's caption.
+func (v RemediationsView) Ordering() string { return v.Sort.Describe() }
 
 // Excluded is how many records the filter is hiding.
 func (v RemediationsView) Excluded() int { return v.TotalUnfiltered - v.Total }
@@ -79,7 +123,7 @@ type Paging struct {
 func (p Paging) Many() bool { return p.Pages > 1 }
 
 func buildRemediations(
-	remediations []v1alpha1.Remediation, filter Filter, page int, now time.Time,
+	remediations []v1alpha1.Remediation, filter Filter, order Sort, page int, now time.Time,
 ) RemediationsView {
 	ordered := newestFirst(remediations)
 
@@ -90,11 +134,18 @@ func buildRemediations(
 
 	view := RemediationsView{
 		Filter:          filter,
-		Groups:          options.Groups(filter, ordered),
+		Sort:            order,
+		Groups:          options.Groups(filter, order, ordered),
+		Clauses:         appliedClauses(filter, order),
+		Columns:         Columns(filter, order),
 		TotalUnfiltered: len(ordered),
 	}
 
 	kept := applyFilter(ordered, filter)
+	// After the filter and before the page: the reader asked for this order
+	// over what they asked to see, and page two has to be the second page of
+	// that order rather than of another one.
+	order.Apply(kept)
 	counts := tally(kept)
 
 	view.Total = len(kept)
@@ -111,7 +162,7 @@ func buildRemediations(
 	start := min((view.Paging.Page-1)*pageSize, len(kept))
 	view.Rows = make([]RemediationRow, 0, min(pageSize, len(kept)-start))
 	for i := start; i < min(start+pageSize, len(kept)); i++ {
-		view.Rows = append(view.Rows, buildRow(kept[i], now))
+		view.Rows = append(view.Rows, buildRow(kept[i], now, view.Filter, order))
 	}
 	view.Shown = len(view.Rows)
 

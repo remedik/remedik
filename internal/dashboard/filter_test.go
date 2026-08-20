@@ -3,6 +3,7 @@ package dashboard
 import (
 	"net/url"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/remedik/remedik/api/v1alpha1"
@@ -215,12 +216,12 @@ func TestBuildRemediations_CountsFollowTheFilter(t *testing.T) {
 	remediations[1].Spec.Target = "deployment/payments/api"
 	remediations[2].Spec.Target = "deployment/checkout/web"
 
-	all := buildRemediations(remediations, Filter{}, 1, testNow())
+	all := buildRemediations(remediations, Filter{}, Sort{}, 1, testNow())
 	if all.Total != 3 || all.Filtered() {
 		t.Fatalf("unfiltered: Total = %d, Filtered = %v", all.Total, all.Filtered())
 	}
 
-	only := buildRemediations(remediations, Filter{Namespace: "checkout"}, 1, testNow())
+	only := buildRemediations(remediations, Filter{Namespace: "checkout"}, Sort{}, 1, testNow())
 
 	if only.Total != 1 {
 		t.Errorf("Total = %d, want 1", only.Total)
@@ -259,7 +260,7 @@ func TestFilterGroups_LinksBothNarrowAndWiden(t *testing.T) {
 	remediations[0].Spec.Target = "deployment/payments/api"
 	remediations[1].Spec.Target = "deployment/checkout/web"
 
-	view := buildRemediations(remediations, Filter{Namespace: "payments"}, 1, testNow())
+	view := buildRemediations(remediations, Filter{Namespace: "payments"}, Sort{}, 1, testNow())
 	group := groupNamed(t, view.Groups, "Namespace")
 
 	if group.AllURL != "/remediations" {
@@ -299,7 +300,7 @@ func TestFilterGroups_OmitADimensionWithNothingToChoose(t *testing.T) {
 		succeededRemediation("ok-1", 30),
 		succeededRemediation("ok-2", 10),
 	}
-	view := buildRemediations(remediations, Filter{}, 1, testNow())
+	view := buildRemediations(remediations, Filter{}, Sort{}, 1, testNow())
 
 	for _, group := range view.Groups {
 		if len(group.Options) < 2 {
@@ -349,5 +350,135 @@ func BenchmarkTargetNamespace(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		_ = TargetNamespace("deployment/payments/api")
+	}
+}
+
+// The overview counts three kinds of failure and, until this dimension
+// existed, linked all of them to the same list: clicking "64 escalations
+// failed" opened every failure there was. The filter has to slice exactly
+// what the panel counted, or the number is still unreachable.
+func TestFilter_Escalation(t *testing.T) {
+	none := failedRemediation("no-escalation", 10)
+
+	sent := failedRemediation("told", 10)
+	sent.Status.Escalation = &v1alpha1.EscalationStatus{Phase: v1alpha1.StepPhaseSucceeded}
+
+	tried := failedRemediation("not-told", 10)
+	tried.Status.Escalation = &v1alpha1.EscalationStatus{Phase: v1alpha1.StepPhaseFailed}
+
+	records := []*v1alpha1.Remediation{&none, &sent, &tried}
+
+	tests := []struct {
+		clause string
+		want   string
+	}{
+		{clause: EscalationNone, want: "no-escalation"},
+		{clause: EscalationSucceeded, want: "told"},
+		{clause: EscalationFailed, want: "not-told"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.clause, func(t *testing.T) {
+			f := Filter{Escalation: tt.clause}
+			var kept []string
+			for _, rem := range records {
+				if f.Matches(rem) {
+					kept = append(kept, rem.Name)
+				}
+			}
+			if len(kept) != 1 || kept[0] != tt.want {
+				t.Errorf("escalation=%s kept %v, want [%s]", tt.clause, kept, tt.want)
+			}
+		})
+	}
+}
+
+// A target is arrived at by clicking one, and the click has to narrow what
+// is on screen rather than replace it — every other control in this filter
+// works that way.
+func TestFilter_TargetAndAlertNarrowOnTopOfTheRest(t *testing.T) {
+	f := Filter{Namespace: "payments", Target: "deployment/payments/api", Alert: "KubePodCrashLooping"}
+
+	query := f.Query()
+	for _, want := range []string{"namespace=payments", "target=deployment", "alert=KubePodCrashLooping"} {
+		if !strings.Contains(query, want) {
+			t.Errorf("Query() = %q, want it to carry %q", query, want)
+		}
+	}
+
+	match := succeededRemediation("hit", 5)
+	match.Spec.Target = "deployment/payments/api"
+	match.Spec.Alert.Name = "KubePodCrashLooping"
+	if !f.Matches(&match) {
+		t.Error("a record matching every clause was filtered out")
+	}
+
+	other := succeededRemediation("miss", 5)
+	other.Spec.Target = "deployment/payments/web"
+	other.Spec.Alert.Name = "KubePodCrashLooping"
+	if f.Matches(&other) {
+		t.Error("a different target survived a target clause")
+	}
+}
+
+// Choosing a namespace must not silently drop the target somebody clicked.
+func TestFilterGroups_KeepEveryOtherClause(t *testing.T) {
+	records := []*v1alpha1.Remediation{}
+	for _, ns := range []string{"payments", "checkout"} {
+		rem := succeededRemediation("r-"+ns, 5)
+		rem.Spec.Target = "deployment/" + ns + "/api"
+		records = append(records, &rem)
+	}
+
+	active := Filter{Target: "deployment/payments/api", Alert: "KubePodCrashLooping"}
+	groups := BuildFilterOptions(records).Groups(active, Sort{}, records)
+
+	if len(groups) == 0 {
+		t.Fatal("no groups were built")
+	}
+	for _, group := range groups {
+		for _, option := range group.Options {
+			if !strings.Contains(option.URL, "target=") || !strings.Contains(option.URL, "alert=") {
+				t.Errorf("%s option %q links to %q, which has dropped a clause",
+					group.Label, option.Value, option.URL)
+			}
+		}
+	}
+}
+
+// Every success also has no escalation, so the "none" option counted 1203
+// records and buried the 87 that are the actual question. The dimension only
+// means anything over failures, and the link has to say so.
+func TestFilterGroups_EscalationIsAboutFailuresOnly(t *testing.T) {
+	var records []*v1alpha1.Remediation
+	for i := range 3 {
+		ok := succeededRemediation("ok", i+1)
+		records = append(records, &ok)
+	}
+	none := failedRemediation("no-escalation", 10)
+	tried := failedRemediation("not-told", 11)
+	tried.Status.Escalation = &v1alpha1.EscalationStatus{Phase: v1alpha1.StepPhaseFailed}
+	records = append(records, &none, &tried)
+
+	groups := BuildFilterOptions(records).Groups(Filter{}, Sort{}, records)
+
+	var escalation *FilterGroup
+	for i := range groups {
+		if groups[i].Param == paramEscalation {
+			escalation = &groups[i]
+		}
+	}
+	if escalation == nil {
+		t.Fatal("no escalation group was built")
+	}
+
+	for _, option := range escalation.Options {
+		if !strings.Contains(option.URL, "state=Failed") {
+			t.Errorf("%q links to %q, which does not limit itself to failures",
+				option.Value, option.URL)
+		}
+		if option.Count != 1 {
+			t.Errorf("%q counts %d, want 1: the three successes are not part of this question",
+				option.Value, option.Count)
+		}
 	}
 }

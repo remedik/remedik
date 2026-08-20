@@ -14,9 +14,25 @@ import (
 // here. It also means a filtered view is a URL somebody can send to a
 // colleague during an incident, which is most of the value.
 const (
-	paramNamespace = "namespace"
-	paramStrategy  = "strategy"
-	paramState     = "state"
+	paramNamespace  = "namespace"
+	paramStrategy   = "strategy"
+	paramState      = "state"
+	paramEscalation = "escalation"
+	paramTarget     = "target"
+	paramAlert      = "alert"
+)
+
+// Escalation clauses, which answer the question the overview asks first:
+// did anybody find out?
+const (
+	// EscalationNone is a record whose strategy declared no onFailure.steps,
+	// so nothing was ever sent.
+	EscalationNone = "none"
+	// EscalationFailed is a record where the attempt to tell somebody ran
+	// and did not get through.
+	EscalationFailed = "failed"
+	// EscalationSucceeded is a record where somebody was told.
+	EscalationSucceeded = "succeeded"
 )
 
 // Filter narrows the executions shown.
@@ -33,6 +49,16 @@ type Filter struct {
 	Strategy string
 	// State narrows to one outcome, using the same words the records use.
 	State string
+	// Escalation narrows by whether anybody was told: "none", "failed" or
+	// "succeeded". Combined with State it is the slice the overview's
+	// attention panel counts — and, until this existed, could not show.
+	Escalation string
+	// Target narrows to one object: "deployment/payments/api". High
+	// cardinality, so it is arrived at by clicking a target rather than
+	// browsed from a list of every workload remedik has ever touched.
+	Target string
+	// Alert narrows to one alertname, reached the same way.
+	Alert string
 }
 
 // ParseFilter reads a filter from a query string.
@@ -43,15 +69,19 @@ type Filter struct {
 // parameter would turn a shareable URL into a trap.
 func ParseFilter(query url.Values) Filter {
 	return Filter{
-		Namespace: strings.TrimSpace(query.Get(paramNamespace)),
-		Strategy:  strings.TrimSpace(query.Get(paramStrategy)),
-		State:     strings.TrimSpace(query.Get(paramState)),
+		Namespace:  strings.TrimSpace(query.Get(paramNamespace)),
+		Strategy:   strings.TrimSpace(query.Get(paramStrategy)),
+		State:      strings.TrimSpace(query.Get(paramState)),
+		Escalation: strings.TrimSpace(query.Get(paramEscalation)),
+		Target:     strings.TrimSpace(query.Get(paramTarget)),
+		Alert:      strings.TrimSpace(query.Get(paramAlert)),
 	}
 }
 
 // Active reports whether anything is being narrowed.
 func (f Filter) Active() bool {
-	return f.Namespace != "" || f.Strategy != "" || f.State != ""
+	return f.Namespace != "" || f.Strategy != "" || f.State != "" ||
+		f.Escalation != "" || f.Target != "" || f.Alert != ""
 }
 
 // Matches reports whether a record survives the filter.
@@ -65,7 +95,32 @@ func (f Filter) Matches(rem *v1alpha1.Remediation) bool {
 	if f.State != "" && displayState(rem.Status.State) != f.State {
 		return false
 	}
+	if f.Escalation != "" && escalationOutcome(rem) != f.Escalation {
+		return false
+	}
+	if f.Target != "" && rem.Spec.Target != f.Target {
+		return false
+	}
+	if f.Alert != "" && rem.Spec.Alert.Name != f.Alert {
+		return false
+	}
 	return true
+}
+
+// escalationOutcome names what happened to the attempt to tell somebody.
+//
+// The three answers are the ones the overview counts, and they are counted
+// there by exactly this shape: no escalation recorded at all, one that did
+// not reach anybody, and one that did.
+func escalationOutcome(rem *v1alpha1.Remediation) string {
+	switch {
+	case rem.Status.Escalation == nil:
+		return EscalationNone
+	case rem.Status.Escalation.Phase != v1alpha1.StepPhaseSucceeded:
+		return EscalationFailed
+	default:
+		return EscalationSucceeded
+	}
 }
 
 // Path is the list page carrying this filter, which is what every filter
@@ -77,20 +132,30 @@ func (f Filter) Path() string { return remediationsPath + f.Query() }
 // Query renders the filter back into a query string, so links can preserve
 // what is already selected while changing one thing.
 func (f Filter) Query() string {
+	values := f.Values()
+	if len(values) == 0 {
+		return ""
+	}
+	return "?" + values.Encode()
+}
+
+// Values is the filter as query parameters, for links that carry more than
+// the filter — the table headers carry the order beside it.
+func (f Filter) Values() url.Values {
 	values := url.Values{}
 	for key, value := range map[string]string{
-		paramNamespace: f.Namespace,
-		paramStrategy:  f.Strategy,
-		paramState:     f.State,
+		paramNamespace:  f.Namespace,
+		paramStrategy:   f.Strategy,
+		paramState:      f.State,
+		paramEscalation: f.Escalation,
+		paramTarget:     f.Target,
+		paramAlert:      f.Alert,
 	} {
 		if value != "" {
 			values.Set(key, value)
 		}
 	}
-	if len(values) == 0 {
-		return ""
-	}
-	return "?" + values.Encode()
+	return values
 }
 
 // TargetNamespace pulls the namespace out of a "kind/namespace/name" target.
@@ -172,6 +237,9 @@ func (g FilterGroup) KeptParams() []Label {
 		{Key: paramNamespace, Value: g.Keep.Namespace},
 		{Key: paramStrategy, Value: g.Keep.Strategy},
 		{Key: paramState, Value: g.Keep.State},
+		{Key: paramEscalation, Value: g.Keep.Escalation},
+		{Key: paramTarget, Value: g.Keep.Target},
+		{Key: paramAlert, Value: g.Keep.Alert},
 	} {
 		if pair.Key != g.Param && pair.Value != "" {
 			kept = append(kept, pair)
@@ -186,9 +254,10 @@ func (g FilterGroup) KeptParams() []Label {
 // choice can always be changed or undone. A control whose options shrink as
 // you use it is a control you can get stuck in.
 type FilterOptions struct {
-	Namespaces []string
-	Strategies []string
-	States     []string
+	Namespaces  []string
+	Strategies  []string
+	States      []string
+	Escalations []string
 }
 
 // BuildFilterOptions collects the distinct values present in the records.
@@ -196,6 +265,7 @@ func BuildFilterOptions(remediations []*v1alpha1.Remediation) FilterOptions {
 	namespaces := map[string]bool{}
 	strategies := map[string]bool{}
 	states := map[string]bool{}
+	escalations := map[string]bool{}
 
 	for i := range remediations {
 		if ns := TargetNamespace(remediations[i].Spec.Target); ns != "" {
@@ -205,19 +275,27 @@ func BuildFilterOptions(remediations []*v1alpha1.Remediation) FilterOptions {
 			strategies[name] = true
 		}
 		states[displayState(remediations[i].Status.State)] = true
+		// Only failed records have anything to say here. Every success has
+		// no escalation, and offering "none — 900 records" as a filter would
+		// bury the twenty that matter.
+		if remediations[i].Status.State == v1alpha1.RemediationStateFailed {
+			escalations[escalationOutcome(remediations[i])] = true
+		}
 	}
 
 	return FilterOptions{
-		Namespaces: sortedKeys(namespaces),
-		Strategies: sortedKeys(strategies),
-		States:     sortedKeys(states),
+		Namespaces:  sortedKeys(namespaces),
+		Strategies:  sortedKeys(strategies),
+		States:      sortedKeys(states),
+		Escalations: sortedKeys(escalations),
 	}
 }
 
 // Any reports whether there is anything worth showing a control for. With
 // one namespace and one strategy, a filter row is furniture.
 func (o FilterOptions) Any() bool {
-	return len(o.Namespaces) > 1 || len(o.Strategies) > 1 || len(o.States) > 1
+	return len(o.Namespaces) > 1 || len(o.Strategies) > 1 ||
+		len(o.States) > 1 || len(o.Escalations) > 1
 }
 
 func sortedKeys(set map[string]bool) []string {
@@ -249,7 +327,18 @@ const quickPickLimit = 4
 // The counts ignore the row's own clause, so the namespace row always shows
 // every namespace's total under the *other* filters — which is what makes it
 // usable for switching rather than only for narrowing.
-func (o FilterOptions) Groups(active Filter, remediations []*v1alpha1.Remediation) []FilterGroup {
+func (o FilterOptions) Groups(
+	active Filter, order Sort, remediations []*v1alpha1.Remediation,
+) []FilterGroup {
+	// Each dimension's "rest" is the whole active filter with its own clause
+	// cleared. Spelling out which clauses to keep was fine with three of
+	// them and is how a fourth silently drops the target somebody clicked.
+	without := func(drop func(*Filter)) Filter {
+		rest := active
+		drop(&rest)
+		return rest
+	}
+
 	specs := []struct {
 		label  string
 		param  string
@@ -258,24 +347,43 @@ func (o FilterOptions) Groups(active Filter, remediations []*v1alpha1.Remediatio
 		rest   Filter
 		set    func(*Filter, string)
 		key    func(*v1alpha1.Remediation) string
+		// narrow is applied along with a chosen value, and to the counts.
+		// Only the escalation dimension uses it, and it is what stops
+		// "none" from meaning "everything that succeeded".
+		narrow func(*Filter)
 	}{
 		{
 			label: "Namespace", param: paramNamespace, values: o.Namespaces, chosen: active.Namespace,
-			rest: Filter{Strategy: active.Strategy, State: active.State},
+			rest: without(func(f *Filter) { f.Namespace = "" }),
 			set:  func(f *Filter, v string) { f.Namespace = v },
 			key:  func(r *v1alpha1.Remediation) string { return TargetNamespace(r.Spec.Target) },
 		},
 		{
 			label: "Strategy", param: paramStrategy, values: o.Strategies, chosen: active.Strategy,
-			rest: Filter{Namespace: active.Namespace, State: active.State},
+			rest: without(func(f *Filter) { f.Strategy = "" }),
 			set:  func(f *Filter, v string) { f.Strategy = v },
 			key:  func(r *v1alpha1.Remediation) string { return r.Spec.StrategyName },
 		},
 		{
 			label: "State", param: paramState, values: o.States, chosen: active.State,
-			rest: Filter{Namespace: active.Namespace, Strategy: active.Strategy},
+			rest: without(func(f *Filter) { f.State = "" }),
 			set:  func(f *Filter, v string) { f.State = v },
 			key:  func(r *v1alpha1.Remediation) string { return displayState(r.Status.State) },
+		},
+		{
+			// "Did anybody find out?" — the question the overview asks first
+			// and, until this dimension existed, the one its own links could
+			// not answer: both attention cards led to every failure.
+			label: "Escalation", param: paramEscalation, values: o.Escalations, chosen: active.Escalation,
+			rest: without(func(f *Filter) { f.Escalation = "" }),
+			set:  func(f *Filter, v string) { f.Escalation = v },
+			key:  escalationOutcome,
+			// Only a failure has anything to say here: every success also
+			// has no escalation, so without this "none" offered 1203 records
+			// and buried the 87 that are the actual question. Written into
+			// the link rather than assumed, so the URL still says what the
+			// page is showing.
+			narrow: func(f *Filter) { f.State = string(v1alpha1.RemediationStateFailed) },
 		},
 	}
 
@@ -286,7 +394,12 @@ func (o FilterOptions) Groups(active Filter, remediations []*v1alpha1.Remediatio
 			continue
 		}
 
-		counts := countByValue(remediations, spec.rest, spec.key)
+		countRest := spec.rest
+		if spec.narrow != nil {
+			spec.narrow(&countRest)
+		}
+		counts := countByValue(remediations, countRest, spec.key)
+
 		options := make([]FilterOption, 0, len(spec.values))
 		for _, value := range spec.values {
 			// Clicking the value already in force removes it, so the same
@@ -294,10 +407,13 @@ func (o FilterOptions) Groups(active Filter, remediations []*v1alpha1.Remediatio
 			target := spec.rest
 			if value != spec.chosen {
 				spec.set(&target, value)
+				if spec.narrow != nil {
+					spec.narrow(&target)
+				}
 			}
 			options = append(options, FilterOption{
 				Value:    value,
-				URL:      target.Path(),
+				URL:      sortedPath(target, order),
 				Selected: value == spec.chosen,
 				Count:    counts[value],
 			})
@@ -306,7 +422,7 @@ func (o FilterOptions) Groups(active Filter, remediations []*v1alpha1.Remediatio
 		group := FilterGroup{
 			Label:       spec.label,
 			Param:       spec.param,
-			AllURL:      spec.rest.Path(),
+			AllURL:      sortedPath(spec.rest, order),
 			AllSelected: spec.chosen == "",
 			Options:     options,
 			// The form posts the other clauses back as hidden fields, so

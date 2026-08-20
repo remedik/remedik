@@ -518,8 +518,18 @@ func TestStrategiesPage(t *testing.T) {
 	mustContain(t, body, "15m", "show the cooldown guard")
 	mustContain(t, body, "deployment.restart", "show the steps")
 	mustContain(t, body, "last run", "show when the strategy last ran")
-	mustContain(t, body, "None. Both guards are opt-in",
+	mustContain(t, body, "None &mdash; this strategy sets neither",
 		"say plainly that a strategy has no guards")
+
+	// The rules that govern every strategy are page-level facts, and printing
+	// them once per card put fourteen identical sentences on a page of seven.
+	// Said once, or the page reads like a template nobody finished.
+	if n := strings.Count(body, "the most specific matching strategy wins"); n != 1 {
+		t.Errorf("the matching rule appears %d times, want 1 — it is a property of the page, not of each card", n)
+	}
+	if n := strings.Count(body, "Both guards are opt-in"); n != 1 {
+		t.Errorf("the guards explanation appears %d times, want 1", n)
+	}
 }
 
 func TestStrategiesEmptyState(t *testing.T) {

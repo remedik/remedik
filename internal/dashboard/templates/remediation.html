@@ -1,7 +1,10 @@
 {{define "content"}}
 
 <nav class="crumbs" aria-label="Breadcrumb">
-  <a href="/">Overview</a>
+  {{/* The list this record belongs to, not the front page: the reader came
+       from /remediations, the nav marks it as the current section, and a
+       breadcrumb that disagrees with the nav is a breadcrumb nobody trusts. */}}
+  <a href="/remediations">Remediations</a>
   <span aria-hidden="true">/</span>
   <span aria-current="page">{{.Name}}</span>
 </nav>
@@ -45,13 +48,13 @@
   <p class="panel-foot">
     Approve it:
   </p>
-  <pre class="code"><code>{{.Approval.Approve}}</code></pre>
+  <pre class="code" data-copy><code>{{.Approval.Approve}}</code></pre>
 
   <p class="panel-foot">
     Or deny it, with a note the next reader will thank you for
     (<code>"note":"we are rolling forward instead"</code>):
   </p>
-  <pre class="code"><code>{{.Approval.Deny}}</code></pre>
+  <pre class="code" data-copy><code>{{.Approval.Deny}}</code></pre>
 
   <p class="panel-foot dim">
     {{if .Approval.Deadline}}
@@ -148,7 +151,8 @@
         {{if .Plan}}<p class="step-plan"><code class="plan">{{.Plan}}</code></p>{{end}}
 
         {{if .Kubectl}}
-        <p class="step-kubectl" title="The command a human would have typed. remedik records it; it never runs it.">
+        <p class="step-kubectl" data-copy
+           title="The command a human would have typed. remedik records it; it never runs it.">
           <span class="kubectl-mark" aria-hidden="true">$</span><code>{{.Kubectl}}</code>
         </p>
         {{end}}

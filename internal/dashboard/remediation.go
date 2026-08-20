@@ -159,23 +159,58 @@ type StepView struct {
 
 // StrategiesView is the strategy list.
 
-func buildRow(rem *v1alpha1.Remediation, now time.Time) RemediationRow {
+// buildRow renders one execution for a list.
+//
+// base is the filter the reader is already looking through, so clicking a
+// target or an alert narrows what is on screen rather than replacing it —
+// the same rule every other control in this filter follows. On a page with
+// no filter it is the zero value, and the link is simply that one clause.
+func buildRow(rem *v1alpha1.Remediation, now time.Time, base Filter, order Sort) RemediationRow {
 	state := displayState(rem.Status.State)
+
+	strategyURL, stateURL := "", ""
+	if rem.Spec.StrategyName != "" {
+		pivot := base
+		pivot.Strategy = rem.Spec.StrategyName
+		strategyURL = sortedPath(pivot, order)
+	}
+	if state != "" {
+		pivot := base
+		pivot.State = state
+		stateURL = sortedPath(pivot, order)
+	}
+
+	targetURL, alertURL := "", ""
+	if rem.Spec.Target != "" {
+		pivot := base
+		pivot.Target = rem.Spec.Target
+		targetURL = sortedPath(pivot, order)
+	}
+	if rem.Spec.Alert.Name != "" {
+		pivot := base
+		pivot.Alert = rem.Spec.Alert.Name
+		alertURL = sortedPath(pivot, order)
+	}
+
 	return RemediationRow{
-		Name:      rem.Name,
-		URL:       "/remediations/" + rem.Name,
-		Strategy:  rem.Spec.StrategyName,
-		Target:    rem.Spec.Target,
-		Alert:     rem.Spec.Alert.Name,
-		State:     state,
-		Tone:      stateTone(rem.Status.State),
-		Age:       FormatAge(rem.CreationTimestamp.Time, now),
-		AgeExact:  FormatTimestamp(rem.CreationTimestamp.Time),
-		Duration:  FormatSpan(rem.Status.StartedAt, rem.Status.CompletedAt),
-		Attempt:   rem.Status.Attempt,
-		DryRun:    rem.Spec.DryRun,
-		Reason:    rem.Status.Reason,
-		Escalated: escalationMarker(rem.Status.Escalation),
+		Name:        rem.Name,
+		URL:         "/remediations/" + rem.Name,
+		Strategy:    rem.Spec.StrategyName,
+		StrategyURL: strategyURL,
+		Target:      rem.Spec.Target,
+		TargetURL:   targetURL,
+		Alert:       rem.Spec.Alert.Name,
+		AlertURL:    alertURL,
+		State:       state,
+		StateURL:    stateURL,
+		Tone:        stateTone(rem.Status.State),
+		Age:         FormatAge(rem.CreationTimestamp.Time, now),
+		AgeExact:    FormatTimestamp(rem.CreationTimestamp.Time),
+		Duration:    FormatSpan(rem.Status.StartedAt, rem.Status.CompletedAt),
+		Attempt:     rem.Status.Attempt,
+		DryRun:      rem.Spec.DryRun,
+		Reason:      rem.Status.Reason,
+		Escalated:   escalationMarker(rem.Status.Escalation),
 	}
 }
 

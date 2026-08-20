@@ -38,7 +38,7 @@ func bigCluster(namespaces, strategies, records int) []v1alpha1.Remediation {
 // owner reported.
 func TestFilterControlsStayUsableAtScale(t *testing.T) {
 	records := bigCluster(scaleNamespaces, scaleStrategies, scaleRecords)
-	view := buildRemediations(records, Filter{}, 1, testNow())
+	view := buildRemediations(records, Filter{}, Sort{}, 1, testNow())
 
 	byLabel := map[string]FilterGroup{}
 	for _, group := range view.Groups {
@@ -81,7 +81,7 @@ func TestFilterCountsMatchCountingEachOptionSeparately(t *testing.T) {
 
 	pointers := ptrs(records)
 	options := BuildFilterOptions(pointers)
-	groups := options.Groups(active, pointers)
+	groups := options.Groups(active, Sort{}, pointers)
 
 	for _, group := range groups {
 		rest := Filter{Namespace: active.Namespace, Strategy: active.Strategy, State: active.State}
@@ -125,7 +125,7 @@ func TestPagingKeepsTheFilter(t *testing.T) {
 	records := bigCluster(2, 2, pageSize*6)
 	filter := Filter{Namespace: "ns-000"}
 
-	view := buildRemediations(records, filter, 2, testNow())
+	view := buildRemediations(records, filter, Sort{}, 2, testNow())
 
 	if view.Paging.Pages != 3 {
 		t.Fatalf("pages = %d, want 3", view.Paging.Pages)
@@ -148,7 +148,7 @@ func BenchmarkListPageAtScale(b *testing.B) {
 	records := bigCluster(scaleNamespaces, scaleStrategies, scaleRecords)
 	b.ResetTimer()
 	for range b.N {
-		_ = buildRemediations(records, Filter{}, 1, testNow())
+		_ = buildRemediations(records, Filter{}, Sort{}, 1, testNow())
 	}
 }
 
@@ -167,7 +167,7 @@ func TestPagingHandlesAnEmptyResult(t *testing.T) {
 	for _, page := range []int{1, 2, 99} {
 		view := buildRemediations(
 			[]v1alpha1.Remediation{succeededRemediation("ok-1", 5)},
-			Filter{Namespace: "no-such-namespace"}, page, testNow())
+			Filter{Namespace: "no-such-namespace"}, Sort{}, page, testNow())
 
 		if len(view.Rows) != 0 {
 			t.Errorf("page %d: rows = %d, want none", page, len(view.Rows))
@@ -186,7 +186,7 @@ func TestPagingHandlesAnEmptyResult(t *testing.T) {
 func TestPagingAtTheBoundaries(t *testing.T) {
 	records := bigCluster(1, 1, pageSize*2)
 
-	last := buildRemediations(records, Filter{}, 2, testNow())
+	last := buildRemediations(records, Filter{}, Sort{}, 2, testNow())
 	if len(last.Rows) != pageSize {
 		t.Errorf("the last page has %d rows, want a full page", len(last.Rows))
 	}
@@ -194,7 +194,7 @@ func TestPagingAtTheBoundaries(t *testing.T) {
 		t.Errorf("the last page offers a next page: %q", last.Paging.NextURL)
 	}
 
-	beyond := buildRemediations(records, Filter{}, 9, testNow())
+	beyond := buildRemediations(records, Filter{}, Sort{}, 9, testNow())
 	if beyond.Paging.Page != 2 {
 		t.Errorf("page 9 of 2 = %d, want it clamped to 2", beyond.Paging.Page)
 	}

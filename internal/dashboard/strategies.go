@@ -23,7 +23,26 @@ type StrategiesView struct {
 	Total      int
 	Enabled    int
 	Disabled   int
+	// NotReady is how many name an action this build does not have. They
+	// are the ones worth finding on a Tuesday, so the page offers them as
+	// a filter rather than leaving them to be spotted while scrolling.
+	NotReady int
+	// Show is the view in force: "", "not-ready" or "disabled".
+	Show string
+	// Shown is how many survive it.
+	Shown int
 }
+
+// Strategy views the page offers.
+const (
+	// ShowNotReady lists only the strategies remedik could not run.
+	ShowNotReady = "not-ready"
+	// ShowDisabled lists only the ones that never match an alert.
+	ShowDisabled = "disabled"
+)
+
+// Filtered reports whether the page is showing a subset.
+func (v StrategiesView) Filtered() bool { return v.Show != "" }
 
 // StrategyView is one strategy and what it has done.
 type StrategyView struct {
@@ -65,6 +84,7 @@ func buildStrategies(
 	strategies []v1alpha1.RemediationStrategy,
 	remediations []v1alpha1.Remediation,
 	now time.Time,
+	show string,
 ) StrategiesView {
 	ordered := newestFirst(remediations)
 
@@ -131,7 +151,7 @@ func buildStrategies(
 			case v1alpha1.RemediationStatePending, v1alpha1.RemediationStateRunning:
 			}
 			if len(item.Recent) < perStrategyRecent {
-				item.Recent = append(item.Recent, buildRow(rem, now))
+				item.Recent = append(item.Recent, buildRow(rem, now, Filter{}, Sort{}))
 			}
 		}
 
@@ -146,8 +166,32 @@ func buildStrategies(
 		} else {
 			view.Disabled++
 		}
+		if item.NotReady != "" {
+			view.NotReady++
+		}
+
+		// The counts above are of every strategy, whatever is being shown:
+		// a filter that also changed the numbers beside its own control
+		// would make the control impossible to reason about.
+		if !showsStrategy(show, item) {
+			continue
+		}
 		view.Strategies = append(view.Strategies, item)
 	}
 
+	view.Show = show
+	view.Shown = len(view.Strategies)
 	return view
+}
+
+// showsStrategy reports whether one strategy survives the view in force.
+func showsStrategy(show string, item StrategyView) bool {
+	switch show {
+	case ShowNotReady:
+		return item.NotReady != ""
+	case ShowDisabled:
+		return !item.Enabled
+	default:
+		return true
+	}
 }

@@ -100,11 +100,17 @@ func successRate(succeeded, failed int) string {
 	return fmt.Sprintf("%d%% of executed runs", percent(succeeded, total))
 }
 
-func failedDetail(failed int) string {
+// failedDetail is the line under the Failed tile.
+//
+// A share rather than "needs a look", so it can be compared with the tile
+// beside it: 212 of 851 executed runs is a different situation from 212 of
+// 240, and the two tiles used to describe the same ratio in two different
+// vocabularies — one a percentage, the other an opinion.
+func failedDetail(succeeded, failed int) string {
 	if failed == 0 {
 		return "none"
 	}
-	return "needs a look"
+	return fmt.Sprintf("%d%% of executed runs", percent(failed, succeeded+failed))
 }
 
 func percent(part, total int) int {

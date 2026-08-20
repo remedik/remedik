@@ -2,7 +2,9 @@ package dashboard
 
 import (
 	"fmt"
+	"net/url"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/remedik/remedik/api/v1alpha1"
@@ -21,6 +23,13 @@ import (
 // namespace where remedik only reports and one where it acts are not
 // comparable, and showing their failure counts side by side without saying
 // which is which invites exactly the wrong conclusion.
+
+// The words a row's posture chip uses. They are what the filter compares
+// against, so the label and the clause cannot drift apart.
+const (
+	postureLiveLabel      = "Live"
+	postureReportingLabel = "Reporting"
+)
 
 // attentionLimit is how many namespaces get a full card.
 //
@@ -64,6 +73,135 @@ type NamespacesView struct {
 	// different posture from the one configured now. Counted so the summary
 	// can state the pattern once instead of every row repeating it.
 	Shifted int
+
+	// Filter is what is in force, and Groups are the controls.
+	//
+	// A hundred and fifty rows ordered by severity is the right default and
+	// the wrong only option: "how is payments doing" was a question this
+	// page could answer and could not be asked, so it was answered by
+	// scrolling.
+	Filter NamespaceFilter
+	Groups []NamespaceGroup
+	// Names is every namespace on the page, for the select's type-ahead.
+	Names []string
+	// Shown is how many namespaces survive the filter.
+	Shown int
+}
+
+// NamespaceFilter narrows the page.
+type NamespaceFilter struct {
+	// Name is one namespace, chosen from the select.
+	Name string
+	// Posture is "live" or "dryRun" — what remedik may do there now.
+	Posture string
+	// Show is "attention" or "unheard".
+	Show string
+}
+
+// Namespace filter values, in the query string.
+const (
+	paramNamespaceName = "ns"
+	paramPosture       = "posture"
+	paramShow          = "show"
+
+	// ShowAttention keeps the namespaces with something wrong.
+	ShowAttention = "attention"
+	// ShowUnheard keeps the ones holding failures nobody was told about,
+	// which is the slice worth reaching first and the hardest to spot.
+	ShowUnheard = "unheard"
+
+	// PostureLive and PostureReporting are what a row's posture may be.
+	PostureLive      = "live"
+	PostureReporting = "dryRun"
+)
+
+// ParseNamespaceFilter reads the filter from a query string. An unknown value
+// is kept for the name and dropped for the closed sets, for the same reason
+// the record filter keeps one: a pasted URL should answer widely rather than
+// fail.
+func ParseNamespaceFilter(query url.Values) NamespaceFilter {
+	f := NamespaceFilter{Name: strings.TrimSpace(query.Get(paramNamespaceName))}
+
+	switch strings.TrimSpace(query.Get(paramPosture)) {
+	case PostureLive:
+		f.Posture = PostureLive
+	case PostureReporting:
+		f.Posture = PostureReporting
+	}
+	switch strings.TrimSpace(query.Get(paramShow)) {
+	case ShowAttention:
+		f.Show = ShowAttention
+	case ShowUnheard:
+		f.Show = ShowUnheard
+	}
+	return f
+}
+
+// Active reports whether anything is being narrowed.
+func (f NamespaceFilter) Active() bool {
+	return f.Name != "" || f.Posture != "" || f.Show != ""
+}
+
+// Path is the page carrying this filter.
+func (f NamespaceFilter) Path() string {
+	values := url.Values{}
+	for key, value := range map[string]string{
+		paramNamespaceName: f.Name,
+		paramPosture:       f.Posture,
+		paramShow:          f.Show,
+	} {
+		if value != "" {
+			values.Set(key, value)
+		}
+	}
+	if len(values) == 0 {
+		return namespacesPath
+	}
+	return namespacesPath + "?" + values.Encode()
+}
+
+// keeps reports whether a row survives the filter.
+func (f NamespaceFilter) keeps(row *NamespaceRow) bool {
+	if f.Name != "" && row.Name != f.Name {
+		return false
+	}
+	switch f.Posture {
+	case PostureLive:
+		if row.Posture != postureLiveLabel {
+			return false
+		}
+	case PostureReporting:
+		if row.Posture == postureLiveLabel {
+			return false
+		}
+	}
+	switch f.Show {
+	case ShowAttention:
+		return row.NeedsAttention()
+	case ShowUnheard:
+		return row.Unheard > 0
+	}
+	return true
+}
+
+// NamespaceGroup is one dimension of the filter, as the pills that set it.
+type NamespaceGroup struct {
+	Label   string
+	Options []NamespaceOption
+}
+
+// NamespaceOption is one choice, as the link that applies or removes it.
+type NamespaceOption struct {
+	Label    string
+	URL      string
+	Selected bool
+	// Count is how many namespaces carry this value, over the whole cluster
+	// rather than over what is shown: a control whose own numbers move as
+	// you use it cannot be reasoned about.
+	Count int
+	// Countless marks the "All" option, which needs no number beside the
+	// total the page already states.
+	Countless bool
 }
 
 // AnyRest reports whether the compact table has anything in it.
@@ -198,6 +336,7 @@ func buildNamespaces(
 	remediations []v1alpha1.Remediation,
 	posture Posture,
 	now time.Time,
+	filter NamespaceFilter,
 ) NamespacesView {
 	byName := make(map[string]*NamespaceRow)
 	latest := make(map[string]time.Time)
@@ -247,16 +386,30 @@ func buildNamespaces(
 
 	view := NamespacesView{Total: len(byName)}
 	var wrong, fine []NamespaceRow
+	// Two passes, deliberately. The first is over every namespace, because
+	// the totals the page states and the counts beside the filter's own
+	// controls are about the cluster — a control whose numbers move as you
+	// use it is one nobody can reason about. The second keeps what survives.
+	var counts namespaceCounts
 	for name, row := range byName {
 		row.applyPosture(posture, name)
 		row.summarise()
 		view.Executions += row.Total
+		counts.add(row)
+		view.Names = append(view.Names, name)
+
+		if !filter.keeps(row) {
+			continue
+		}
 		if row.NeedsAttention() {
 			wrong = append(wrong, *row)
 			continue
 		}
 		fine = append(fine, *row)
 	}
+	sort.Strings(view.Names)
+	view.Filter = filter
+	view.Groups = namespaceGroups(filter, counts)
 
 	sortNamespaceRows(wrong)
 	sortNamespaceRows(fine)
@@ -267,7 +420,8 @@ func buildNamespaces(
 		}
 	}
 
-	view.Attention = len(wrong)
+	view.Attention = counts.attention
+	view.Shown = len(wrong) + len(fine)
 	if len(wrong) > attentionLimit {
 		view.Rows = wrong[:attentionLimit]
 		view.Withheld = len(wrong) - attentionLimit
@@ -280,6 +434,110 @@ func buildNamespaces(
 	view.Rest = append(view.Rest, fine...)
 
 	return view
+}
+
+// namespaceCounts is how many namespaces carry each filterable property,
+// over the whole cluster.
+type namespaceCounts struct {
+	attention int
+	unheard   int
+	live      int
+	reporting int
+}
+
+func (c *namespaceCounts) add(row *NamespaceRow) {
+	if row.NeedsAttention() {
+		c.attention++
+	}
+	if row.Unheard > 0 {
+		c.unheard++
+	}
+	if row.Posture == postureLiveLabel {
+		c.live++
+	} else {
+		c.reporting++
+	}
+}
+
+// namespaceGroups builds the controls.
+//
+// Every option is a link, and choosing the one already in force removes it —
+// the same rule the record list follows, so a control both narrows and
+// widens and nothing is a dead end. An option nothing matches is left out
+// rather than offered as a way to reach an empty page.
+func namespaceGroups(active NamespaceFilter, counts namespaceCounts) []NamespaceGroup {
+	option := func(label, value, param string, count int) NamespaceOption {
+		chosen := active.Show
+		if param == paramPosture {
+			chosen = active.Posture
+		}
+
+		next := active
+		if value == chosen {
+			value = ""
+		}
+		if param == paramPosture {
+			next.Posture = value
+		} else {
+			next.Show = value
+		}
+
+		return NamespaceOption{
+			Label:    label,
+			URL:      next.Path(),
+			Selected: value != "" && value == chosen,
+			Count:    count,
+		}
+	}
+
+	clearShow, clearPosture := active, active
+	clearShow.Show = ""
+	clearPosture.Posture = ""
+
+	show := NamespaceGroup{Label: "Show", Options: []NamespaceOption{{
+		Label: "All", URL: clearShow.Path(), Selected: active.Show == "", Countless: true,
+	}}}
+	if counts.attention > 0 {
+		show.Options = append(show.Options,
+			option("Needs attention", ShowAttention, paramShow, counts.attention))
+	}
+	if counts.unheard > 0 {
+		show.Options = append(show.Options,
+			option("Nobody was told", ShowUnheard, paramShow, counts.unheard))
+	}
+
+	posture := NamespaceGroup{Label: "Posture", Options: []NamespaceOption{{
+		Label: "All", URL: clearPosture.Path(), Selected: active.Posture == "", Countless: true,
+	}}}
+	if counts.live > 0 {
+		posture.Options = append(posture.Options,
+			option("Acting", PostureLive, paramPosture, counts.live))
+	}
+	if counts.reporting > 0 {
+		posture.Options = append(posture.Options,
+			option("Reporting only", PostureReporting, paramPosture, counts.reporting))
+	}
+
+	groups := make([]NamespaceGroup, 0, 2)
+	// One value is not a choice, and a row offering it is furniture.
+	if len(show.Options) > 1 {
+		groups = append(groups, show)
+	}
+	if len(posture.Options) > 2 {
+		groups = append(groups, posture)
+	}
+	return groups
+}
+
+// Filtered reports whether the page is showing a subset.
+func (v NamespacesView) Filtered() bool { return v.Filter.Active() }
+
+// ClearNameURL is this view without the namespace clause, so the chip that
+// shows it can also lift it.
+func (v NamespacesView) ClearNameURL() string {
+	without := v.Filter
+	without.Name = ""
+	return without.Path()
 }
 
 // applyPosture says what remedik may do in this namespace.
@@ -306,7 +564,7 @@ func (r *NamespaceRow) applyPosture(posture Posture, name string) {
 	}
 
 	if dryRun {
-		r.Posture = "Reporting"
+		r.Posture = postureReportingLabel
 		r.PostureTone = toneDryRun
 		r.PostureDetail = "remedik plans here, it does not act"
 		if r.RanForReal > 0 {
@@ -318,7 +576,7 @@ func (r *NamespaceRow) applyPosture(posture Posture, name string) {
 		}
 		return
 	}
-	r.Posture = "Live"
+	r.Posture = postureLiveLabel
 	r.PostureTone = toneOK
 	r.PostureDetail = "remedik acts here"
 	if r.RanDry > 0 && r.RanForReal == 0 {

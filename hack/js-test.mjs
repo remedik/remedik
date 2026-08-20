@@ -49,8 +49,24 @@ function makeElement(tag, attrs = {}) {
         return el.className.split(/\s+/).includes(name);
       },
     },
+    textContent: attrs.text ?? "",
+    parentNode: null,
     getAttribute(name) {
       return el.attributes[name] ?? null;
+    },
+    setAttribute(name, value) {
+      el.attributes[name] = value;
+    },
+    appendChild(child) {
+      el.children.push(child);
+      child.parentNode = el;
+      return child;
+    },
+    insertBefore(node, before) {
+      const at = el.children.indexOf(before);
+      el.children.splice(at < 0 ? el.children.length : at, 0, node);
+      node.parentNode = el;
+      return node;
     },
     addEventListener(type, fn) {
       (el.listeners[type] ??= []).push(fn);
@@ -61,6 +77,7 @@ function makeElement(tag, attrs = {}) {
     querySelector(sel) {
       if (sel === "select") return el.children.find((c) => c.tagName === "SELECT") ?? null;
       if (sel === "button") return el.children.find((c) => c.tagName === "BUTTON") ?? null;
+      if (sel === "code") return el.children.find((c) => c.tagName === "CODE") ?? null;
       return null;
     },
     requestSubmit() {
@@ -73,14 +90,18 @@ function makeElement(tag, attrs = {}) {
   return el;
 }
 
-function makeDocument(forms) {
+function makeDocument(forms, copyable = []) {
   return {
+    createElement(tag) {
+      return makeElement(tag);
+    },
     querySelector(sel) {
       if (sel === 'meta[name="remedik-asset"]') return { content: "abc123" };
       return null;
     },
     querySelectorAll(sel) {
       if (sel === "form.filter-select") return forms;
+      if (sel === "[data-copy]") return copyable;
       return [];
     },
     getElementById() {
@@ -124,23 +145,49 @@ function makeWindow() {
   };
 }
 
-function run() {
+function run(options = {}) {
   const select = makeElement("select", { name: "namespace" });
   const button = makeElement("button", { type: "submit" });
   const form = makeElement("form", { class: "filter-select", method: "get", action: "/remediations" });
   form.children.push(select, button);
 
   const win = makeWindow();
-  const doc = makeDocument([form]);
+  const doc = makeDocument([form], options.copyable ?? []);
 
-  // app.js is two top-level IIFEs referring to `window` and `document`. Giving
-  // them as parameters runs the real file rather than a copy of it.
-  new Function("window", "document", "console", source)(win, doc, {
-    log() {},
-    error() {},
-  });
+  // app.js refers to `window`, `document` and `navigator`. Giving them as
+  // parameters runs the real file rather than a copy of it.
+  new Function("window", "document", "console", "navigator", source)(
+    win,
+    doc,
+    { log() {}, error() {} },
+    options.navigator ?? {},
+  );
 
   return { form, select, win };
+}
+
+// A command block as the templates mark it: a <pre data-copy> holding the
+// <code> whose text is what a person is meant to run.
+function makeCommand(text) {
+  const page = makeElement("div");
+  const block = makeElement("pre", { class: "code", "data-copy": "" });
+  const code = makeElement("code", { text });
+  block.appendChild(code);
+  page.appendChild(block);
+  return { page, block };
+}
+
+function makeClipboard() {
+  const written = [];
+  return {
+    written,
+    clipboard: {
+      writeText(text) {
+        written.push(text);
+        return Promise.resolve();
+      },
+    },
+  };
 }
 
 // --------------------------------------------------------------------------
@@ -205,6 +252,51 @@ console.log("==> app.js: the filter select");
     win, makeDocument([bare]), { log() {}, error() {} });
   check(!bare.classList.contains("is-live"),
     "a form with no select is left alone, so its button stays visible");
+}
+
+console.log("");
+console.log("==> app.js: copying a command");
+
+{
+  const { page, block } = makeCommand("kubectl -n remedik patch remediation x --type merge");
+  const nav = makeClipboard();
+  run({ copyable: [block], navigator: nav });
+
+  const wrapper = page.children[0];
+  check(wrapper.className === "copyable",
+    "the command is wrapped, so the button cannot scroll away with the text");
+  check(wrapper.children.includes(block),
+    "and the block itself is inside that wrapper");
+
+  const copy = wrapper.querySelector("button");
+  check(copy !== null && copy.textContent === "Copy", "a Copy button is offered");
+}
+
+{
+  const { page, block } = makeCommand("kubectl get remediations");
+  const nav = makeClipboard();
+  const { win } = run({ copyable: [block], navigator: nav });
+
+  const copy = page.children[0].querySelector("button");
+  copy.dispatch("click");
+  await Promise.resolve();
+
+  check(nav.written.length === 1 && nav.written[0] === "kubectl get remediations",
+    "clicking it copies exactly the command that is printed");
+  check(copy.textContent === "Copied", "and the button says so");
+
+  win.tick();
+  check(copy.textContent === "Copy", "then goes back to offering the next copy");
+}
+
+{
+  // Clipboard access needs a secure context. A button that silently does
+  // nothing is worse than none, because the reader believes they copied it.
+  const { page, block } = makeCommand("kubectl get remediations");
+  run({ copyable: [block], navigator: {} });
+
+  check(page.children[0] === block,
+    "with no clipboard available nothing is wrapped and no button is built");
 }
 
 console.log(failures === 0

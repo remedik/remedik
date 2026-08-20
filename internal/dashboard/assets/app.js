@@ -224,4 +224,78 @@
       }
     });
   });
+
+  /* ------------------------------------------------------------------
+   * Copying a command
+   *
+   * These pages print commands a person is meant to run: the patch that
+   * approves a remediation, and the kubectl each step would have been. At
+   * 04:00 nobody retypes a patch correctly, and dragging a mouse across a
+   * wrapped command is worse than retyping it.
+   *
+   * The button is built here rather than written into the template so that
+   * it cannot exist when it would not work. Clipboard access needs a secure
+   * context, so a dashboard put behind plain HTTP would otherwise show a
+   * button that silently does nothing — which is worse than no button,
+   * because the reader believes they copied it.
+   * ------------------------------------------------------------------ */
+  var COPIED_MS = 1600;
+
+  function canCopy() {
+    return (
+      typeof navigator !== "undefined" &&
+      navigator.clipboard &&
+      typeof navigator.clipboard.writeText === "function"
+    );
+  }
+
+  function addCopyButton(block) {
+    var source = block.querySelector("code");
+    if (!source) {
+      return;
+    }
+
+    var button = document.createElement("button");
+    button.type = "button";
+    button.className = "copy";
+    button.textContent = "Copy";
+    button.setAttribute("aria-label", "Copy this command");
+
+    var reset = null;
+    button.addEventListener("click", function () {
+      navigator.clipboard.writeText(source.textContent).then(
+        function () {
+          button.textContent = "Copied";
+          window.clearTimeout(reset);
+          reset = window.setTimeout(function () {
+            button.textContent = "Copy";
+          }, COPIED_MS);
+        },
+        function () {
+          // Say nothing rather than claim success. The command is still on
+          // the page to select by hand, which is where the reader started.
+        },
+      );
+    });
+
+    // Wrapped rather than appended into the block: both kinds of command
+    // scroll horizontally, and a button inside a scrolling box scrolls out
+    // of reach with the text it is meant to copy.
+    var parent = block.parentNode;
+    if (!parent || typeof parent.insertBefore !== "function") {
+      return;
+    }
+    var wrapper = document.createElement("div");
+    wrapper.className = "copyable";
+    parent.insertBefore(wrapper, block);
+    wrapper.appendChild(block);
+    wrapper.appendChild(button);
+  }
+
+  if (canCopy()) {
+    var copyable = document.querySelectorAll("[data-copy]");
+    for (var c = 0; c < copyable.length; c++) {
+      addCopyButton(copyable[c]);
+    }
+  }
 })();

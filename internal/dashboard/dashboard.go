@@ -368,7 +368,8 @@ func (h *Handler) remediations(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := r.URL.Query()
-	view := buildRemediations(remediations, ParseFilter(query), ParsePage(query), h.now())
+	view := buildRemediations(
+		remediations, ParseFilter(query), ParseSort(query), ParsePage(query), h.now())
 	view.Page = h.page("Remediations", navRemediations)
 	h.render(w, r, remediationsTemplate, view)
 }
@@ -414,7 +415,8 @@ func (h *Handler) namespaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	view := buildNamespaces(remediations, h.viewPosture(), h.now())
+	view := buildNamespaces(
+		remediations, h.viewPosture(), h.now(), ParseNamespaceFilter(r.URL.Query()))
 	view.Page = h.page("Namespaces", navNamespaces)
 	h.render(w, r, namespacesTemplate, view)
 }
@@ -434,7 +436,15 @@ func (h *Handler) strategies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	view := buildStrategies(strategies, remediations, h.now())
+	// Unknown values show everything, for the same reason the record filter
+	// keeps them: a mistyped parameter should be a wide answer, not a 400 on
+	// a URL somebody pasted into a channel.
+	show := r.URL.Query().Get("show")
+	if show != ShowNotReady && show != ShowDisabled {
+		show = ""
+	}
+
+	view := buildStrategies(strategies, remediations, h.now(), show)
 	view.Page = h.page("Strategies", navStrategies)
 	h.render(w, r, strategiesTemplate, view)
 }

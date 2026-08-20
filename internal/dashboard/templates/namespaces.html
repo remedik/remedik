@@ -21,6 +21,70 @@
 </div>
 
 {{if .Any}}
+{{/*
+  A hundred and fifty rows ordered by severity is the right default and the
+  wrong only option. The select carries the browser's own type-ahead, which
+  is exactly the "find payments among a hundred and fifty" interaction and
+  costs no JavaScript; the pills are the two questions worth one click.
+
+  The counts beside them are of the whole cluster, not of what is shown — a
+  control whose own numbers move as you use it cannot be reasoned about.
+*/}}
+<section class="filters" aria-labelledby="ns-filters-heading">
+  <h2 id="ns-filters-heading" class="visually-hidden">Filters</h2>
+
+  <div class="filter-row">
+    <span class="filter-label" id="filter-ns">Namespace</span>
+    <form class="filter-select" method="get" action="/namespaces">
+      {{if .Filter.Posture}}<input type="hidden" name="posture" value="{{.Filter.Posture}}">{{end}}
+      {{if .Filter.Show}}<input type="hidden" name="show" value="{{.Filter.Show}}">{{end}}
+      <label class="visually-hidden" for="pick-ns">Namespace</label>
+      <select id="pick-ns" name="ns">
+        <option value="">All {{len .Names}} &mdash; type to search</option>
+        {{$chosen := .Filter.Name}}
+        {{range .Names}}
+        <option value="{{.}}"{{if eq . $chosen}} selected{{end}}>{{.}}</option>
+        {{end}}
+      </select>
+      <button type="submit">Go</button>
+    </form>
+    {{if .Filter.Name}}
+    <ul class="filter-values" aria-labelledby="filter-ns">
+      <li>
+        <a class="pill-link is-on" href="{{.ClearNameURL}}" aria-current="true"
+           title="Click to stop filtering by this namespace">
+          <code>{{.Filter.Name}}</code>
+        </a>
+      </li>
+    </ul>
+    {{end}}
+  </div>
+
+  {{range .Groups}}
+  <div class="filter-row">
+    <span class="filter-label">{{.Label}}</span>
+    <ul class="filter-values">
+      {{range .Options}}
+      <li>
+        <a class="pill-link{{if .Selected}} is-on{{end}}" href="{{.URL}}"
+           {{if .Selected}}aria-current="true" title="Click to stop filtering by this"{{end}}>
+          {{.Label}}{{if not .Countless}}<span class="pill-count">{{.Count}}</span>{{end}}
+        </a>
+      </li>
+      {{end}}
+    </ul>
+  </div>
+  {{end}}
+
+  {{if .Filtered}}
+  <p class="filter-summary">
+    Showing {{.Shown}} of {{.Total}}.
+    <a href="/namespaces">Clear all filters</a>
+  </p>
+  {{end}}
+</section>
+
+{{if .Shown}}
 <p class="dim hint ns-hint">{{.Summary}}</p>
 
 <div class="ns-table-scroll">
@@ -65,6 +129,17 @@
     {{end}}
   </table>
 </div>
+
+{{else}}
+<div class="card empty">
+  <h2 class="card-title">No namespace matches this filter</h2>
+  <p>
+    {{.Total}} namespace{{if ne .Total 1}}s have{{else}} has{{end}} something recorded;
+    none of them match what you asked for.
+  </p>
+  <p class="dim"><a href="/namespaces">Clear the filters</a> to see all of them.</p>
+</div>
+{{end}}
 
 {{else}}
 <div class="card empty">

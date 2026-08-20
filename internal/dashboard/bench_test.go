@@ -44,7 +44,7 @@ func BenchmarkBuildRemediations(b *testing.B) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		_ = buildRemediations(rems, Filter{}, 1, testNow())
+		_ = buildRemediations(rems, Filter{}, Sort{}, 1, testNow())
 	}
 }
 
@@ -54,7 +54,7 @@ func BenchmarkBuildRemediationsFiltered(b *testing.B) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		_ = buildRemediations(rems, filter, 1, testNow())
+		_ = buildRemediations(rems, filter, Sort{}, 1, testNow())
 	}
 }
 
@@ -64,7 +64,7 @@ func BenchmarkBuildNamespaces(b *testing.B) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		_ = buildNamespaces(rems, posture, testNow())
+		_ = buildNamespaces(rems, posture, testNow(), NamespaceFilter{})
 	}
 }
 
@@ -73,7 +73,7 @@ func BenchmarkBuildStrategies(b *testing.B) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		_ = buildStrategies(strategies, rems, testNow())
+		_ = buildStrategies(strategies, rems, testNow(), "")
 	}
 }
 

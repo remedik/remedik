@@ -263,6 +263,7 @@ func TestBuildStrategies(t *testing.T) {
 			failedRemediation("bad-1", 10),
 		},
 		testNow(),
+		"",
 	)
 
 	if view.Total != 2 || view.Enabled != 1 || view.Disabled != 1 {
@@ -316,6 +317,7 @@ func TestStrategyRunCountFallsBackToTheRecords(t *testing.T) {
 			failedRemediation("bad-1", 10),
 		},
 		testNow(),
+		"",
 	)
 
 	if got := view.Strategies[0].Runs; got != 2 {
@@ -387,6 +389,22 @@ func TestFormatSpanNeedsBothEnds(t *testing.T) {
 	}
 	if got := FormatSpan(nil, nil); got != "" {
 		t.Errorf("FormatSpan(nil, nil) = %q, want empty", got)
+	}
+}
+
+// A step that failed before it did anything starts and ends at the same
+// second, and "0ms" reads as a measurement of something that never ran. Every
+// page already renders a missing duration as an em dash, which is honest.
+func TestFormatSpan_ZeroIsNotAMeasurement(t *testing.T) {
+	at := metav1.NewTime(testNow())
+
+	if got := FormatSpan(&at, &at); got != "" {
+		t.Errorf("FormatSpan(t, t) = %q, want empty so the page shows an em dash", got)
+	}
+
+	later := metav1.NewTime(at.Add(1500 * time.Millisecond))
+	if got := FormatSpan(&at, &later); got != "1.5s" {
+		t.Errorf("FormatSpan = %q, want 1.5s: a real duration still renders", got)
 	}
 }
 
@@ -573,9 +591,84 @@ func TestBuildRow_MarksEscalationInTheList(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			rem := failedRemediation("bad-1", 10)
 			rem.Status.Escalation = tt.escalation
-			if got := buildRow(&rem, testNow()).Escalated; got != tt.want {
+			if got := buildRow(&rem, testNow(), Filter{}, Sort{}).Escalated; got != tt.want {
 				t.Errorf("Escalated = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// A strategy remedik cannot run is the one worth finding on a Tuesday, so
+// the page offers it as a view rather than leaving it to be noticed while
+// scrolling past forty that are fine.
+func TestBuildStrategies_ShowsOnlyWhatWasAskedFor(t *testing.T) {
+	broken := enabledStrategy()
+	broken.Name = "cannot-run"
+	broken.Status.Conditions = []metav1.Condition{{
+		Type:    v1alpha1.ConditionReady,
+		Status:  metav1.ConditionFalse,
+		Reason:  v1alpha1.ReasonUnknownAction,
+		Message: `step 1: unknown action "node.drain"`,
+	}}
+
+	all := []v1alpha1.RemediationStrategy{enabledStrategy(), disabledStrategy(), broken}
+
+	full := buildStrategies(all, nil, testNow(), "")
+	if full.Shown != 3 || full.NotReady != 1 {
+		t.Fatalf("unfiltered: shown %d, not ready %d; want 3 and 1", full.Shown, full.NotReady)
+	}
+	if full.Filtered() {
+		t.Error("Filtered() = true with no view chosen")
+	}
+
+	only := buildStrategies(all, nil, testNow(), ShowNotReady)
+	if only.Shown != 1 || only.Strategies[0].Name != "cannot-run" {
+		t.Errorf("show=not-ready listed %d strategies, want just the broken one", only.Shown)
+	}
+	// The counts beside the control must not move with it, or the control
+	// cannot be reasoned about.
+	if only.Total != full.Total || only.NotReady != 1 || only.Disabled != full.Disabled {
+		t.Errorf("the counts changed with the view: %+v", only)
+	}
+
+	off := buildStrategies(all, nil, testNow(), ShowDisabled)
+	if off.Shown != 1 || off.Strategies[0].Enabled {
+		t.Errorf("show=disabled listed %d strategies, want the disabled one", off.Shown)
+	}
+}
+
+// Every value a row prints and the filter understands is a link. Making the
+// target and the alert clickable and leaving the strategy and the state as
+// plain text taught the reader a rule the table then broke twice per row.
+func TestBuildRow_EveryFilterableValueIsALink(t *testing.T) {
+	rem := failedRemediation("pod-crashloop-abc", 10)
+	rem.Spec.StrategyName = "pod-crashloop"
+	rem.Spec.Target = "deployment/payments/api"
+	rem.Spec.Alert.Name = "KubePodCrashLooping"
+
+	row := buildRow(&rem, testNow(), Filter{Namespace: "payments"}, Sort{})
+
+	links := map[string]string{
+		"strategy": row.StrategyURL,
+		"target":   row.TargetURL,
+		"alert":    row.AlertURL,
+		"state":    row.StateURL,
+	}
+	for name, link := range links {
+		if link == "" {
+			t.Errorf("the %s has no link", name)
+			continue
+		}
+		// Narrowing on top of what is already in force, like every other
+		// control: the namespace the reader chose survives the click.
+		if !strings.Contains(link, "namespace=payments") {
+			t.Errorf("the %s link %q dropped the namespace already in force", name, link)
+		}
+	}
+
+	// A record whose target could not be resolved has nothing to ask about.
+	rem.Spec.Target = ""
+	if got := buildRow(&rem, testNow(), Filter{}, Sort{}).TargetURL; got != "" {
+		t.Errorf("TargetURL = %q for an unresolved target, want none", got)
 	}
 }

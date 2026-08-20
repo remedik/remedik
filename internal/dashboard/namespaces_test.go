@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 
@@ -22,7 +23,7 @@ func TestBuildNamespaces_OneRowPerNamespace(t *testing.T) {
 		in(succeededRemediation("a", 10), "payments", "api"),
 		in(succeededRemediation("b", 9), "payments", "worker"),
 		in(succeededRemediation("c", 8), "checkout", "web"),
-	}, Posture{}, testNow())
+	}, Posture{}, testNow(), NamespaceFilter{})
 
 	if view.Total != 2 {
 		t.Fatalf("Total = %d, want 2 namespaces", view.Total)
@@ -64,7 +65,7 @@ func TestBuildNamespaces_UnheardFailuresComeFirst(t *testing.T) {
 		in(failedRemediation("unheard", 4), "silent", "api"),
 	)
 
-	view := buildNamespaces(remediations, Posture{}, testNow())
+	view := buildNamespaces(remediations, Posture{}, testNow(), NamespaceFilter{})
 
 	if len(view.Rows) != 2 {
 		t.Fatalf("rows needing attention = %d, want 2", len(view.Rows))
@@ -98,7 +99,7 @@ func TestBuildNamespaces_CountsFailuresNobodyWasTold(t *testing.T) {
 	silent := in(failedRemediation("silent", 3), "payments", "api")
 
 	view := buildNamespaces([]v1alpha1.Remediation{told, tried, silent},
-		Posture{}, testNow())
+		Posture{}, testNow(), NamespaceFilter{})
 
 	row := view.Rows[0]
 	if row.Failed != 3 {
@@ -121,7 +122,7 @@ func TestBuildNamespaces_AnEscalatedFailureIsAWarningNotAnAlarm(t *testing.T) {
 	told := in(failedRemediation("told", 5), "payments", "api")
 	told.Status.Escalation = &v1alpha1.EscalationStatus{Phase: v1alpha1.StepPhaseSucceeded}
 
-	view := buildNamespaces([]v1alpha1.Remediation{told}, Posture{}, testNow())
+	view := buildNamespaces([]v1alpha1.Remediation{told}, Posture{}, testNow(), NamespaceFilter{})
 
 	if view.Rows[0].Tone != toneWarn {
 		t.Errorf("Tone = %q, want %q", view.Rows[0].Tone, toneWarn)
@@ -137,7 +138,7 @@ func TestBuildNamespaces_PostureIsPerRow(t *testing.T) {
 	view := buildNamespaces([]v1alpha1.Remediation{
 		in(succeededRemediation("a", 5), "staging", "api"),
 		in(simulatedRemediation("b", "", 4), "prod", "api"),
-	}, posture, testNow())
+	}, posture, testNow(), NamespaceFilter{})
 
 	byName := map[string]NamespaceRow{}
 	for _, row := range append(view.Rows, view.Rest...) {
@@ -159,7 +160,7 @@ func TestBuildNamespaces_PostureHonoursDryRunOnly(t *testing.T) {
 	view := buildNamespaces([]v1alpha1.Remediation{
 		in(succeededRemediation("a", 5), "staging", "api"),
 		in(simulatedRemediation("b", "", 4), "prod", "api"),
-	}, posture, testNow())
+	}, posture, testNow(), NamespaceFilter{})
 
 	for _, row := range append(view.Rows, view.Rest...) {
 		want := "Live"
@@ -178,7 +179,7 @@ func TestBuildNamespaces_SimulationIsNotAFailedRate(t *testing.T) {
 	view := buildNamespaces([]v1alpha1.Remediation{
 		in(simulatedRemediation("a", "", 5), "prod", "api"),
 		in(simulatedRemediation("b", "", 4), "prod", "api"),
-	}, Posture{DryRun: true}, testNow())
+	}, Posture{DryRun: true}, testNow(), NamespaceFilter{})
 
 	row := view.Rest[0]
 	if row.RatePct != -1 {
@@ -204,7 +205,7 @@ func TestBuildNamespaces_ClusterScopedRecordsAreNotARow(t *testing.T) {
 	view := buildNamespaces([]v1alpha1.Remediation{
 		node,
 		in(succeededRemediation("a", 4), "payments", "api"),
-	}, Posture{}, testNow())
+	}, Posture{}, testNow(), NamespaceFilter{})
 
 	if view.Total != 1 {
 		t.Fatalf("Total = %d, want 1 — a node action is not a namespace", view.Total)
@@ -215,7 +216,7 @@ func TestBuildNamespaces_ClusterScopedRecordsAreNotARow(t *testing.T) {
 }
 
 func TestBuildNamespaces_EmptyIsNotAnError(t *testing.T) {
-	view := buildNamespaces(nil, Posture{}, testNow())
+	view := buildNamespaces(nil, Posture{}, testNow(), NamespaceFilter{})
 
 	if view.Any() {
 		t.Error("Any() = true with no records")
@@ -234,9 +235,9 @@ func TestBuildNamespaces_OrderIsStable(t *testing.T) {
 		in(succeededRemediation("c", 3), "mid", "api"),
 	}
 
-	first := buildNamespaces(remediations, Posture{}, testNow())
+	first := buildNamespaces(remediations, Posture{}, testNow(), NamespaceFilter{})
 	for range 20 {
-		again := buildNamespaces(remediations, Posture{}, testNow())
+		again := buildNamespaces(remediations, Posture{}, testNow(), NamespaceFilter{})
 		for i := range first.Rest {
 			if first.Rest[i].Name != again.Rest[i].Name {
 				t.Fatalf("order changed between builds: %s then %s",
@@ -258,7 +259,7 @@ func TestBuildNamespaces_LastActivityIsTheNewestRecord(t *testing.T) {
 	old := in(succeededRemediation("old", 600), "payments", "api")
 	recent := in(succeededRemediation("recent", 3), "payments", "api")
 
-	view := buildNamespaces([]v1alpha1.Remediation{old, recent}, Posture{}, testNow())
+	view := buildNamespaces([]v1alpha1.Remediation{old, recent}, Posture{}, testNow(), NamespaceFilter{})
 
 	if got := view.Rest[0].Last; got != "3m" {
 		t.Errorf("Last = %q, want 3m — the newest record, not the first seen", got)
@@ -276,7 +277,7 @@ func TestBuildNamespaces_CountsAddUp(t *testing.T) {
 		in(failedRemediation("b", 4), "payments", "api"),
 		in(simulatedRemediation("c", "", 3), "payments", "api"),
 		pending,
-	}, Posture{}, testNow())
+	}, Posture{}, testNow(), NamespaceFilter{})
 
 	row := view.Rows[0]
 	sum := row.Succeeded + row.Failed + row.Simulated + row.InFlight
@@ -296,7 +297,7 @@ func TestBuildNamespaces_SurvivesAnEmptyRecord(t *testing.T) {
 		Spec:       v1alpha1.RemediationSpec{Target: "deployment/payments/api"},
 	}
 
-	view := buildNamespaces([]v1alpha1.Remediation{bare}, Posture{}, testNow())
+	view := buildNamespaces([]v1alpha1.Remediation{bare}, Posture{}, testNow(), NamespaceFilter{})
 
 	if view.Total != 1 {
 		t.Fatalf("Total = %d, want 1", view.Total)
@@ -339,7 +340,7 @@ func TestBuildNamespaces_QuietNamespacesDoNotCrowdOutTheLoudOnes(t *testing.T) {
 	remediations = append(remediations,
 		in(failedRemediation("unheard", 1), "the-one-that-matters", "api"))
 
-	view := buildNamespaces(remediations, Posture{}, testNow())
+	view := buildNamespaces(remediations, Posture{}, testNow(), NamespaceFilter{})
 
 	if view.Total != 151 {
 		t.Fatalf("Total = %d, want 151", view.Total)
@@ -365,13 +366,13 @@ func TestBuildNamespaces_QuietNamespacesDoNotCrowdOutTheLoudOnes(t *testing.T) {
 func TestBuildNamespaces_AllClearIsNotTheSameAsEmpty(t *testing.T) {
 	allClear := buildNamespaces([]v1alpha1.Remediation{
 		in(succeededRemediation("a", 5), "payments", "api"),
-	}, Posture{}, testNow())
+	}, Posture{}, testNow(), NamespaceFilter{})
 
 	if !allClear.Any() || !allClear.AllQuiet() {
 		t.Errorf("Any()=%v AllQuiet()=%v, want true and true", allClear.Any(), allClear.AllQuiet())
 	}
 
-	empty := buildNamespaces(nil, Posture{}, testNow())
+	empty := buildNamespaces(nil, Posture{}, testNow(), NamespaceFilter{})
 	if empty.Any() || empty.AllQuiet() {
 		t.Errorf("Any()=%v AllQuiet()=%v, want false and false", empty.Any(), empty.AllQuiet())
 	}
@@ -394,7 +395,7 @@ func TestBuildNamespaces_WithheldNamespacesAreCountedAndStillShown(t *testing.T)
 			in(succeededRemediation(fmt.Sprintf("ok-%03d", i), i), fmt.Sprintf("fine-%03d", i), "api"))
 	}
 
-	view := buildNamespaces(remediations, Posture{}, testNow())
+	view := buildNamespaces(remediations, Posture{}, testNow(), NamespaceFilter{})
 
 	if view.Attention != 40 {
 		t.Fatalf("Attention = %d, want 40 — the count is of every namespace "+
@@ -446,7 +447,7 @@ func TestBuildNamespaces_APostureChangeIsVisible(t *testing.T) {
 
 	// Reporting today, but something ran for ranLive before that.
 	reporting := buildNamespaces([]v1alpha1.Remediation{ranLive, dry},
-		Posture{DryRun: true}, testNow())
+		Posture{DryRun: true}, testNow(), NamespaceFilter{})
 	row := reporting.Rest[0]
 	if row.Posture != "Reporting" {
 		t.Fatalf("Posture = %q, want Reporting", row.Posture)
@@ -470,15 +471,113 @@ func TestBuildNamespaces_APostureChangeIsVisible(t *testing.T) {
 	// Live today, but nothing has actually run yet — worth saying, because a
 	// reader would otherwise assume the successes were ranLive ones.
 	live := buildNamespaces([]v1alpha1.Remediation{dry},
-		Posture{DryRun: false}, testNow())
+		Posture{DryRun: false}, testNow(), NamespaceFilter{})
 	if got := live.Rest[0].PostureNote; !strings.Contains(got, "only reported") { //nolint:goconst
 		t.Errorf("PostureNote = %q, want it to say nothing has run for ranLive yet", got)
 	}
 
 	// And when they agree, the page stays quiet about it.
 	agreed := buildNamespaces([]v1alpha1.Remediation{ranLive},
-		Posture{DryRun: false}, testNow())
+		Posture{DryRun: false}, testNow(), NamespaceFilter{})
 	if got := agreed.Rest[0].PostureNote; got != "" {
 		t.Errorf("PostureNote = %q, want empty when the records agree with the posture", got)
+	}
+}
+
+// A hundred and fifty rows ordered by severity is the right default and the
+// wrong only option: "how is payments doing" was a question this page could
+// answer and could not be asked.
+func TestNamespaces_Filters(t *testing.T) {
+	quiet := in(succeededRemediation("ok", 10), "quiet", "api")
+
+	loud := in(failedRemediation("bad", 9), "loud", "api")
+	loud.Status.Escalation = &v1alpha1.EscalationStatus{Phase: v1alpha1.StepPhaseSucceeded}
+
+	silent := in(failedRemediation("worse", 8), "silent", "api")
+
+	records := []v1alpha1.Remediation{quiet, loud, silent}
+	posture := Posture{DryRun: true, Live: []string{"loud"}}
+
+	all := buildNamespaces(records, posture, testNow(), NamespaceFilter{})
+	if all.Total != 3 || all.Shown != 3 {
+		t.Fatalf("unfiltered: total %d, shown %d; want 3 and 3", all.Total, all.Shown)
+	}
+
+	tests := []struct {
+		name   string
+		filter NamespaceFilter
+		want   []string
+	}{
+		{name: "one namespace", filter: NamespaceFilter{Name: "quiet"}, want: []string{"quiet"}},
+		{name: "acting only", filter: NamespaceFilter{Posture: PostureLive}, want: []string{"loud"}},
+		{
+			name:   "reporting only",
+			filter: NamespaceFilter{Posture: PostureReporting},
+			want:   []string{"quiet", "silent"},
+		},
+		{
+			// The slice worth reaching first: a failure nobody was told
+			// about. "loud" failed but its escalation got through.
+			name:   "nobody was told",
+			filter: NamespaceFilter{Show: ShowUnheard},
+			want:   []string{"silent"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			view := buildNamespaces(records, posture, testNow(), tt.filter)
+
+			var got []string
+			for _, row := range append(append([]NamespaceRow{}, view.Rows...), view.Rest...) {
+				got = append(got, row.Name)
+			}
+			sort.Strings(got)
+			if len(got) != len(tt.want) {
+				t.Fatalf("rows = %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("rows = %v, want %v", got, tt.want)
+				}
+			}
+			if view.Shown != len(tt.want) {
+				t.Errorf("Shown = %d, want %d", view.Shown, len(tt.want))
+			}
+
+			// The counts beside the controls are of the cluster, not of what
+			// survives — a control whose own numbers move as it is used
+			// cannot be reasoned about.
+			if view.Total != all.Total || view.Attention != all.Attention {
+				t.Errorf("the totals moved with the filter: total %d, attention %d",
+					view.Total, view.Attention)
+			}
+			if len(view.Names) != all.Total {
+				t.Errorf("the select offers %d namespaces, want all %d",
+					len(view.Names), all.Total)
+			}
+		})
+	}
+}
+
+// Choosing a namespace must not silently drop the posture already chosen.
+func TestNamespaceFilter_LinksKeepTheOtherClauses(t *testing.T) {
+	active := NamespaceFilter{Name: "payments", Posture: PostureLive, Show: ShowUnheard}
+
+	path := active.Path()
+	for _, want := range []string{"ns=payments", "posture=live", "show=unheard"} {
+		if !strings.Contains(path, want) {
+			t.Errorf("Path() = %q, want it to carry %q", path, want)
+		}
+	}
+
+	groups := namespaceGroups(active, namespaceCounts{attention: 2, unheard: 1, live: 3, reporting: 4})
+	for _, group := range groups {
+		for _, option := range group.Options {
+			if !strings.Contains(option.URL, "ns=payments") {
+				t.Errorf("%s option %q links to %q, which dropped the namespace",
+					group.Label, option.Label, option.URL)
+			}
+		}
 	}
 }

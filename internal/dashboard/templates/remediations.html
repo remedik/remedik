@@ -21,6 +21,29 @@
 <section class="filters" aria-labelledby="filters-heading">
   <h2 id="filters-heading" class="visually-hidden">Filters</h2>
 
+  {{if .Clauses}}
+  {{/*
+    A target or an alert somebody clicked in the table. These have no control
+    of their own — there are as many targets as there are workloads — so they
+    appear here, named and removable, rather than narrowing the page by
+    something it never shows.
+  */}}
+  <div class="filter-row">
+    <span class="filter-label" id="filter-applied">Showing only</span>
+    <ul class="filter-values" aria-labelledby="filter-applied">
+      {{range .Clauses}}
+      <li>
+        <a class="pill-link is-on" href="{{.RemoveURL}}" aria-current="true"
+           title="Click to stop filtering by this {{.Label}}">
+          <span class="pill-count">{{.Label}}</span>
+          {{if .Mono}}<code>{{.Value}}</code>{{else}}{{.Value}}{{end}}
+        </a>
+      </li>
+      {{end}}
+    </ul>
+  </div>
+  {{end}}
+
   {{range .Groups}}
   <div class="filter-row">
     <span class="filter-label" id="filter-{{.Param}}">{{.Label}}</span>
@@ -112,27 +135,44 @@
 
   <div class="table-scroll">
     <table class="table table-hover">
-      <caption class="visually-hidden">Executions, newest first</caption>
+      <caption class="visually-hidden">Executions, {{.Ordering}}</caption>
+      {{/*
+        A header means "sort by this" to anybody who has ever used a table, so
+        each one is the link that does it. Links rather than a control with
+        state, because these headers sit inside the region the ten-second
+        refresh replaces — anything holding its own state here would lose it
+        mid-use. aria-sort is what a screen reader announces the order from.
+      */}}
       <thead>
         <tr>
-          <th scope="col">Remediation</th>
-          <th scope="col">Strategy</th>
-          <th scope="col">Target</th>
-          <th scope="col">Alert</th>
-          <th scope="col">State</th>
-          <th scope="col" class="num">Took</th>
-          <th scope="col" class="num">Age</th>
+          {{range .Columns}}
+          <th scope="col"{{if .Numeric}} class="num"{{end}}{{if .Sorted}} aria-sort="{{.Sorted}}"{{end}}>
+            <a class="sort" href="{{.URL}}">{{.Label}}<span class="sort-mark" aria-hidden="true"></span></a>
+          </th>
+          {{end}}
         </tr>
       </thead>
       <tbody>
         {{range .Rows}}
         <tr>
           <th scope="row"><a class="row-link" href="{{.URL}}"><code>{{.Name}}</code></a></th>
-          <td><code class="dim">{{.Strategy}}</code></td>
-          <td>{{if .Target}}<code class="dim">{{.Target}}</code>{{else}}<span class="dim">&mdash;</span>{{end}}</td>
-          <td>{{if .Alert}}{{.Alert}}{{else}}<span class="dim">&mdash;</span>{{end}}</td>
           <td>
-            <span class="pill pill-{{.Tone}}">{{.State}}</span>
+            {{if .StrategyURL}}<a class="pivot" href="{{.StrategyURL}}" title="Every execution of this strategy"><code>{{.Strategy}}</code></a>
+            {{else}}<code class="dim">{{.Strategy}}</code>{{end}}
+          </td>
+          <td>
+            {{if .TargetURL}}<a class="pivot" href="{{.TargetURL}}" title="Everything remedik has done to this object"><code>{{.Target}}</code></a>
+            {{else if .Target}}<code class="dim">{{.Target}}</code>
+            {{else}}<span class="dim">&mdash;</span>{{end}}
+          </td>
+          <td>
+            {{if .AlertURL}}<a class="pivot" href="{{.AlertURL}}" title="Everything this alert has caused">{{.Alert}}</a>
+            {{else if .Alert}}{{.Alert}}
+            {{else}}<span class="dim">&mdash;</span>{{end}}
+          </td>
+          <td>
+            {{if .StateURL}}<a class="pivot" href="{{.StateURL}}" title="Every execution that ended this way"><span class="pill pill-{{.Tone}}">{{.State}}</span></a>
+            {{else}}<span class="pill pill-{{.Tone}}">{{.State}}</span>{{end}}
             {{if eq .Escalated "sent"}}
             <span class="tag tag-quiet" title="This failure was escalated, and the escalation went out.">paged</span>
             {{else if eq .Escalated "failed"}}
@@ -140,7 +180,17 @@
             {{end}}
           </td>
           <td class="num dim">{{if .Duration}}{{.Duration}}{{else}}&mdash;{{end}}</td>
-          <td class="num dim"><time title="{{.AgeExact}}">{{.Age}}</time></td>
+          {{/*
+            Both, because they answer different questions. The age is what
+            you scan — "this one is twenty minutes old" — and the timestamp
+            is what you paste into Grafana or grep the logs for. It used to
+            be a tooltip, which is invisible exactly when somebody is
+            correlating this list with another system.
+          */}}
+          <td class="num dim">
+            <time datetime="{{.AgeExact}}">{{.Age}}</time>
+            <span class="stamp">{{.AgeExact}}</span>
+          </td>
         </tr>
         {{end}}
       </tbody>

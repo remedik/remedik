@@ -60,6 +60,11 @@ type PosturePanel struct {
 	Tone string
 	// Mixed reports whether the default describes the whole cluster.
 	Mixed bool
+	// ShowNames asks the page to list the namespaces as chips. It is false
+	// when the sentence already named them: saying the same list twice, once
+	// as prose and once as chips, is how the panel got twice as tall as the
+	// fact it carries.
+	ShowNames bool
 	// Live and Reporting are the namespaces that differ from the default.
 	Live      []string
 	Reporting []string
@@ -115,17 +120,37 @@ type ActivityBar struct {
 // the cluster, which this page's own CSP forbids.
 type ActivityPanel struct {
 	Bars []ActivityBar
-	// Busiest is the count the tallest bar represents, so the axis can be
-	// labelled with a real number.
+	// Busiest is the count the tallest bar represents, which the caption
+	// reports as the peak.
 	Busiest int
+	// Scale is what the top of the chart is worth. It is the busiest hour,
+	// or the floor when that is small — and it is what the axis must be
+	// labelled with. Labelling the axis with Busiest instead said the top
+	// of the chart was 1 while a bar of 1 drew a quarter of the height.
+	Scale int
 	// Total is every execution in the window.
 	Total int
+	// Failed is how many of them failed. The tiles above this panel count
+	// every record the cluster still holds, which is a different question
+	// from "how is it going right now" — and the one the page's own heading
+	// asks.
+	Failed int
 	// Window describes the span in words.
 	Window string
 }
 
 // Any reports whether anything happened in the window.
 func (p ActivityPanel) Any() bool { return p.Total > 0 }
+
+// FailureRate is the share of the window that failed, as a percentage. An
+// empty window has no rate rather than a rate of zero, which would read as
+// "nothing is failing" when the truth is "nothing has run".
+func (p ActivityPanel) FailureRate() int {
+	if p.Total == 0 {
+		return 0
+	}
+	return p.Failed * 100 / p.Total
+}
 
 // Breakdown is one row of "where is this happening": a name, its counts, and
 // the filtered list that shows them.
@@ -136,7 +161,10 @@ type Breakdown struct {
 	Simulated int
 	// Share is this row's percentage of the largest row, for the inline bar.
 	Share int
-	URL   string
+	// FailedShare is how much of this row's own bar failed, drawn as the
+	// tail of it.
+	FailedShare int
+	URL         string
 }
 
 func buildOverview(
@@ -185,7 +213,7 @@ func buildOverview(
 		{
 			Label:  "Failed",
 			Value:  fmt.Sprint(counts.failed),
-			Detail: failedDetail(counts.failed),
+			Detail: failedDetail(counts.succeeded, counts.failed),
 			Tone:   toneFailed,
 			URL:    Filter{State: string(v1alpha1.RemediationStateFailed)}.Path(),
 		},
@@ -210,7 +238,7 @@ func buildOverview(
 		if i == recentLimit {
 			break
 		}
-		view.Recent = append(view.Recent, buildRow(rem, now))
+		view.Recent = append(view.Recent, buildRow(rem, now, Filter{}, Sort{}))
 	}
 
 	if report := buildDryRunReport(ordered, posture.DryRun, now); report != nil {
@@ -299,13 +327,15 @@ func buildPosturePanel(posture Posture) PosturePanel {
 	case panel.Mixed && posture.DryRun:
 		panel.Headline = "Mixed"
 		panel.Detail = fmt.Sprintf(
-			"Reporting only, except in %s, where remedik acts.", joinNames(posture.Live))
+			"Reporting only, except in %s, where remedik acts.", nameOrCount(posture.Live))
+		panel.ShowNames = len(posture.Live) > postureNameLimit
 		panel.Tone = toneRunning
 	case panel.Mixed:
 		panel.Headline = "Mixed"
 		panel.Detail = fmt.Sprintf(
 			"Acting on matching alerts, except in %s, where remedik only reports.",
-			joinNames(posture.DryRunOnly))
+			nameOrCount(posture.DryRunOnly))
+		panel.ShowNames = len(posture.DryRunOnly) > postureNameLimit
 		panel.Tone = toneRunning
 	case posture.DryRun:
 		panel.Headline = "Dry-run"
@@ -344,7 +374,13 @@ func buildAttention(remediations []*v1alpha1.Remediation) AttentionPanel {
 	}
 
 	var panel AttentionPanel
-	failedURL := Filter{State: string(v1alpha1.RemediationStateFailed)}.Path()
+	failedState := string(v1alpha1.RemediationStateFailed)
+	failedURL := Filter{State: failedState}.Path()
+	// Each card links to the set it counted, not to every failure. They both
+	// pointed at state=Failed, so "64 escalations failed" opened a list of
+	// two hundred and twelve — a number the page offered and could not show.
+	unheardURL := Filter{State: failedState, Escalation: EscalationFailed}.Path()
+	untoldURL := Filter{State: failedState, Escalation: EscalationNone}.Path()
 
 	// First, ahead of anything that already happened: these are the only
 	// entries where somebody doing something changes the outcome. Everything
@@ -372,7 +408,7 @@ func buildAttention(remediations []*v1alpha1.Remediation) AttentionPanel {
 			Detail: "A remediation failed and the attempt to report it failed too. " +
 				"Assume nobody was told.",
 			Tone: toneFailed,
-			URL:  failedURL,
+			URL:  unheardURL,
 		})
 	}
 	if untold > 0 {
@@ -382,7 +418,7 @@ func buildAttention(remediations []*v1alpha1.Remediation) AttentionPanel {
 			Detail: "Their strategies declare no onFailure.steps, so no alert went " +
 				"anywhere. Not a fault — but worth knowing before concluding it is quiet.",
 			Tone: toneWaiting,
-			URL:  failedURL,
+			URL:  untoldURL,
 		})
 	}
 	if interrupted > 0 {
@@ -456,15 +492,28 @@ func buildActivity(remediations []*v1alpha1.Remediation, now time.Time) Activity
 		}
 		bar.Total++
 		panel.Total++
+		if rem.Status.State == v1alpha1.RemediationStateFailed {
+			panel.Failed++
+		}
 		if bar.Total > panel.Busiest {
 			panel.Busiest = bar.Total
 		}
 	}
 
+	// Heights are relative to the busiest hour, but not when the busiest hour
+	// is tiny. A cluster with one execution an hour rendered twenty-four
+	// full-height bars — a wall that reads as a crisis and is a quiet night.
+	// Scaling against a floor keeps a quiet day looking quiet; the caption
+	// still says what the peak actually was.
+	panel.Scale = panel.Busiest
+	if panel.Scale < activityScaleFloor {
+		panel.Scale = activityScaleFloor
+	}
+
 	for i := range panel.Bars {
 		bar := &panel.Bars[i]
-		if panel.Busiest > 0 {
-			bar.Percent = bar.Total * 100 / panel.Busiest
+		if panel.Scale > 0 {
+			bar.Percent = bar.Total * 100 / panel.Scale
 		}
 		if bar.Total > 0 {
 			bar.SucceededPct = bar.Succeeded * 100 / bar.Total
@@ -476,6 +525,13 @@ func buildActivity(remediations []*v1alpha1.Remediation, now time.Time) Activity
 	}
 	return panel
 }
+
+// activityScaleFloor is the smallest peak the chart will scale against.
+//
+// Four, because a day whose busiest hour saw one remediation should look like
+// a quarter of a bar rather than a full one. Above it the scale is the real
+// peak and nothing is compressed.
+const activityScaleFloor = 4
 
 // breakdownLimit is how many rows "where is this happening" shows. Beyond
 // that the panel stops being a summary; the list is one click away.
@@ -534,12 +590,36 @@ func buildBreakdown(
 		largest := out[0].Total
 		for i := range out {
 			out[i].Share = out[i].Total * 100 / largest
+			// The share of this row's own bar that failed. Rows near the top
+			// are all within a few percent of each other, so a bar encoding
+			// volume alone drew five identical tracks; the tail is the part
+			// that differs, and it is the part worth seeing first.
+			if out[i].Total > 0 {
+				out[i].FailedShare = out[i].Failed * 100 / out[i].Total
+			}
 		}
 	}
 	if len(out) > breakdownLimit {
 		out = out[:breakdownLimit]
 	}
 	return out
+}
+
+// postureNameLimit is how many namespaces the sentence will name before it
+// counts them instead.
+//
+// Three, because "except in staging, canary and dev" reads as a sentence and
+// "except in a, b, c, d, e, f, g and h" is a list wearing a sentence's
+// clothes. Past the limit the sentence says how many and the chips below say
+// which — each doing the job it is good at, and neither repeating the other.
+const postureNameLimit = 3
+
+// nameOrCount names a few namespaces, or counts many of them.
+func nameOrCount(names []string) string {
+	if len(names) > postureNameLimit {
+		return fmt.Sprintf("%d namespaces", len(names))
+	}
+	return joinNames(names)
 }
 
 func joinNames(names []string) string {

@@ -84,11 +84,21 @@ func FormatDuration(d time.Duration) string {
 // FormatSpan renders the duration between two optional timestamps. An
 // execution still running has no end, and gets no span rather than a
 // misleading one.
+//
+// A span of zero gets none either. Timestamps here have second granularity,
+// so a step that failed before it did anything starts and ends at the same
+// instant — and "0ms" reads as a measurement of something that never ran.
+// The pages already render a missing duration as an em dash, which is the
+// honest answer.
 func FormatSpan(from, to *metav1.Time) string {
 	if from == nil || to == nil || from.IsZero() || to.IsZero() {
 		return ""
 	}
-	return FormatDuration(to.Sub(from.Time))
+	span := to.Sub(from.Time)
+	if span <= 0 {
+		return ""
+	}
+	return FormatDuration(span)
 }
 
 // FormatPeriod renders a length of time in words, for the sentence that
