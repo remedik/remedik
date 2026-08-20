@@ -465,20 +465,10 @@ Ordered by how often it is asked for, not by how interesting it is.
   `Interrupted` and left for a person, because silently repeating an action is
   the worse outcome.
 
-## Supporting this project
-
-remedik is Apache-2.0 and stays that way: nothing is held back for a paid
-tier, there is no telemetry, and no feature is behind a licence key.
-
-If it saves your team a 03:00 page, [what sponsorship pays
-for](docs/funding.md) is written down — cluster time for the end-to-end
-suite, coverage across Kubernetes versions, and an external security review
-of the code that holds write access to your cluster.
-
-If money is not the right thing, telling us it runs in production is worth
-more than most pull requests: it is what makes the next person's security
-review shorter.
-
 ## License
 
-[Apache-2.0](LICENSE)
+[Apache-2.0](LICENSE), and it stays that way: nothing is held back for a paid
+tier, there is no telemetry, and no feature is behind a licence key.
+
+If it runs in production somewhere, saying so is worth more than most pull
+requests — it is what makes the next person's security review shorter.

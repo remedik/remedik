@@ -142,6 +142,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   cannot exist where it would not work: clipboard access needs a secure
   context, and a button that silently does nothing is worse than none.
 
+### Removed
+
+- **Everything about being paid.** `docs/funding.md`, the "Supporting this
+  project" section and the (entirely commented-out) `.github/FUNDING.yml` are
+  gone. There is no way to take the money that works for the person behind
+  this yet, and a project asking to be trusted with cluster write access
+  should not carry an ask it cannot honour.
+
+  The two things worth keeping from that section were never about money and
+  now sit with the licence: Apache-2.0 with nothing held back for a paid tier,
+  no telemetry and no licence key — and that saying it runs in production is
+  worth more than most pull requests, because it is what makes the next
+  person's security review shorter.
+
 ### Fixed
 
 - **A chart value could put an extra flag on the operator's command line.**
