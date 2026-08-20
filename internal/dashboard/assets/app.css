@@ -3005,7 +3005,111 @@ th[aria-sort] .sort {
    Narrow screens
    -------------------------------------------------------------------------- */
 
+/* A table opts into becoming cards with .table-cards. Not every table wants
+   it: the activity panel's four short columns read fine at any width, and
+   twenty-four cards of them would be worse than the table. */
 @media (width <= 720px) {
+  .table-cards,
+  .table-cards tbody,
+  .table-cards tr,
+  .table-cards td,
+  .table-cards th {
+    display: block;
+    width: auto;
+  }
+
+  /* The header row stays, as a row of sort links. Hiding it would take
+     ordering away on the device most likely to be reading this at 03:00 --
+     which is the opposite of the point. */
+  .table-cards thead tr {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 6px;
+    padding: 8px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+  }
+
+  .table-cards thead th {
+    padding: 3px 6px;
+    border: 0;
+    white-space: nowrap;
+  }
+
+  .table-cards tbody tr {
+    margin-top: 10px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+  }
+
+  .table-cards tbody th[scope="row"] {
+    padding: 0 0 8px;
+    border: 0;
+  }
+
+  .table-cards tbody td {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 14px;
+    padding: 4px 0;
+    border: 0;
+    text-align: right;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  /* The column name, from the cell's own label. One set of markup, one media
+     query, and no template rendered twice for two widths. */
+  .table-cards tbody td::before {
+    content: attr(data-label);
+    flex: none;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-3);
+    text-align: left;
+  }
+
+  /* A cell with nothing in it is noise on a card, where it is not holding a
+     column open for the rows above and below it. */
+  .table-cards tbody td:empty {
+    display: none;
+  }
+
+  .table-scroll,
+  .ns-table-scroll {
+    overflow-x: visible;
+    border: 0;
+    background: none;
+  }
+
+  /* Group headings inside the namespaces table span no columns any more. */
+  .table-cards .ns-group th {
+    padding: 14px 2px 2px;
+    background: none;
+    border: 0;
+  }
+
+  /* The palette is a keyboard interaction, and this width mostly has no
+     keyboard. The keys still work for anything that does. */
+  .palette-hint {
+    display: none;
+  }
+
+  /* The posture is the first question somebody woken up asks, so it keeps a
+     line of its own rather than being squeezed beside the navigation. */
+  .topbar-meta {
+    flex-wrap: wrap;
+  }
+
+  .mode {
+    max-width: 100%;
+  }
+
   .wrap,
   .topbar-inner {
     padding-inline: 16px;

@@ -152,7 +152,7 @@
   {{end}}
 
   <div class="table-scroll">
-    <table class="table table-hover">
+    <table class="table table-hover table-cards">
       <caption class="visually-hidden">Executions, {{.Ordering}}</caption>
       {{/*
         A header means "sort by this" to anybody who has ever used a table, so
@@ -182,21 +182,21 @@
             </a>
             {{end}}
           </th>
-          <td>
+          <td data-label="Strategy">
             {{if .StrategyURL}}<a class="pivot" href="{{.StrategyURL}}" title="Every execution of this strategy"><code>{{.Strategy}}</code></a>
             {{else}}<code class="dim">{{.Strategy}}</code>{{end}}
           </td>
-          <td>
+          <td data-label="Target">
             {{if .TargetURL}}<a class="pivot" href="{{.TargetURL}}" title="Everything remedik has done to this object"><code>{{.Target}}</code></a>
             {{else if .Target}}<code class="dim">{{.Target}}</code>
             {{else}}<span class="dim">&mdash;</span>{{end}}
           </td>
-          <td>
+          <td data-label="Alert">
             {{if .AlertURL}}<a class="pivot" href="{{.AlertURL}}" title="Everything this alert has caused">{{.Alert}}</a>
             {{else if .Alert}}{{.Alert}}
             {{else}}<span class="dim">&mdash;</span>{{end}}
           </td>
-          <td>
+          <td data-label="State">
             {{if .StateURL}}<a class="pivot" href="{{.StateURL}}" title="Every execution that ended this way"><span class="pill pill-{{.Tone}}">{{.State}}</span></a>
             {{else}}<span class="pill pill-{{.Tone}}">{{.State}}</span>{{end}}
             {{if eq .Escalated "sent"}}
@@ -205,7 +205,7 @@
             <span class="tag tag-loud" title="This failure was escalated and the escalation itself failed. Assume nobody was told.">page failed</span>
             {{end}}
           </td>
-          <td class="num dim">{{if .Duration}}{{.Duration}}{{else}}&mdash;{{end}}</td>
+          <td class="num dim" data-label="Took">{{if .Duration}}{{.Duration}}{{else}}&mdash;{{end}}</td>
           {{/*
             Both, because they answer different questions. The age is what
             you scan — "this one is twenty minutes old" — and the timestamp
@@ -213,7 +213,7 @@
             be a tooltip, which is invisible exactly when somebody is
             correlating this list with another system.
           */}}
-          <td class="num dim">
+          <td class="num dim" data-label="Age">
             {{if .Repeats}}
             {{/* The run's own bounds, which is what a line standing for many
                  is actually about: twelve in six hours and twelve in six

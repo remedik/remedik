@@ -88,7 +88,7 @@
 <p class="dim hint ns-hint">{{.Summary}}</p>
 
 <div class="ns-table-scroll">
-  <table class="ns-table">
+  <table class="ns-table table-cards">
     <caption>{{.Summary}}</caption>
     <thead>
       <tr>
@@ -165,19 +165,19 @@
      times over and the chrome outweighed the content. */}}
 {{define "ns-row"}}
 <tr class="ns-tr ns-tr-{{.Tone}}">
-  <td class="ns-col-name">
+  <td class="ns-col-name" data-label="Namespace">
     <a class="mono ns-name" href="{{.URL}}">{{.Name}}</a>
   </td>
-  <td>
+  <td data-label="Posture">
     <span class="pill pill-sm pill-{{.PostureTone}}" title="{{.PostureDetail}}">{{.Posture}}</span>
     {{if .PostureNote}}<span class="ns-sub" title="These executions did not run under the posture configured now">{{.PostureNote}}</span>{{end}}
   </td>
-  <td class="ns-num">{{.Total}}</td>
-  <td class="ns-num">{{if .Succeeded}}<span class="ns-num-ok">{{.Succeeded}}</span>{{else}}<span class="ns-zero">0</span>{{end}}</td>
-  <td class="ns-num">{{if .Failed}}<span class="ns-num-bad">{{.Failed}}</span>{{else}}<span class="ns-zero">0</span>{{end}}</td>
-  <td class="ns-num">{{if .Unheard}}<span class="ns-num-bad">{{.Unheard}}</span>{{else}}<span class="ns-zero">0</span>{{end}}</td>
-  <td class="ns-num">{{if .Simulated}}{{.Simulated}}{{else}}<span class="ns-zero">0</span>{{end}}</td>
-  <td class="ns-col-rate">
+  <td class="ns-num" data-label="Runs">{{.Total}}</td>
+  <td class="ns-num" data-label="OK">{{if .Succeeded}}<span class="ns-num-ok">{{.Succeeded}}</span>{{else}}<span class="ns-zero">0</span>{{end}}</td>
+  <td class="ns-num" data-label="Failed">{{if .Failed}}<span class="ns-num-bad">{{.Failed}}</span>{{else}}<span class="ns-zero">0</span>{{end}}</td>
+  <td class="ns-num" data-label="Unheard">{{if .Unheard}}<span class="ns-num-bad">{{.Unheard}}</span>{{else}}<span class="ns-zero">0</span>{{end}}</td>
+  <td class="ns-num" data-label="Simulated">{{if .Simulated}}{{.Simulated}}{{else}}<span class="ns-zero">0</span>{{end}}</td>
+  <td class="ns-col-rate" data-label="Success rate">
     {{if ge .RatePct 0}}
     <span class="ns-bar" role="img" aria-label="{{.Rate}}">
       <span class="ns-bar-fill {{pct .RatePct}}"></span>
@@ -187,6 +187,6 @@
     <span class="dim ns-rate-none">nothing ran</span>
     {{end}}
   </td>
-  <td class="dim ns-col-last">{{if .Last}}{{.Last}}{{else}}&mdash;{{end}}</td>
+  <td class="dim ns-col-last" data-label="Last">{{if .Last}}{{.Last}}{{else}}&mdash;{{end}}</td>
 </tr>
 {{end}}
