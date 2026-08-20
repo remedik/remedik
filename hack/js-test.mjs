@@ -68,6 +68,23 @@ function makeElement(tag, attrs = {}) {
       node.parentNode = el;
       return node;
     },
+    removeChild(child) {
+      const at = el.children.indexOf(child);
+      if (at >= 0) el.children.splice(at, 1);
+      child.parentNode = null;
+      return child;
+    },
+    // The palette focuses its input; the stub records that it was asked to.
+    focused: 0,
+    focus() {
+      el.focused++;
+    },
+    value: attrs.value ?? "",
+    // Every text node under this element, for asserting what a rendered list
+    // says without reaching into its shape.
+    text() {
+      return [el.textContent, ...el.children.map((c) => c.text())].join(" ").trim();
+    },
     addEventListener(type, fn) {
       (el.listeners[type] ??= []).push(fn);
     },
@@ -91,9 +108,18 @@ function makeElement(tag, attrs = {}) {
 }
 
 function makeDocument(forms, copyable = []) {
+  const body = makeElement("body");
+  const listeners = {};
   return {
+    body,
+    listeners,
+    activeElement: null,
     createElement(tag) {
       return makeElement(tag);
+    },
+    // The palette listens on the document, and a test needs to press keys.
+    press(event) {
+      for (const fn of listeners.keydown ?? []) fn({ preventDefault() {}, ...event });
     },
     querySelector(sel) {
       if (sel === 'meta[name="remedik-asset"]') return { content: "abc123" };
@@ -109,13 +135,15 @@ function makeDocument(forms, copyable = []) {
       // which is what we want — this is a test of the filter block.
       return null;
     },
-    addEventListener() {},
+    addEventListener(type, fn) {
+      (listeners[type] ??= []).push(fn);
+    },
     hidden: false,
   };
 }
 
 // A clock we control, so the debounce is testable without waiting.
-function makeWindow() {
+function makeWindow(entries) {
   let seq = 0;
   const timers = new Map();
   return {
@@ -137,9 +165,18 @@ function makeWindow() {
       timers.clear();
       for (const t of due) t.fn();
     },
-    location: { href: "http://localhost/remediations", reload() {} },
+    location: {
+      href: "http://localhost/remediations",
+      went: [],
+      reload() {},
+      assign(url) {
+        this.went.push(url);
+      },
+    },
     localStorage: { getItem: () => null, setItem: () => {} },
-    fetch: () => Promise.reject(new Error("not used")),
+    fetch: entries
+      ? () => Promise.resolve({ ok: true, json: () => Promise.resolve({ entries }) })
+      : () => Promise.reject(new Error("not used")),
     clearInterval() {},
     setInterval: () => 0,
   };
@@ -151,7 +188,7 @@ function run(options = {}) {
   const form = makeElement("form", { class: "filter-select", method: "get", action: "/remediations" });
   form.children.push(select, button);
 
-  const win = makeWindow();
+  const win = makeWindow(options.entries);
   const doc = makeDocument([form], options.copyable ?? []);
 
   // app.js refers to `window`, `document` and `navigator`. Giving them as
@@ -163,7 +200,26 @@ function run(options = {}) {
     options.navigator ?? {},
   );
 
-  return { form, select, win };
+  return { form, select, win, doc };
+}
+
+// The palette, once it is open: the overlay, its input, and the labels it is
+// currently showing.
+function palette(doc) {
+  const overlay = doc.body.children.find((c) => c.className === "palette");
+  if (!overlay) return null;
+  const box = overlay.children[0];
+  const input = box.children.find((c) => c.tagName === "INPUT");
+  const list = box.children.find((c) => c.tagName === "UL");
+  return {
+    overlay,
+    input,
+    list,
+    labels: () =>
+      list.children.map(
+        (item) => (item.children.find((c) => c.className === "palette-label") ?? item).textContent,
+      ),
+  };
 }
 
 // A command block as the templates mark it: a <pre data-copy> holding the
@@ -297,6 +353,99 @@ console.log("==> app.js: copying a command");
 
   check(page.children[0] === block,
     "with no clipboard available nothing is wrapped and no button is built");
+}
+
+
+// --------------------------------------------------------------------------
+// The palette and the keys
+//
+// None of this exists in any page's markup: the overlay is built when somebody
+// presses a key, which is why it is invisible to every test that reads HTML.
+// --------------------------------------------------------------------------
+
+console.log("==> app.js: the palette");
+
+{
+  const { doc, win } = run();
+
+  doc.press({ key: "k", ctrlKey: true });
+  const open = palette(doc);
+  check(open !== null, "Ctrl+K opens it");
+  check(open.input.focused === 1, "and puts the cursor in the input");
+
+  // Without the fetch, the pages are still there: they are also the shortcuts,
+  // and those are known to the script.
+  check(open.labels().includes("Namespaces"), "with the pages offered even when the fetch fails");
+
+  doc.press({ key: "Escape" });
+  check(palette(doc) === null, "Escape closes it");
+  check(win.location.went.length === 0, "and navigates nowhere");
+}
+
+{
+  const entries = [
+    { kind: "page", label: "Overview", url: "/" },
+    { kind: "namespace", label: "payments", detail: "57 records", url: "/remediations?namespace=payments" },
+    { kind: "namespace", label: "checkout", detail: "12 records", url: "/remediations?namespace=checkout" },
+    { kind: "strategy", label: "pod-crashloop", detail: "200 records", url: "/remediations?strategy=pod-crashloop" },
+  ];
+  const { doc, win } = run({ entries });
+
+  doc.press({ key: "k", metaKey: true });
+  // The fetch resolves over a handful of microtasks -- the response, its body,
+  // and the handlers between them -- so drain the queue rather than counting.
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+
+  const open = palette(doc);
+  check(open.labels().includes("payments"), "the fetched list is offered");
+
+  open.input.value = "pay";
+  open.input.dispatch("input");
+  check(
+    open.labels().join(",") === "payments",
+    `typing narrows to what matches (got ${open.labels().join(",")})`,
+  );
+
+  open.input.dispatch("keydown", { key: "Enter", preventDefault() {} });
+  check(
+    win.location.went[0] === "/remediations?namespace=payments",
+    "Enter goes to the chosen one",
+  );
+  check(palette(doc) === null, "and closes on the way");
+}
+
+{
+  const { doc, win } = run();
+
+  doc.press({ key: "g" });
+  doc.press({ key: "n" });
+  check(win.location.went[0] === "/namespaces", "g then n goes to the namespaces page");
+
+  // A letter with nothing before it is just a letter.
+  doc.press({ key: "s" });
+  check(win.location.went.length === 1, "a bare letter navigates nowhere");
+}
+
+{
+  // A key pressed into a control belongs to that control. The filter's select
+  // is on the page this is most used on.
+  const { doc, win } = run();
+
+  doc.press({ key: "g", target: { tagName: "SELECT" } });
+  doc.press({ key: "n", target: { tagName: "SELECT" } });
+  check(win.location.went.length === 0, "typing into a select does not trigger a shortcut");
+}
+
+{
+  const { doc } = run();
+
+  doc.press({ key: "?" });
+  const open = palette(doc);
+  check(open !== null, "? opens the list of keys");
+  check(
+    open.list.children.some((item) => item.className === "palette-help"),
+    "and it is the keys rather than results",
+  );
 }
 
 console.log(failures === 0

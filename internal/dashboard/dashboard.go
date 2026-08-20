@@ -195,6 +195,7 @@ func New(cfg Config) (*Handler, error) {
 	h.mux.HandleFunc(approvalsPath, h.approvals)
 	h.mux.HandleFunc(approvalsPath+"/{$}", h.approvals)
 	h.mux.HandleFunc("/strategies", h.strategies)
+	h.mux.HandleFunc(palettePath, h.palette)
 	h.mux.Handle("/static/", http.StripPrefix("/static/", staticHandler()))
 	h.mux.HandleFunc("/", h.notFound)
 
