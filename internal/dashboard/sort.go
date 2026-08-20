@@ -108,6 +108,15 @@ func (s Sort) Query() url.Values {
 // Active reports whether this is anything other than the default order.
 func (s Sort) Active() bool { return s.Key != "" }
 
+// GroupsAdjacent reports whether neighbouring rows being identical means
+// anything in this order.
+//
+// In time order it does: a strategy firing every hour against the same target
+// produces a run, and the run is one fact. Ordered by duration or by name,
+// "adjacent" is an accident of the comparison, and a group formed from it
+// would present an arbitrary subset of the page as a run.
+func (s Sort) GroupsAdjacent() bool { return s.Key == "" || s.Key == SortAge }
+
 // Apply orders the records in place.
 //
 // Every comparison falls back to the creation time and then the name, so the
@@ -233,20 +242,10 @@ func Columns(filter Filter, current Sort) []Column {
 	return columns
 }
 
-// sortedPath is the list page carrying both a filter and an order.
-func sortedPath(filter Filter, order Sort) string {
-	values := url.Values{}
-	for key, value := range filter.Values() {
-		values[key] = value
-	}
-	for key, value := range order.Query() {
-		values[key] = value
-	}
-	if len(values) == 0 {
-		return remediationsPath
-	}
-	return remediationsPath + "?" + values.Encode()
-}
+// sortedPath is the list page carrying a filter and an order, at the first
+// page — which is where changing either of them belongs: page seven of one
+// filter is not page seven of another.
+func sortedPath(filter Filter, order Sort) string { return listPath(filter, order, 1) }
 
 // Describe is the order in words, for the table's caption — which is what a
 // screen reader announces before the rows, and the one place the order is

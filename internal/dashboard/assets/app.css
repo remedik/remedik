@@ -2287,6 +2287,56 @@ th[aria-sort] .sort {
 }
 
 /* --------------------------------------------------------------------------
+   Collapsed repeats
+
+   A run of records saying the same thing is one line with a count on it. The
+   count is a link, because the records behind it are a filtered list -- the
+   page already knows how to show exactly those, and an expander holding its
+   own open state would sit inside the region the ten-second refresh replaces.
+   -------------------------------------------------------------------------- */
+
+.list-note {
+  margin: 10px 2px 0;
+  font-size: 0.78rem;
+  color: var(--text-3);
+  max-width: 82ch;
+}
+
+.repeat,
+.repeat-sample {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+  color: var(--text-2);
+  background: var(--surface-2);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.repeat-sample {
+  margin-left: 0;
+}
+
+.repeat:hover,
+.repeat:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+/* The marker is on the left edge rather than the count alone, so a page of
+   fifty rows shows at a glance which of them are runs. */
+.table tbody tr.is-group th[scope="row"] {
+  box-shadow: inset 3px 0 0 var(--border-strong);
+}
+
+/* --------------------------------------------------------------------------
    Narrow screens
    -------------------------------------------------------------------------- */
 

@@ -186,9 +186,15 @@ func TestPagingHandlesAnEmptyResult(t *testing.T) {
 func TestPagingAtTheBoundaries(t *testing.T) {
 	records := bigCluster(1, 1, pageSize*2)
 
+	// Records, not lines: this cluster is one strategy against one target, so
+	// the whole page collapses into very few lines. Shown is what the paging
+	// arithmetic is about, and what the figures above the table count.
 	last := buildRemediations(records, Filter{}, Sort{}, 2, testNow())
-	if len(last.Rows) != pageSize {
-		t.Errorf("the last page has %d rows, want a full page", len(last.Rows))
+	if last.Shown != pageSize {
+		t.Errorf("the last page covers %d records, want a full page", last.Shown)
+	}
+	if len(last.Rows) > last.Shown {
+		t.Errorf("%d lines for %d records", len(last.Rows), last.Shown)
 	}
 	if last.Paging.NextURL != "" {
 		t.Errorf("the last page offers a next page: %q", last.Paging.NextURL)

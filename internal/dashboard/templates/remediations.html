@@ -133,6 +133,24 @@
     </ul>
   </div>
 
+  {{/*
+    Said out loud, because a line standing for twelve records is a different
+    object from a line standing for one, and the counts above this table go on
+    counting records either way.
+  */}}
+  {{if .Collapsed}}
+  <p class="list-note">
+    {{len .Rows}} lines for {{.Shown}} records on this page &mdash; runs of the same
+    strategy, target, alert and outcome are collapsed. Follow a
+    <span class="repeat-sample">&times;n</span> to see the records behind one.
+  </p>
+  {{else if not .Grouped}}
+  <p class="list-note">
+    Every record has its own line: repeats are only collapsed in time order,
+    where two neighbours being identical means something.
+  </p>
+  {{end}}
+
   <div class="table-scroll">
     <table class="table table-hover">
       <caption class="visually-hidden">Executions, {{.Ordering}}</caption>
@@ -154,8 +172,16 @@
       </thead>
       <tbody>
         {{range .Rows}}
-        <tr>
-          <th scope="row"><a class="row-link" href="{{.URL}}"><code>{{.Name}}</code></a></th>
+        <tr{{if .Repeats}} class="is-group"{{end}}>
+          <th scope="row">
+            <a class="row-link" href="{{.URL}}"><code>{{.Name}}</code></a>
+            {{if .Repeats}}
+            <a class="repeat" href="{{.GroupURL}}"
+               title="{{.Count}} records say exactly this &mdash; same strategy, target, alert and outcome. Follow to see them.">
+              &times;{{.Count}}
+            </a>
+            {{end}}
+          </th>
           <td>
             {{if .StrategyURL}}<a class="pivot" href="{{.StrategyURL}}" title="Every execution of this strategy"><code>{{.Strategy}}</code></a>
             {{else}}<code class="dim">{{.Strategy}}</code>{{end}}
@@ -188,8 +214,16 @@
             correlating this list with another system.
           */}}
           <td class="num dim">
+            {{if .Repeats}}
+            {{/* The run's own bounds, which is what a line standing for many
+                 is actually about: twelve in six hours and twelve in six
+                 minutes are different incidents. */}}
+            <time datetime="{{.AgeExact}}">{{.NewestAge}}</time>
+            <span class="stamp">oldest {{.OldestAge}}</span>
+            {{else}}
             <time datetime="{{.AgeExact}}">{{.Age}}</time>
             <span class="stamp">{{.AgeExact}}</span>
+            {{end}}
           </td>
         </tr>
         {{end}}

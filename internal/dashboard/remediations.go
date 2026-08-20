@@ -20,13 +20,23 @@ const paramPage = "page"
 type RemediationsView struct {
 	Page
 
-	// Rows are the executions that survive the filter, newest first.
-	Rows []RemediationRow
-	// Total is how many survive it, and TotalUnfiltered how many exist.
+	// Rows are the lines drawn. A line is one execution, or a run of
+	// executions that say the same thing — see RemediationGroup.
+	Rows []RemediationGroup
+	// Total is how many survive the filter, and TotalUnfiltered how many
+	// exist.
 	Total           int
 	TotalUnfiltered int
-	// Shown is how many are drawn on this page.
+	// Shown is how many records this page covers, which is not len(Rows)
+	// once repeats are collapsed. The figures a reader checks against the
+	// table count records; the table says how many each line stands for.
 	Shown int
+	// Grouped reports that repeats were collapsed, and Collapsed how many
+	// records that removed from the page. Both are stated rather than left
+	// to be noticed: a row standing for twelve is a different object from a
+	// row standing for one.
+	Grouped   bool
+	Collapsed int
 
 	// Filter is what is in force, and Groups are the controls.
 	Filter Filter
@@ -154,19 +164,122 @@ func buildRemediations(
 	view.Simulated = counts.simulated
 	view.InFlight = counts.inFlight
 
-	view.Paging = pageOf(view.Total, page, filter)
+	view.Paging = pageOf(view.Total, page, filter, order)
 
 	// Sliced from the page number rather than from Paging.First and .Last,
 	// which are display values: an empty result sets First to 0 to render
 	// "0 of 0", and deriving the loop from it started at index -1.
 	start := min((view.Paging.Page-1)*pageSize, len(kept))
-	view.Rows = make([]RemediationRow, 0, min(pageSize, len(kept)-start))
-	for i := start; i < min(start+pageSize, len(kept)); i++ {
-		view.Rows = append(view.Rows, buildRow(kept[i], now, view.Filter, order))
-	}
-	view.Shown = len(view.Rows)
+	drawn := kept[start:min(start+pageSize, len(kept))]
+
+	view.Shown = len(drawn)
+	view.Grouped = order.GroupsAdjacent()
+	view.Rows = buildLines(drawn, now, filter, order, view.Grouped)
+	view.Collapsed = view.Shown - len(view.Rows)
 
 	return view
+}
+
+// RemediationGroup is one line of the list: an execution, or a run of
+// executions that say the same thing.
+//
+// Eight consecutive rows reading pod-crashloop / KubePodCrashLooping / Failed
+// are one fact printed eight times, at the top of the page, during the
+// incident that fact is about. The second distinct thing that happened was
+// below the fold.
+type RemediationGroup struct {
+	// The line drawn is the first record of the run, in the order in force.
+	RemediationRow
+
+	// Count is how many records this line stands for. One, for most.
+	Count int
+	// NewestAge and OldestAge bound the run in time, whichever direction the
+	// list is ordered in.
+	NewestAge string
+	OldestAge string
+	// GroupURL is the list narrowed to exactly this run, which is where the
+	// records themselves are. Expansion is navigation for the same reason
+	// filtering is: anything that held the open state would sit inside the
+	// region the ten-second refresh replaces, and would be closed again by a
+	// timer while somebody read it.
+	GroupURL string
+}
+
+// Repeats reports whether this line stands for more than one record.
+func (g RemediationGroup) Repeats() bool { return g.Count > 1 }
+
+// buildLines renders a page of records, collapsing runs of identical ones
+// when the order makes adjacency mean something.
+//
+// One pass, no map, no second query: two records are the same fact only if
+// they are neighbours, which is exactly what the ordering already decided.
+func buildLines(
+	page []*v1alpha1.Remediation, now time.Time, base Filter, order Sort, group bool,
+) []RemediationGroup {
+	lines := make([]RemediationGroup, 0, len(page))
+
+	for i := 0; i < len(page); {
+		run := i + 1
+		if group {
+			for run < len(page) && sameFact(page[i], page[run]) {
+				run++
+			}
+		}
+
+		line := RemediationGroup{
+			RemediationRow: buildRow(page[i], now, base, order),
+			Count:          run - i,
+		}
+		if line.Repeats() {
+			newest, oldest := span(page[i:run])
+			line.NewestAge = FormatAge(newest, now)
+			line.OldestAge = FormatAge(oldest, now)
+			line.GroupURL = listPath(runFilter(base, page[i]), order, 1)
+		}
+
+		lines = append(lines, line)
+		i = run
+	}
+	return lines
+}
+
+// sameFact reports whether two records would print the same line.
+//
+// The state is part of it: a target that failed twice and then succeeded is
+// three records and two facts, and collapsing the success into the failures
+// would hide the only one worth reading.
+func sameFact(a, b *v1alpha1.Remediation) bool {
+	return a.Spec.StrategyName == b.Spec.StrategyName &&
+		a.Spec.Target == b.Spec.Target &&
+		a.Spec.Alert.Name == b.Spec.Alert.Name &&
+		a.Status.State == b.Status.State
+}
+
+// span is the newest and oldest creation time in a run, which is not the
+// first and last: the list can be ordered oldest-first.
+func span(run []*v1alpha1.Remediation) (newest, oldest time.Time) {
+	newest, oldest = run[0].CreationTimestamp.Time, run[0].CreationTimestamp.Time
+	for _, rem := range run[1:] {
+		when := rem.CreationTimestamp.Time
+		if when.After(newest) {
+			newest = when
+		}
+		if when.Before(oldest) {
+			oldest = when
+		}
+	}
+	return newest, oldest
+}
+
+// runFilter narrows to exactly the records a group stands for, on top of
+// whatever the reader was already looking through.
+func runFilter(base Filter, rem *v1alpha1.Remediation) Filter {
+	narrowed := base
+	narrowed.Strategy = rem.Spec.StrategyName
+	narrowed.Target = rem.Spec.Target
+	narrowed.Alert = rem.Spec.Alert.Name
+	narrowed.State = displayState(rem.Status.State)
+	return narrowed
 }
 
 // pageOf works out which slice to draw and the links either side.
@@ -174,7 +287,7 @@ func buildRemediations(
 // A page number out of range is clamped rather than refused: a bookmarked
 // "?page=40" on a list that has since been pruned to three pages should show
 // the last page, not an error.
-func pageOf(total, page int, filter Filter) Paging {
+func pageOf(total, page int, filter Filter, order Sort) Paging {
 	pages := (total + pageSize - 1) / pageSize
 	if pages < 1 {
 		pages = 1
@@ -191,26 +304,34 @@ func pageOf(total, page int, filter Filter) Paging {
 		paging.First = 0
 	}
 	if page > 1 {
-		paging.PrevURL = pageURL(filter, page-1)
+		paging.PrevURL = listPath(filter, order, page-1)
 	}
 	if page < pages {
-		paging.NextURL = pageURL(filter, page+1)
+		paging.NextURL = listPath(filter, order, page+1)
 	}
 	return paging
 }
 
-// pageURL keeps the filter and changes only the page, so paging and
-// filtering compose instead of clearing each other.
-func pageURL(filter Filter, page int) string {
-	path := filter.Path()
-	if page <= 1 {
-		return path
+// listPath is the list carrying a filter, an order and a page — the one
+// place any of the three is turned into a URL.
+//
+// It exists because the previous pageURL built its own from the filter alone,
+// so turning the page silently dropped the order somebody had chosen: page
+// two of "slowest first" was page two of newest-first. Every link on the page
+// goes through here now, which is what stops the next dimension doing it
+// again.
+func listPath(filter Filter, order Sort, page int) string {
+	values := filter.Values()
+	for key, value := range order.Query() {
+		values[key] = value
 	}
-	separator := "?"
-	if filter.Active() {
-		separator = "&"
+	if page > 1 {
+		values.Set(paramPage, strconv.Itoa(page))
 	}
-	return path + separator + paramPage + "=" + strconv.Itoa(page)
+	if len(values) == 0 {
+		return remediationsPath
+	}
+	return remediationsPath + "?" + values.Encode()
 }
 
 // ParsePage reads the page number. Anything unreadable is page one, for the
