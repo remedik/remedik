@@ -7,8 +7,14 @@
 # Both are declared here, before any FROM: an ARG used in a FROM
 # instruction must live in the global scope, because arguments declared
 # inside a stage are not visible to the next stage's FROM.
-ARG GO_IMAGE=golang:1.26.6-alpine
-ARG RUNTIME_IMAGE=gcr.io/distroless/static:nonroot
+# Pinned by digest, with the tag kept beside it so a human can still read what
+# it is. A tag is a pointer somebody else can move: the image built from
+# golang:1.26.6-alpine last week and the one built from it today are not
+# necessarily the same bytes, and "reproducible" then means nothing. Dependabot
+# watches the docker ecosystem here, so these are bumped by a pull request that
+# says what changed rather than by a silent re-resolution at build time.
+ARG GO_IMAGE=golang:1.26.6-alpine@sha256:3889b425f035be855a72fb4755265311293b6d414521f0a519d819df32222d83
+ARG RUNTIME_IMAGE=gcr.io/distroless/static:nonroot@sha256:f7f8f729987ad0fdf6b05eeeae94b26e6a0f613bdf46feea7fc40f7bd72953e6
 
 # Build stage. Dependencies always come from the module proxy, never from a
 # local vendor directory (.dockerignore excludes it), so the image builds

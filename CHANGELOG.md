@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The page chrome's posture ignored the kill switch.** `page()` folded the
+  pause into a local value and then returned the configured one, so a paused
+  operator would have rendered a header saying Paused beside a posture object
+  saying it acts in five namespaces. Nothing reads that field yet, which is why
+  it was worth fixing now: the two would have disagreed silently. Found by
+  CodeQL as a useless assignment, which is what a contradiction looks like from
+  the outside.
+
+### Changed
+
+- **The untrusted edge is fuzzed.** `ParseWebhook` is the only place remedik
+  reads bytes it did not write — everything else starts from an object the API
+  server already validated. `FuzzParseWebhook` asserts what the function
+  promises rather than what it returns: a refusal hands back no alerts at all,
+  and an accepted alert always has labels, a status and a fingerprint. 1.7
+  million executions found nothing, which is the result worth recording.
+
+- **Least privilege in the release workflow.** Its three write grants —
+  contents, packages, and the OIDC token cosign signs with — were declared at
+  the top of the file, where they apply to every job in it including the one
+  somebody adds next year. They belong to the job that writes, and now sit
+  there.
+
+- **The base images are pinned by digest**, with the tag kept beside them so a
+  human can still read what they are. A tag is a pointer somebody else can
+  move. Dependabot watches the docker ecosystem here, so they are bumped by a
+  pull request that says what changed rather than by a silent re-resolution at
+  build time.
+
+- **Log injection, answered with a test rather than an argument.** Eleven call
+  sites pass something an attacker controls to a log entry, which CodeQL is
+  right to flag and which is unavoidable: the alert labels *are* the incident.
+  What matters is that one delivery can never become two records, so that is
+  what is asserted, against the JSON handler the operator actually uses and the
+  text one somebody might set by hand.
+
 ## [0.1.0] - 2026-08-20
 
 The first release. Six days from the first commit, three release candidates

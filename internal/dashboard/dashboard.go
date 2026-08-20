@@ -584,12 +584,17 @@ func (h *Handler) page(title, nav string) Page {
 		Title:       title,
 		Nav:         nav,
 		DryRun:      h.posture.DryRun,
-		Posture:     h.posture,
-		Namespace:   h.namespace,
-		Cluster:     h.cluster,
-		Version:     h.version,
-		Asset:       assetVersion,
-		RenderedAt:  FormatClock(h.now()),
+		// The posture with the kill switch folded in, not the configured one.
+		// This built the value and then returned the other, so the chrome's
+		// posture said "live in payments" while the header beside it said
+		// Paused -- the page contradicting itself, which is the defect
+		// Posture.Paused exists to prevent.
+		Posture:    posture,
+		Namespace:  h.namespace,
+		Cluster:    h.cluster,
+		Version:    h.version,
+		Asset:      assetVersion,
+		RenderedAt: FormatClock(h.now()),
 	}
 }
 
