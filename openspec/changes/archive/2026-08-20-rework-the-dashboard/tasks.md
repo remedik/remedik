@@ -67,4 +67,4 @@
 - [x] 10.1 `make verify` green, including the benchmarks and the JS tests
 - [x] 10.2 `make e2e` — five pages render, filtering, ordering and grouping work, still GET-only
 - [x] 10.3 Screenshots regenerated, `docs/` and `CHANGELOG.md` updated
-- [ ] 10.4 `openspec archive rework-the-dashboard`
+- [x] 10.4 Archived into `openspec/specs/readonly-dashboard/` (by hand: the CLI is a convenience, and `hack/openspec-check.sh` is the gate)

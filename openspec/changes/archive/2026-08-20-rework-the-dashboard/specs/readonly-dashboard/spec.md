@@ -340,3 +340,8 @@ silently does nothing is worse than no button.
 
 - **WHEN** the page is served over a context where the clipboard is unavailable
 - **THEN** no copy control is rendered and the command is still shown in full
+
+#### Scenario: Every page that prints one, not only some
+
+- **WHEN** a page that carries no filter control prints a command
+- **THEN** the copy control is offered there too
