@@ -56,6 +56,14 @@ type ApprovalsView struct {
 	ApprovalStrategies int
 	// Named lists them, so the empty page can point at what to look at.
 	Named []string
+	// Asking and Fills are the empty page's sentence, either side of those
+	// names. They are built here rather than assembled in the template
+	// because the verb has to agree with the count and the clause after it
+	// changes too: "1 strategy ask for approval ... when one of them matches"
+	// is what a plural helper leaves behind when the sentence around it also
+	// has to move.
+	Asking string
+	Fills  string
 }
 
 // Any reports whether anything is waiting.
@@ -121,6 +129,7 @@ func buildApprovals(
 		}
 	}
 	sort.Strings(view.Named)
+	view.Asking, view.Fills = askingSentence(view.ApprovalStrategies)
 
 	for i := range remediations {
 		rem := &remediations[i]
@@ -144,6 +153,16 @@ func buildApprovals(
 		return a.Name < b.Name
 	})
 	return view
+}
+
+// askingSentence is the empty page's explanation, with its verb agreeing.
+func askingSentence(strategies int) (asking, fills string) {
+	if strategies == 1 {
+		return "1 strategy asks for approval",
+			"so this queue fills when it matches an alert"
+	}
+	return fmt.Sprintf("%d strategies ask for approval", strategies),
+		"so this queue fills when one of them matches an alert"
 }
 
 func buildWaiting(rem *v1alpha1.Remediation, now time.Time) WaitingView {

@@ -124,6 +124,21 @@ func TestApprovals_TwoKindsOfEmpty(t *testing.T) {
 		body := get(t, h, approvalsPath, nil).Body.String()
 		mustContain(t, body, "Nothing is waiting", "say the queue is empty")
 		mustContain(t, body, "payments-restart", "name the strategy that fills it")
+		// The verb agrees with the count, and so does the clause after it.
+		mustContain(t, body, "1 strategy asks for approval", "write the sentence in English")
+		mustContain(t, body, "when it matches an alert", "and keep the rest of it agreeing")
+		mustNotContain(t, body, "strategy ask for", "print a plural verb after a singular noun")
+	})
+
+	t.Run("several strategies ask", func(t *testing.T) {
+		h, reader := newHandler(t, Config{})
+		second := approvalStrategy()
+		second.Name = "checkout-restart"
+		reader.strategies = []v1alpha1.RemediationStrategy{approvalStrategy(), second}
+
+		body := get(t, h, approvalsPath, nil).Body.String()
+		mustContain(t, body, "2 strategies ask for approval", "count them")
+		mustContain(t, body, "when one of them matches", "and say which one fills the queue")
 	})
 }
 

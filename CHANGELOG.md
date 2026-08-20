@@ -119,6 +119,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **The auto-refresh control said "Auto" and showed nothing.** Its indicator
+  had two states and one rule: an edit had flattened the paused selector onto
+  the bare class, where it overrode the running one unconditionally, so the dot
+  was grey and unchanging whichever state the control was in. The button now
+  says what it does — `Auto-refresh`, `Refresh paused` — and the dot pulses
+  green while it is on. The first question anybody asked about this page was
+  what that button did.
+
+- **"1 strategy ask for approval."** The empty approvals page pluralised the
+  noun and left the verb, and the clause after it — "when one of them matches"
+  — did not agree either. Both are built where the count is known now, rather
+  than assembled from a helper in the template.
+
 - **The Copy button was on the one page with nothing to copy.** It was built
   inside the filter's block, which returns early on any page with no filter
   form — that is, on every page that prints a command. Six commands on

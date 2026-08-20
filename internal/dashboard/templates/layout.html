@@ -81,10 +81,13 @@
       {{else}}
       <span class="mode mode-live" title="Matching alerts are remediated">Live</span>
       {{end}}
+      {{/* "Auto" was a word with no object, and the first question anybody
+           asked about this page was what the button did. It says what it does
+           now, and the dot beside it says which state it is in. */}}
       <button class="refresh" type="button" id="refresh-toggle" aria-pressed="true"
-              title="Reload the page content every 10 seconds">
+              title="Reload the page content every 10 seconds, without losing your place">
         <span class="refresh-dot" aria-hidden="true"></span>
-        <span class="refresh-label">Auto</span>
+        <span class="refresh-label">Auto-refresh</span>
       </button>
     </div>
   </div>

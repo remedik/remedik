@@ -435,6 +435,10 @@ code {
   font-variant-numeric: tabular-nums;
 }
 
+/* The dot is the state, and the state has two of them. Both selectors matter:
+   an earlier edit flattened the paused rule onto the bare class, where it
+   overrode the running one unconditionally -- so the indicator was grey and
+   still whatever it had been before you pressed the button. */
 .refresh-dot {
   width: 7px;
   height: 7px;
@@ -444,11 +448,7 @@ code {
   animation: pulse 2.4s ease-in-out infinite;
 }
 
-.refresh[aria-pressed="false"] .refresh-label {
-  font-variant-numeric: tabular-nums;
-}
-
-.refresh-dot {
+.refresh[aria-pressed="false"] .refresh-dot {
   background: var(--text-3);
   box-shadow: none;
   animation: none;
@@ -466,11 +466,7 @@ code {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .refresh-label {
-  font-variant-numeric: tabular-nums;
-}
-
-.refresh-dot {
+  .refresh-dot {
     animation: none;
   }
 }

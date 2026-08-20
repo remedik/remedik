@@ -59,11 +59,11 @@
   function paint() {
     toggle.setAttribute("aria-pressed", enabled ? "true" : "false");
     if (label) {
-      label.textContent = enabled ? "Auto" : "Paused";
+      label.textContent = enabled ? "Auto-refresh" : "Refresh paused";
     }
     toggle.title = enabled
-      ? "Reloading the page content every 10 seconds"
-      : "Automatic reloading is paused";
+      ? "Reloading the page content every 10 seconds, without losing your place"
+      : "Automatic reloading is paused; the page will not change until you reload it";
   }
 
   function schedule() {

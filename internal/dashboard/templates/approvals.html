@@ -111,10 +111,10 @@
   </svg>
   <h3>Nothing is waiting</h3>
   <p>
-    {{plural .ApprovalStrategies "strategy-strategies"}} ask for approval
-    &mdash; {{range $i, $name := .Named}}{{if $i}}, {{end}}<code>{{$name}}</code>{{end}} &mdash;
-    so this queue fills when one of them matches an alert. Everything that has
-    been through it is in the <a href="/remediations">list</a>.
+    {{.Asking}} &mdash;
+    {{range $i, $name := .Named}}{{if $i}}, {{end}}<code>{{$name}}</code>{{end}} &mdash;
+    {{.Fills}}. Everything that has been through it is in the
+    <a href="/remediations">list</a>.
   </p>
 </div>
 
