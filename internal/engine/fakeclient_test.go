@@ -199,6 +199,27 @@ func (w *fakeStatusWriter) Update(
 	return nil
 }
 
+// storedStrategy returns a deep copy of a RemediationStrategy held by the
+// fake — what a user's `kubectl get` would show.
+func (c *fakeClient) storedStrategy(name string) *v1alpha1.RemediationStrategy {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	key := fmt.Sprintf("%T//%s", &v1alpha1.RemediationStrategy{}, name)
+	if stored, ok := c.objects[key]; ok {
+		return stored.(*v1alpha1.RemediationStrategy).DeepCopy()
+	}
+	return nil
+}
+
+// put replaces an object, the way an apply from somebody's terminal does.
+func (c *fakeClient) put(obj client.Object) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.objects[keyOf(obj)] = obj.DeepCopyObject().(client.Object)
+}
+
 // stored returns a deep copy of a Remediation held by the fake, so
 // assertions cannot accidentally mutate it.
 func (c *fakeClient) stored(namespace, name string) *v1alpha1.Remediation {

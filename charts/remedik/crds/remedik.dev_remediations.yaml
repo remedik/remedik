@@ -4,7 +4,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.21.0
-    remedik.dev/schema-hash: 8a56faeef89ec2da
+    remedik.dev/schema-hash: cfdc8fd38929b936
   name: remediations.remedik.dev
 spec:
   group: remedik.dev
@@ -183,8 +183,13 @@ spec:
                     action:
                       description: |-
                         Action is the verb to run, in "noun.verb" form — for example
-                        "deployment.restart". Unknown actions fail validation at admission
-                        time when possible, and at execution time otherwise.
+                        "deployment.restart".
+
+                        The schema cannot check the name: which actions exist depends on
+                        which ones the chart enabled, and the API server does not know that.
+                        So a name this build does not have is reported on the strategy's
+                        Ready condition within seconds of applying it, and the execution
+                        that names it fails with reason UnknownAction.
                       minLength: 1
                       type: string
                     with:
@@ -231,8 +236,13 @@ spec:
                     action:
                       description: |-
                         Action is the verb to run, in "noun.verb" form — for example
-                        "deployment.restart". Unknown actions fail validation at admission
-                        time when possible, and at execution time otherwise.
+                        "deployment.restart".
+
+                        The schema cannot check the name: which actions exist depends on
+                        which ones the chart enabled, and the API server does not know that.
+                        So a name this build does not have is reported on the strategy's
+                        Ready condition within seconds of applying it, and the execution
+                        that names it fails with reason UnknownAction.
                       minLength: 1
                       type: string
                     with:

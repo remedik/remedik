@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **A strategy now says whether remedik can run it.** `kubectl get
+  remediationstrategies` has a `READY` column, and a strategy naming an action
+  this build does not have — a typo, or one of the thirteen the chart does not
+  enable by default — reports `Ready=False` with reason `UnknownAction` within
+  seconds of being applied. The message names the step, counted the way a person
+  counts, and lists what *is* enabled, because "misspelled" and "not enabled in
+  the chart" are the same fact to the strategy and two different fixes for the
+  reader. `onFailure.steps` is checked the same way: an escalation that could
+  never page anybody is otherwise discovered when a remediation has already
+  failed.
+
+  This closes a gap that had been open since the status field was designed. The
+  check existed (`Registry.ValidateNames`), the field existed, the chart already
+  granted `remediationstrategies/status`, and the dashboard already rendered the
+  message — three comments in the source said the engine did this. Nothing did.
+  A strategy that could never work was accepted by the API server, looked
+  correct in `kubectl get`, and was found out at 03:00 as a record that failed
+  with `UnknownAction`.
+
+  It reports; it does not gate. A strategy that is not ready still matches
+  alerts and still produces records, which fail at that step exactly as before —
+  the registry stays the only authority on what remedik can run, so a controller
+  that has not caught up with an apply cannot suppress a remediation that would
+  have worked.
+
+- **`RUNS` and `LAST RUN`, also in `kubectl get`.** How many records a strategy
+  has produced that the cluster still holds, and when the newest was created, so
+  "has this ever fired?" needs one command rather than two. Derived from the
+  records rather than counted as they are created: a monotonic counter would put
+  a write of a cluster-scoped object on the path an alert storm takes, which is
+  the one path that has to stay cheap. So retention lowers it, the field says
+  so, and `remedik_remediations_total` remains the source for rates.
+
 - **`./hack/try.sh` (`make try`) — the whole loop on your laptop, with nothing
   simulated.** A throwaway cluster, a real Prometheus, a workload that really
   crash-loops, a real alert through a real Alertmanager, and remedik recording

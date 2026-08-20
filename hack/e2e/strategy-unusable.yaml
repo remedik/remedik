@@ -1,0 +1,38 @@
+# Two strategies remedik cannot run, for the readiness assertions.
+#
+# This is the mistake that used to be found at three in the morning: an action
+# nobody enabled in the chart, or a typo, is accepted by the API server and
+# looks correct in `kubectl get` until an alert arrives and the remediation
+# fails with UnknownAction. Their alertnames are never sent -- what is under
+# test is what the strategy says about itself before anything fires.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: e2e-unusable
+spec:
+  trigger:
+    match:
+      alertname: E2ENeverSent
+  steps:
+    - action: deployment.restart
+    # The typo. Step 2, counted the way a person counts.
+    - action: deployment.restrat
+  onFailure:
+    retries: 0
+---
+# The half worth checking most: an escalation that could never page anybody is
+# otherwise discovered when a remediation has already failed.
+apiVersion: remedik.dev/v1alpha1
+kind: RemediationStrategy
+metadata:
+  name: e2e-unusable-escalation
+spec:
+  trigger:
+    match:
+      alertname: E2ENeverSentEither
+  steps:
+    - action: deployment.restart
+  onFailure:
+    retries: 0
+    steps:
+      - action: webhook.kall

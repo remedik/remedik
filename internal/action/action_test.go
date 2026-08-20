@@ -202,8 +202,13 @@ func TestRegistry_ValidateNames(t *testing.T) {
 	if !errors.Is(err, ErrUnknownAction) {
 		t.Fatalf("ValidateNames() error = %v, want ErrUnknownAction", err)
 	}
-	if !strings.Contains(err.Error(), "step 1") {
+	// Numbered from one: the second step in the list is "step 2", which is
+	// what the dashboard and the condition on the strategy both call it.
+	if !strings.Contains(err.Error(), "step 2") {
 		t.Errorf("error = %q, want it to identify the offending step", err)
+	}
+	if !strings.Contains(err.Error(), "enabled actions: deployment.restart") {
+		t.Errorf("error = %q, want it to list what this build can run", err)
 	}
 }
 

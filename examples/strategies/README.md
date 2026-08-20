@@ -30,6 +30,21 @@ Every action a recipe uses must be enabled in the chart, because each one is
 a permission: `--set actions.podDelete.enabled=true`. The chart's
 `action-rbac.yaml` lists what each is allowed to touch, and why.
 
+You do not have to remember which. Apply the recipe and read the answer:
+
+```console
+$ kubectl get remediationstrategies
+NAME       ENABLED   READY   MODE   RUNS   LAST RUN   AGE
+pod-stuck            False   auto   0                 6s
+
+$ kubectl get remediationstrategy pod-stuck \
+    -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}'
+step 1: unknown action "pod.delete" (enabled actions: deployment.restart)
+```
+
+A name spelled correctly and missing from that list is an action nobody
+enabled, not a mistake in the recipe.
+
 ## Choosing guards
 
 **`cooldown`** answers "how long before trying the same thing on the same

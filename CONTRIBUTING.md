@@ -6,7 +6,7 @@ this file is the short version of the workflow.
 ## Ground rules
 
 - **English everywhere**: code, comments, docs, commit messages, issues.
-- **Spec-driven**: no behavior change without an approved spec. We use
+- **Spec-driven**: no behaviour change without an approved spec. We use
   [OpenSpec](https://github.com/Fission-AI/OpenSpec): current truths live in
   `openspec/specs/`, proposals in `openspec/changes/<name>/`.
 - **No assumptions**: external interfaces (Kubernetes, Slack, cloud APIs)
@@ -22,7 +22,7 @@ this file is the short version of the workflow.
 4. **Definition of done** — all of:
    - `make verify` passes (gofmt, vet, golangci-lint, yamllint, helm lint,
      unit tests with race detector)
-   - integration/e2e updated when the behavior is observable in a cluster
+   - integration/e2e updated when the behaviour is observable in a cluster
    - docs updated (README / QUICKSTART / docs/)
    - `CHANGELOG.md` updated under `[Unreleased]`
 5. **Archive** the change after merge (`openspec archive`) so

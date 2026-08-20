@@ -228,8 +228,13 @@ type BlastRadius struct {
 // Step is one remediation action.
 type Step struct {
 	// Action is the verb to run, in "noun.verb" form — for example
-	// "deployment.restart". Unknown actions fail validation at admission
-	// time when possible, and at execution time otherwise.
+	// "deployment.restart".
+	//
+	// The schema cannot check the name: which actions exist depends on
+	// which ones the chart enabled, and the API server does not know that.
+	// So a name this build does not have is reported on the strategy's
+	// Ready condition within seconds of applying it, and the execution
+	// that names it fails with reason UnknownAction.
 	//
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
@@ -317,11 +322,26 @@ const (
 	EscalationModeFirstSuccess EscalationMode = "firstSuccess"
 )
 
+// Condition types and reasons reported on a RemediationStrategy.
+const (
+	// ConditionReady reports whether the strategy could run if an alert
+	// matched it. It is not about whether it will: a disabled strategy is
+	// still Ready, and spec.enabled is beside it in `kubectl get`.
+	ConditionReady = "Ready"
+
+	// ReasonUsable is why a strategy is Ready.
+	ReasonUsable = "Usable"
+)
+
 // RemediationStrategyStatus reports observed state.
 type RemediationStrategyStatus struct {
 	// Conditions follow the standard Kubernetes convention. "Ready"
-	// reports whether the strategy is usable: a strategy referencing an
-	// unknown action is accepted by the schema but not Ready.
+	// reports whether the strategy is usable: a strategy naming an action
+	// this build does not have is accepted by the schema but not Ready,
+	// and the message says which step and what is available.
+	//
+	// Ready reports; it does not gate. A strategy that is not Ready still
+	// matches alerts, and the records it produces fail at that step.
 	//
 	// +listType=map
 	// +listMapKey=type
@@ -333,9 +353,15 @@ type RemediationStrategyStatus struct {
 	// +optional
 	LastExecutionTime *metav1.Time `json:"lastExecutionTime,omitempty"`
 
-	// ExecutionCount is how many executions this strategy has started
-	// since the resource was created. It is a coarse counter for humans;
-	// metrics remain the source for rates.
+	// ExecutionCount is how many Remediation records this strategy has
+	// produced that the cluster still holds.
+	//
+	// It is derived from the records rather than counted as they are
+	// created, so retention lowers it: incrementing a counter would put a
+	// write of this object on the path an alert storm takes, which is the
+	// one path that has to stay cheap. A coarse number for humans, beside
+	// remedik_remediations_total, which is monotonic because a metric can
+	// afford to be.
 	//
 	// +optional
 	ExecutionCount int64 `json:"executionCount,omitempty"`
@@ -357,6 +383,7 @@ func (s *RemediationStrategy) IsEnabled() bool {
 // +kubebuilder:resource:scope=Cluster,shortName=rstrat;rs
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Enabled",type=boolean,JSONPath=`.spec.enabled`
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Mode",type=string,JSONPath=`.spec.execution.mode`
 // +kubebuilder:printcolumn:name="Runs",type=integer,JSONPath=`.status.executionCount`
 // +kubebuilder:printcolumn:name="Last Run",type=date,JSONPath=`.status.lastExecutionTime`

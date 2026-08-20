@@ -243,6 +243,24 @@ strategy_field() {
 		-o jsonpath="{.items[0]$2}" 2>/dev/null || true
 }
 
+# strategy_condition <strategy> <field> reads the Ready condition a strategy
+# reports about itself. Cluster-scoped, so there is no namespace.
+strategy_condition() {
+	kubectl get remediationstrategy "$1" \
+		-o jsonpath="{.status.conditions[?(@.type=='Ready')].$2}" 2>/dev/null || true
+}
+
+# wait_for_ready <strategy> <True|False> [timeout-seconds]
+wait_for_ready() {
+	local name="$1" want="$2" timeout="${3:-60}" elapsed=0
+	while [ "$elapsed" -lt "$timeout" ]; do
+		[ "$(strategy_condition "$name" status)" = "$want" ] && return 0
+		sleep 2
+		elapsed=$((elapsed + 2))
+	done
+	return 1
+}
+
 # wait_for_remediations <expected-count> [timeout-seconds]
 wait_for_remediations() {
 	local want="$1" timeout="${2:-60}" elapsed=0
@@ -2003,6 +2021,89 @@ else
 	fail "no event explaining why the manual strategy did nothing"
 fi
 
+step "10g. A strategy says whether remedik can run it"
+
+# Applied at 10:00, answered within seconds -- rather than at 03:00, by a
+# remediation that fails with UnknownAction. The alertnames in this fixture are
+# never sent: what is under test is what the strategy says about itself.
+kubectl apply -f hack/e2e/strategy-unusable.yaml >/dev/null
+
+if wait_for_ready e2e-unusable False 60; then
+	pass "a strategy naming an action this build does not have is not Ready"
+else
+	fail "e2e-unusable never reported Ready=False (got '$(strategy_condition e2e-unusable status)')"
+fi
+
+message=$(strategy_condition e2e-unusable message)
+if grep -q "step 2" <<<"$message"; then
+	pass "and the message names the step, counted the way a person counts"
+else
+	fail "the message does not identify the step: ${message:-<none>}"
+fi
+if grep -q "enabled actions:" <<<"$message"; then
+	pass "and lists what this build can run, so a typo is told apart from a feature nobody enabled"
+else
+	fail "the message does not say what is available: ${message:-<none>}"
+fi
+
+reason=$(strategy_condition e2e-unusable reason)
+if [ "$reason" = "UnknownAction" ]; then
+	pass "and the reason is the same word the failed record would have used"
+else
+	fail "reason = ${reason:-<none>}, want UnknownAction"
+fi
+
+# The print column: the answer has to be where somebody already looks.
+if kubectl get remediationstrategy e2e-unusable --no-headers 2>/dev/null | grep -q False; then
+	pass "and 'kubectl get remediationstrategies' shows it without a second query"
+else
+	fail "the Ready column is not rendered by kubectl get"
+fi
+
+if wait_for_ready e2e-unusable-escalation False 60; then
+	pass "an escalation that could never page anybody is refused the same way"
+else
+	fail "e2e-unusable-escalation never reported Ready=False"
+fi
+escalation_message=$(strategy_condition e2e-unusable-escalation message)
+if grep -q "onFailure" <<<"$escalation_message"; then
+	pass "and the message says the step was an escalation step"
+else
+	fail "the message does not distinguish the escalation: ${escalation_message:-<none>}"
+fi
+
+# Fixing it has to clear the condition without an operator restart, or the
+# report is worse than none: it would go on accusing a strategy that is fine.
+kubectl patch remediationstrategy e2e-unusable --type json \
+	-p '[{"op": "replace", "path": "/spec/steps/1/action", "value": "deployment.restart"}]' >/dev/null
+if wait_for_ready e2e-unusable True 60; then
+	pass "and correcting the manifest clears it, with no restart"
+else
+	fail "e2e-unusable stayed not Ready after the name was corrected"
+fi
+
+# The other half: a strategy that has been used says so.
+if [ "$(strategy_condition e2e-crashloop status)" = "True" ]; then
+	pass "the strategy that has been remediating all along is Ready"
+else
+	fail "e2e-crashloop is not Ready: $(strategy_condition e2e-crashloop message)"
+fi
+runs=$(kubectl get remediationstrategy e2e-crashloop -o jsonpath='{.status.executionCount}' 2>/dev/null || true)
+last=$(kubectl get remediationstrategy e2e-crashloop -o jsonpath='{.status.lastExecutionTime}' 2>/dev/null || true)
+if [ -n "$runs" ] && [ "$runs" -ge 1 ] 2>/dev/null; then
+	pass "and it reports the ${runs} record(s) it has produced"
+else
+	fail "executionCount = ${runs:-<none>}, want at least 1"
+fi
+if [ -n "$last" ]; then
+	pass "and when it last fired: ${last}"
+else
+	fail "lastExecutionTime is empty on a strategy that has fired"
+fi
+
+# --------------------------------------------------------------------------
+# 11. Posture is per namespace
+# --------------------------------------------------------------------------
 step "11. Live in one namespace, reporting in another"
 
 helm upgrade remedik charts/remedik \

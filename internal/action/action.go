@@ -300,8 +300,7 @@ func (r *Registry) Get(name string) (Action, error) {
 	if a, ok := r.actions[name]; ok {
 		return a, nil
 	}
-	return nil, fmt.Errorf("%w %q (known actions: %s)",
-		ErrUnknownAction, name, strings.Join(r.Names(), ", "))
+	return nil, fmt.Errorf("%w %q (%s)", ErrUnknownAction, name, r.available())
 }
 
 // Has reports whether name is registered.
@@ -324,15 +323,33 @@ func (r *Registry) Names() []string {
 // Len reports how many actions are registered.
 func (r *Registry) Len() int { return len(r.actions) }
 
-// ValidateNames reports the first step naming an unknown action. The engine
-// calls it when a strategy is applied, so an unusable strategy is reported
-// on the resource rather than discovered mid-incident.
+// ValidateNames reports the first step naming an unknown action. The strategy
+// controller calls it whenever a strategy is applied, so an unusable strategy
+// says so on the resource rather than being discovered mid-incident.
+//
+// Steps are numbered from one, because that is how every other part of this
+// project shows them to a person: "step 2" here is the second step in the
+// manifest and the one the dashboard labels 2.
 func (r *Registry) ValidateNames(names []string) error {
 	for i, name := range names {
 		if !r.Has(name) {
-			return fmt.Errorf("step %d: %w %q (known actions: %s)",
-				i, ErrUnknownAction, name, strings.Join(r.Names(), ", "))
+			return fmt.Errorf("step %d: %w %q (%s)",
+				i+1, ErrUnknownAction, name, r.available())
 		}
 	}
 	return nil
+}
+
+// available describes what this build can run, for the error messages that
+// send somebody looking.
+//
+// The two answers need different words. A misspelled action is a typo in the
+// manifest; an action spelled correctly and absent from this list is almost
+// always a feature nobody enabled in the chart, and an empty list means every
+// one of them is off — which reads as a broken operator unless it is named.
+func (r *Registry) available() string {
+	if len(r.actions) == 0 {
+		return "no actions are enabled in this build"
+	}
+	return "enabled actions: " + strings.Join(r.Names(), ", ")
 }

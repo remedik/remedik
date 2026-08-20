@@ -184,6 +184,49 @@ event on the strategy.
 
 ---
 
+## Will this strategy work when it fires?
+
+The gates above are for an alert that has already arrived. This one is worth
+asking on a Tuesday, because the answer used to arrive at 03:00:
+
+```bash
+kubectl get remediationstrategies
+```
+
+```
+NAME            ENABLED   READY   MODE   RUNS   LAST RUN   AGE
+pod-crashloop             True    auto   12     4m         21d
+drain-safely              False   auto   0                 2d
+```
+
+`READY` is false when a step — or an `onFailure` step — names an action this
+build does not have, and the message says which:
+
+```bash
+kubectl get remediationstrategy drain-safely \
+  -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}'
+```
+
+```
+step 1: unknown action "node.drain" (enabled actions: deployment.restart,
+webhook.call)
+```
+
+Two different mistakes reach that message: a typo, and an action that exists but
+is not enabled in the chart. The list of what *is* available is how you tell
+them apart — if the name is spelled right and missing from the list, it is
+`actions.nodeDrain.enabled=true` you want, not an edit to the strategy.
+
+The condition reports; it does not gate. A strategy that is not ready still
+matches alerts and still produces records — they fail at that step, with reason
+`UnknownAction`. Nothing is suppressed because a status is stale.
+
+`RUNS` and `LAST RUN` count the records the strategy has produced that the
+cluster still holds, so retention lowers them. For rates, use
+`remedik_remediations_total`.
+
+---
+
 ## What a terminal reason means
 
 `status.reason` on a `Remediation`:
@@ -191,7 +234,7 @@ event on the strategy.
 | Reason | What happened |
 | --- | --- |
 | `StepFailed` | a step failed after its retries; `status.steps` says which and why |
-| `UnknownAction` | the strategy names an action this build does not have enabled. `helm get values` and the `actions` block are the answer |
+| `UnknownAction` | the strategy names an action this build does not have enabled. `helm get values` and the `actions` block are the answer — and the strategy's own `Ready` condition said so before the alert arrived |
 | `Interrupted` | the process died mid-execution. remedik **never resumes** a half-finished attempt — repeating a mutating step is the worse outcome — so it is failed and left for a person. A record waiting for a retry is `Pending`, never `Running` |
 | `GuardRejected` | a guard refused before anything ran |
 | `GaveUp` | this alert has been remediated repeatedly without the underlying problem improving. remedik stopped and escalated; the message names the count and window |
@@ -273,7 +316,7 @@ Open an issue with the output of:
 ```bash
 kubectl -n remedik logs deploy/remedik --tail=200
 kubectl -n remedik describe remediation <name>
-kubectl get remediationstrategy <name> -o yaml
+kubectl get remediationstrategy <name> -o yaml   # including its status
 helm -n remedik get values remedik
 ```
 

@@ -1,6 +1,6 @@
 # Architecture
 
-> Living document. The authoritative behavior contracts are the specs in
+> Living document. The authoritative behaviour contracts are the specs in
 > [`openspec/`](../openspec/); this document is the map. Status labels:
 > **[shipped]** = implemented and tested, **[planned]** = designed, not yet
 > built.
@@ -442,6 +442,7 @@ stopping a strategy is `enabled: false`, never an unset field.
 | `cooldown` | how recently did this run here? | strategy + target |
 | `maxPerHour` | how often has this run? | strategy, trailing hour |
 | `blastRadius` | how broken is this workload already? | the workload behind the target |
+| `giveUpAfter` | is this working at all? | strategy + target, trailing window |
 
 The first two are about time and need nothing from the cluster.
 `blastRadius` is about state: `minAvailable` refuses while the workload has
@@ -476,6 +477,30 @@ an action.
 Guard state (recent completions, hourly counts) is held in memory and
 rebuilt from the `Remediation` resources at startup. A guard that evaporated
 on restart would be worse than no guard, because it is one people rely on.
+
+## A strategy reports on itself
+
+A strategy is the one object in remedik that its user writes, so it is the one
+that has to answer back. A second controller — it executes nothing, reads no
+workloads and writes only status — keeps two answers current on the resource:
+
+- **`Ready`**, false with reason `UnknownAction` when a step or an `onFailure`
+  step names an action this build does not have. The message names the step and
+  lists what is available, because "misspelled" and "not enabled in the chart"
+  are the same fact to the strategy and different fixes for the reader.
+- **`executionCount` and `lastExecutionTime`**, so `kubectl get
+  remediationstrategies` answers "has this ever fired?" without a second query.
+  They are derived from the records, so retention lowers them; the metric is
+  what does not.
+
+Both are reports, not gates. A strategy that is not ready still matches alerts
+and still produces records, which fail at that step exactly as they did before
+the condition existed — the registry stays the only authority on what remedik
+can run, and a controller that has not caught up with an apply cannot suppress
+a remediation that would have worked.
+
+The status is written only when it changes. A status write is a watch event, so
+a controller that writes on every pass never settles.
 
 ## The action contract
 
@@ -521,7 +546,8 @@ Three places, deliberately, because people look in three places:
   gets this with no table to update; an event that cannot be addressed is
   logged and skipped, never a reason to fail a remediation that worked.
 - **On the strategy.** Guard rejections, which answer "why did nothing
-  happen?".
+  happen?", and the `Ready` condition, which answers it before an alert ever
+  arrives.
 - **On the `Remediation` record**, and therefore on the dashboard: the full
   per-step trail.
 
@@ -624,7 +650,7 @@ version got wrong by putting all of them on one:
 | `/remediations` | What happened, and to what? The full list, with the filters |
 | `/remediations/{name}` | What did this one do, step by step |
 | `/namespaces` | Where is this going badly? One row per namespace, ordered by what needs attention |
-| `/strategies` | What could happen, and under what guards |
+| `/strategies` | What could happen, under what guards, and whether remedik can run it |
 
 The overview is panels. Each is a claim with a link to its evidence, and
 each is one struct, one builder and one template block, which is why
@@ -650,8 +676,9 @@ it. So a namespace marked `Reporting` may hold executions that changed
 something, and the row says so rather than letting the chip contradict the
 numbers beside it.
 
-It is also careful about one more thing: it is not a health page. remedik knows the remediations it
-ran, not whether the workloads in a namespace are well, and a page implying
+It is also careful about one more thing: it is not a health page. remedik
+knows the remediations it ran, not whether the workloads in a namespace are
+well, and a page implying
 otherwise would be the dashboard being authoritative about something it
 never measured. So every column is remedik's own record — executions, how
 they ended, how many failures nobody was told about — and every row states

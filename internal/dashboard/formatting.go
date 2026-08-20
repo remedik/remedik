@@ -70,7 +70,7 @@ func phaseTone(phase v1alpha1.StepPhase) string {
 // A strategy that cannot run is worth saying so on the page that lists it.
 func notReadyMessage(conditions []metav1.Condition) string {
 	for i := range conditions {
-		if conditions[i].Type != "Ready" || conditions[i].Status != metav1.ConditionFalse {
+		if conditions[i].Type != v1alpha1.ConditionReady || conditions[i].Status != metav1.ConditionFalse {
 			continue
 		}
 		if msg := conditions[i].Message; msg != "" {

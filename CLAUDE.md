@@ -109,7 +109,8 @@ internal/gateway/    HTTP receiver, bearer auth                 (stdlib only)
 internal/matching/   Which strategy handles an alert            (stdlib only)
 internal/guards/     Cooldown and rate limiting                 (stdlib only)
 internal/action/     The Resolve/Plan/Execute contract + registry
-internal/engine/     Sink (alert → record) and the reconciler
+internal/engine/     Sink (alert → record), the remediation reconciler, and
+                     the strategy one, which only ever writes status
 internal/metrics/    Prometheus adapters behind the Recorder interfaces
 internal/dashboard/  Read-only web UI, five pages; templates and CSS embedded
 internal/action/external/  webhook.call, job.run, script.run — the widest trust surface
@@ -135,6 +136,11 @@ test; each test explains itself.
    `Succeeded` and, by invariant 3, decide it was interrupted. The conflict on
    that write is what refuses the stale verdict — it is the check, not a defect
    to smooth over. `internal/engine/staleread_test.go`.
+
+   It is about the *verdict*, so it does not generalise: the strategy
+   controller's status write is retried on conflict, because every field there
+   is recomputed from observed state and a conflict only means "look again".
+
 2. **`NeedLeaderElection() == false` on every HTTP server is load-bearing.**
    controller-runtime starts a runnable that says nothing only after the lease
    is won, so without it a standby has no listener and refuses the connection

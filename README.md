@@ -54,10 +54,10 @@ mechanism next to it is the answer this project actually ships — not a plan.
 | **When it fails, somebody is told** | `onFailure.steps` is a second plan. If that fails too, the record says so, because "we tried to tell you and could not" is the thing you need to find later. |
 | **The supply chain is checkable** | Multi-arch images signed with cosign keyless, an SBOM attested to the image, every GitHub Action pinned to a commit SHA, and `govulncheck` in the gate. |
 
-Nothing is published yet: the tags that exist are release candidates and
-their packages are private until this repository is. `v0.1.0` is the first
-one meant to be installed. Until then, `./hack/try.sh` runs the whole loop
-from a checkout, on a throwaway cluster — see below.
+Nothing is published yet: `v0.1.0` is the first release meant to be
+installed, and its packages stay private until this repository is. Until
+then, `./hack/try.sh` runs the whole loop from a checkout, on a throwaway
+cluster — see below.
 
 ```console
 # Verify a release before you trust it — no key required.
@@ -171,6 +171,21 @@ forbids expansion accepts the patch and does nothing, so remedik checks
 first. And a remediation Job runs as a ServiceAccount you name, never
 remedik's own, which is refused.
 
+**A strategy says whether remedik can run it**, seconds after you apply it
+rather than during the incident it was written for:
+
+```console
+$ kubectl get remediationstrategies
+NAME            ENABLED   READY   MODE   RUNS   LAST RUN   AGE
+pod-crashloop             True    auto   12     4m         21d
+drain-safely              False   auto   0                 2d
+```
+
+`False` means a step names an action this build does not have — a typo, or one
+of the thirteen the chart does not enable by default — and the message names the
+step and lists what *is* enabled, so the two are told apart. It reports rather
+than gates: nothing is suppressed because a status is stale.
+
 **When remediation does not work, somebody gets told.** `onFailure.steps` is
 a second plan that runs once the retries are spent, so the loop closes:
 
@@ -278,7 +293,7 @@ an edit to your monitoring stack.
 <summary>The other two ways in, for contributors</summary>
 
 ```bash
-make e2e           # the end-to-end suite: throwaway cluster, 155 assertions, then cleanup
+make e2e           # the end-to-end suite: throwaway cluster, 166 assertions, then cleanup
 make dev-up        # a cluster to keep: kind + Prometheus, Alertmanager and Grafana
 make dev-deploy    # build, load and install remedik (dry-run on)
 make dev-seed      # 150 namespaces of history, so the pages have something to say
@@ -390,6 +405,8 @@ The whole loop, and the parts that make it safe to leave running.
   the paging path is proved before it is needed.
 - **A read-only dashboard**, five pages, off by default and unable to write by
   construction.
+- **Strategies that report on themselves** — a `Ready` condition naming the step
+  that cannot run, and how often the strategy has fired, in `kubectl get`.
 - **Retention** on a schedule that never deletes a record a guard still relies
   on, and leader election so two replicas are failover rather than double
   remediation.

@@ -236,8 +236,9 @@ nothing — and **the escalation still runs**, which is the only thing in
 remedik that runs for real during a dry run. So the whole path, including the
 page, is provable before it is needed.
 
-**On a kind cluster.** `./hack/try.sh` (or `make dev-up && make dev-deploy`) wires Alertmanager to
-the gateway, so the path above is the path the dev cluster uses.
+**On a kind cluster.** `./hack/try.sh` (or `make dev-up && make dev-deploy`)
+wires Alertmanager to the gateway, so the path above is the path the dev
+cluster uses.
 
 ## Checklist
 

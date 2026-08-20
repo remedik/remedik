@@ -4,7 +4,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.21.0
-    remedik.dev/schema-hash: 52d09628954e1e2f
+    remedik.dev/schema-hash: 479eb9e861bc038c
   name: remediationstrategies.remedik.dev
 spec:
   group: remedik.dev
@@ -22,6 +22,9 @@ spec:
     - jsonPath: .spec.enabled
       name: Enabled
       type: boolean
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
     - jsonPath: .spec.execution.mode
       name: Mode
       type: string
@@ -251,8 +254,13 @@ spec:
                         action:
                           description: |-
                             Action is the verb to run, in "noun.verb" form — for example
-                            "deployment.restart". Unknown actions fail validation at admission
-                            time when possible, and at execution time otherwise.
+                            "deployment.restart".
+
+                            The schema cannot check the name: which actions exist depends on
+                            which ones the chart enabled, and the API server does not know that.
+                            So a name this build does not have is reported on the strategy's
+                            Ready condition within seconds of applying it, and the execution
+                            that names it fails with reason UnknownAction.
                           minLength: 1
                           type: string
                         with:
@@ -279,8 +287,13 @@ spec:
                     action:
                       description: |-
                         Action is the verb to run, in "noun.verb" form — for example
-                        "deployment.restart". Unknown actions fail validation at admission
-                        time when possible, and at execution time otherwise.
+                        "deployment.restart".
+
+                        The schema cannot check the name: which actions exist depends on
+                        which ones the chart enabled, and the API server does not know that.
+                        So a name this build does not have is reported on the strategy's
+                        Ready condition within seconds of applying it, and the execution
+                        that names it fails with reason UnknownAction.
                       minLength: 1
                       type: string
                     with:
@@ -326,8 +339,12 @@ spec:
               conditions:
                 description: |-
                   Conditions follow the standard Kubernetes convention. "Ready"
-                  reports whether the strategy is usable: a strategy referencing an
-                  unknown action is accepted by the schema but not Ready.
+                  reports whether the strategy is usable: a strategy naming an action
+                  this build does not have is accepted by the schema but not Ready,
+                  and the message says which step and what is available.
+
+                  Ready reports; it does not gate. A strategy that is not Ready still
+                  matches alerts, and the records it produces fail at that step.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -388,9 +405,15 @@ spec:
                 x-kubernetes-list-type: map
               executionCount:
                 description: |-
-                  ExecutionCount is how many executions this strategy has started
-                  since the resource was created. It is a coarse counter for humans;
-                  metrics remain the source for rates.
+                  ExecutionCount is how many Remediation records this strategy has
+                  produced that the cluster still holds.
+
+                  It is derived from the records rather than counted as they are
+                  created, so retention lowers it: incrementing a counter would put a
+                  write of this object on the path an alert storm takes, which is the
+                  one path that has to stay cheap. A coarse number for humans, beside
+                  remedik_remediations_total, which is monotonic because a metric can
+                  afford to be.
                 format: int64
                 type: integer
               lastExecutionTime:

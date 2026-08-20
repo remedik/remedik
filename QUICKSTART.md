@@ -46,8 +46,7 @@ passes and gives you the command for each one.
 
 > **Not published yet.** The chart and image referenced below live in a
 > package registry that is private until this repository is, so these
-> commands will not resolve today. The tags that exist are release
-> candidates (`v0.1.0-rc.3`); `v0.1.0` is the first one meant to be
+> commands will not resolve today. `v0.1.0` is the first release meant to be
 > installed. Until then, `./hack/try.sh` runs the whole loop from a checkout on
 > a throwaway cluster.
 
@@ -244,12 +243,42 @@ port-forward or the Service name is.
 
 ### 4. Add a strategy
 
-Start from the cookbook in [`examples/strategies/`](examples/strategies/):
+Start from the cookbook in [`examples/strategies/`](examples/strategies/) —
+nineteen recipes, each with the reasoning behind its guards written down:
 
 ```bash
 kubectl apply -f examples/strategies/pod-crashloop.yaml
 kubectl get remediationstrategies
 ```
+
+```
+NAME            ENABLED   READY   MODE   RUNS   LAST RUN   AGE
+pod-crashloop             True    auto   0                 4s
+```
+
+**Read the `READY` column before you go any further.** It is false when a step
+names an action this build does not have — because it is misspelled, or because
+it is one of the thirteen the chart does not enable by default — and the message
+says which of the two it was:
+
+```bash
+kubectl get remediationstrategy pod-crashloop \
+  -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}'
+```
+
+```
+step 1: unknown action "pod.delete" (enabled actions: deployment.restart)
+```
+
+Enable what a recipe needs, and only that — each action is a permission, which
+is why none of them are on by default:
+
+```bash
+helm upgrade remedik ... --set actions.podDelete.enabled=true
+```
+
+`RUNS` and `LAST RUN` fill in as the strategy is used, so this one command is
+also how you check later whether a strategy has ever fired.
 
 ### Stopping it
 
@@ -394,7 +423,8 @@ Five pages:
   on, with what happened in each. This is the page for a cluster where the
   posture is not the same everywhere.
 - **Strategies** — every strategy with its matchers, guards, steps and last
-  run; disabled ones are marked as such.
+  run; disabled ones are marked as such, and one remedik cannot run says so in
+  full, naming the step.
 
 Nothing on it changes anything: it serves GET and HEAD, and answers 405 to
 everything else. Enabling it grants remedik no permission it did not already
@@ -423,10 +453,9 @@ helm show crds oci://ghcr.io/remedik/charts/remedik | kubectl apply --server-sid
 ```
 
 `--force-conflicts` is part of the command, not a workaround: Helm recorded
-itself as the field manager when it installed the CRDs, so taking that ownership
-over is exactly the intent. Applying a CRD does not touch the resources already
-using it. If you manage
-CRDs yourself, `--set crdCheck.enabled=false` says so.
+itself as the field manager when it installed the CRDs, so taking that over is
+exactly the intent. Applying a CRD does not touch the resources already using
+it. If you manage CRDs yourself, `--set crdCheck.enabled=false` says so.
 
 **`--reuse-values` does not merge new defaults.** It replays the values from
 your last install, so a key added since is simply absent — you get the new
@@ -463,7 +492,7 @@ make build    # ./bin/remedik
 ### End-to-end on kind
 
 ```bash
-make e2e                  # throwaway cluster, then cleans up
+make e2e                   # throwaway cluster, then cleans up
 KEEP_CLUSTER=1 make e2e    # keep it to inspect afterwards
 ```
 

@@ -314,6 +314,19 @@ func run(logger *slog.Logger, opts options) error {
 		return fmt.Errorf("register the remediation controller: %w", err)
 	}
 
+	// The second controller writes nothing but status, and it is what makes a
+	// strategy answer back: applied at 10:00, it says within seconds whether
+	// remedik could run it, instead of leaving that to be found out at 03:00.
+	strategies := &engine.StrategyReconciler{
+		Client:    mgr.GetClient(),
+		Registry:  registry,
+		Namespace: opts.namespace,
+		Logger:    logger.With("component", "strategies"),
+	}
+	if err := strategies.SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("register the strategy controller: %w", err)
+	}
+
 	// Guards live in memory; without replaying what is already in the
 	// cluster, a remediation cooled down a minute ago would run again.
 	//

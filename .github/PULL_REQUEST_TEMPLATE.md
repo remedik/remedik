@@ -4,9 +4,9 @@
 
 ## Spec
 
-<!-- Every behavior change references an OpenSpec change. -->
+<!-- Every behaviour change references an OpenSpec change. -->
 
-- OpenSpec change: `openspec/changes/<name>` <!-- or "none — no behavior change, because ..." -->
+- OpenSpec change: `openspec/changes/<name>` <!-- or "none — no behaviour change, because ..." -->
 
 ## Checklist
 
