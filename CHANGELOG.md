@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-20
+
+The first release. Six days from the first commit, three release candidates
+that were the same code learning to install itself, and one rule the whole
+thing is built on: it is dry-run until somebody says otherwise, per namespace,
+and every decision it makes is a Kubernetes object that explains itself.
+
 ### Added
 
 - **[docs/actions.md](docs/actions.md) — every action, and how to write one of
