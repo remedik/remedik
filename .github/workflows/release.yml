@@ -4,14 +4,20 @@ on:
   push:
     tags: ["v*"]
 
+# Read at the top, written only where writing happens. A workflow-level grant
+# applies to every job in the file, including the one somebody adds next year
+# for something unrelated -- which is how a job that only needed to read ends
+# up able to push an image and mint an OIDC token.
 permissions:
-  contents: write
-  packages: write
-  id-token: write # keyless signing with cosign
+  contents: read
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release and attach its files
+      packages: write # push the image and the chart to ghcr.io
+      id-token: write # keyless signing with cosign
     # A hang would otherwise run to GitHub's six-hour default.
     timeout-minutes: 60
     steps:

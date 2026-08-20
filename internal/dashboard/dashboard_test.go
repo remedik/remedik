@@ -782,3 +782,29 @@ func TestNotPausedSaysNothingAboutIt(t *testing.T) {
 		t.Error("the posture chip disappeared when nothing was paused")
 	}
 }
+
+// The chrome's posture must agree with the header beside it.
+//
+// page() computed the posture with the kill switch folded in and then returned
+// the configured one, so a paused operator rendered a header saying Paused
+// next to a posture object saying it acts in five namespaces. Nothing on the
+// page reads that field yet, which is exactly why it was worth fixing before
+// something does: the two would have disagreed silently.
+func TestPageChromeAgreesWithItsOwnPosture(t *testing.T) {
+	h, _ := newHandler(t, Config{
+		Posture: Posture{DryRun: true, Live: []string{"payments"}},
+		Paused:  func() (bool, string) { return true, "just checking" },
+	})
+
+	page := h.page("Overview", navOverview)
+
+	if !page.Paused {
+		t.Fatal("the chrome does not report the kill switch")
+	}
+	if !page.Posture.Paused {
+		t.Error("the chrome's posture says remediation is running while the header says paused")
+	}
+	if page.Posture.ActsAnywhere() {
+		t.Error("a paused operator's posture still claims it acts somewhere")
+	}
+}
