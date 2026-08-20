@@ -2287,6 +2287,53 @@ th[aria-sort] .sort {
 }
 
 /* --------------------------------------------------------------------------
+   Links out
+
+   Where else to look at this moment. Configured, because the URL of somebody's
+   Grafana is not something this project can guess.
+   -------------------------------------------------------------------------- */
+
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.links-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.link-out {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.78rem;
+  color: var(--text-2);
+  background: var(--surface);
+  text-decoration: none;
+}
+
+.link-out::after {
+  content: "↗";
+  font-size: 0.72rem;
+  color: var(--text-3);
+}
+
+.link-out:hover,
+.link-out:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* --------------------------------------------------------------------------
    The palette
 
    Built by the script, never written into a page, so it cannot exist where it

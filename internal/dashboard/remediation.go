@@ -45,6 +45,10 @@ type RemediationView struct {
 	// Failed is the terminal state, kept as a bool because the page asks the
 	// question more than once and State is a display string.
 	Failed bool
+	// Links are where else to look at this moment — Grafana, Loki, whatever
+	// the operator was configured with. Empty when none is, and no page
+	// depends on one existing.
+	Links []ResolvedLink
 	// Explanation is what a rule made of the reason, the failing step, the
 	// message and this target's history. Nil when no rule recognised the
 	// record, which is the honest answer: the raw message is still on the

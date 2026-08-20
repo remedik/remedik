@@ -69,6 +69,11 @@ spec:
             {{- /* No flag at all when the dashboard is off: nothing listens,
                    and no handler exists to be reached. */}}
             - --dashboard-bind-address=:{{ .Values.dashboard.port }}
+            {{- /* Where else to look at a moment. The operator checks the
+                   scheme itself: this template is rendered into a page. */}}
+            {{- range .Values.dashboard.links }}
+            - --dashboard-link={{ .name }}={{ .url }}
+            {{- end }}
             {{- end }}
           env:
             - name: REMEDIK_NAMESPACE

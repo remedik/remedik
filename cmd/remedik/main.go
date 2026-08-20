@@ -73,6 +73,7 @@ type options struct {
 	gatewayAddr    string
 	gatewayPath    string
 	dashboardAddr  string
+	dashboardLinks []string
 	actions        []string
 	serviceAccount string
 	namespace      string
@@ -131,6 +132,15 @@ func parseFlags() options {
 	flag.StringVar(&opts.dashboardAddr, "dashboard-bind-address", "",
 		"address the read-only web dashboard binds to; empty disables it (for example "+
 			dashboard.DefaultBindAddress+")")
+	flag.Func("dashboard-link",
+		"add a link out of the dashboard, as \"Name=https://url/{alert}?from={from}\". "+
+			"Repeatable. The URL is a template over {namespace}, {target}, {name}, "+
+			"{alert}, {fingerprint}, {from} and {to}; values are escaped on the way in, "+
+			"and a template whose scheme is not http or https is refused at startup",
+		func(value string) error {
+			opts.dashboardLinks = append(opts.dashboardLinks, value)
+			return nil
+		})
 	var actions string
 	flag.StringVar(&actions, "actions", "",
 		"comma-separated actions to enable; empty enables every action this build implements. "+
@@ -442,6 +452,7 @@ func run(logger *slog.Logger, opts options) error {
 			Paused:  func() (bool, string) { return pause.Paused(), pause.Reason() },
 			Cluster: opts.cluster,
 			Version: version.String(),
+			Links:   dashboardLinks(opts.dashboardLinks, logger),
 			Logger:  logger.With("component", "dashboard"),
 		})
 		if err != nil {
@@ -520,6 +531,28 @@ func postureLabels(p engine.Posture) map[string]string {
 		labels[namespace] = string(mode)
 	}
 	return labels
+}
+
+// dashboardLinks parses the repeated --dashboard-link flag.
+//
+// "Name=URL", split on the first "=" because a URL template is mostly equals
+// signs after that. A malformed one is dropped with a log line rather than
+// refusing to start: a mistyped link is not a reason to leave a cluster
+// without remediation. The dashboard checks the scheme itself, for the same
+// reason and in the place that renders it.
+func dashboardLinks(values []string, logger *slog.Logger) []dashboard.Link {
+	links := make([]dashboard.Link, 0, len(values))
+	for _, value := range values {
+		name, target, found := strings.Cut(value, "=")
+		name, target = strings.TrimSpace(name), strings.TrimSpace(target)
+		if !found || name == "" || target == "" {
+			logger.Warn("ignoring a malformed --dashboard-link; expected \"Name=URL\"",
+				"value", value)
+			continue
+		}
+		links = append(links, dashboard.Link{Name: name, URL: target})
+	}
+	return links
 }
 
 // dashboardPosture converts the engine's posture into the shape the pages

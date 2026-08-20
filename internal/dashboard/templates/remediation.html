@@ -153,6 +153,20 @@
   </div>
 </section>
 
+{{if .Links}}
+{{/*
+  A fingerprint printed as text is a dead end. remedik knows the namespace, the
+  target, the alert and the window; where those are worth looking is the
+  operator's own answer, configured once in values.yaml.
+*/}}
+<nav class="links" aria-label="Elsewhere">
+  <span class="links-label">This moment in</span>
+  {{range .Links}}
+  <a class="link-out" href="{{.URL}}" rel="noreferrer noopener">{{.Name}}</a>
+  {{end}}
+</nav>
+{{end}}
+
 {{if .Timeline.Any}}
 {{/*
   One order, once. The alert, the wait for a person, the attempts and the

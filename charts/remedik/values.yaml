@@ -91,6 +91,20 @@ dashboard:
   enabled: false
   # -- Port the dashboard listens on
   port: 8082
+  # -- Links out of a remediation's page, as `name` and `url`. The URL is a
+  # template over `{namespace}`, `{target}`, `{name}`, `{alert}`,
+  # `{fingerprint}`, `{from}` and `{to}` — the last two an ISO window around
+  # the record, padded either side. Values are percent-encoded on
+  # substitution, and a template whose scheme is not `http` or `https` is
+  # refused at startup with a log line naming it. A fingerprint printed as
+  # text is a dead end; this is what turns it into a click.
+  # @default -- `[]` (no links)
+  links: []
+  # links:
+  #   - name: Grafana
+  #     url: https://grafana.example.com/d/k8s/pods?var-namespace={namespace}&from={from}&to={to}
+  #   - name: Logs
+  #     url: https://grafana.example.com/explore?left={"query":"{namespace=\"{namespace}\"}"}
   auth:
     # -- Token required to read the dashboard. The chart creates a Secret
     # holding it. Present it as a bearer token, or as the password in the

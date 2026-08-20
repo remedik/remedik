@@ -129,6 +129,15 @@ type Config struct {
 	// produced it.
 	Version string
 
+	// Links are destinations outside the dashboard — Grafana, Loki,
+	// Alertmanager — as name and URL template. Optional; every page renders
+	// with none configured.
+	//
+	// Templates whose scheme is not http or https are dropped by New, with a
+	// log line naming them: the person writing them is trusted with the
+	// cluster, and the template is still rendered into a page.
+	Links []Link
+
 	// Logger is required.
 	Logger *slog.Logger
 
@@ -146,6 +155,7 @@ type Handler struct {
 	paused    func() (bool, string)
 	cluster   string
 	version   string
+	links     []Link
 	logger    *slog.Logger
 	now       func() time.Time
 	mux       *http.ServeMux
@@ -174,6 +184,7 @@ func New(cfg Config) (*Handler, error) {
 		logger:    cfg.Logger,
 		now:       cfg.Now,
 	}
+	h.links = validLinks(cfg.Links, cfg.Logger)
 	if h.now == nil {
 		h.now = time.Now
 	}
@@ -412,6 +423,7 @@ func (h *Handler) remediation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	view := buildRemediation(&rem, all, h.now())
+	view.Links = resolveLinks(h.links, &rem, h.now())
 	view.Page = h.page(rem.Name, navRemediations)
 	view.Waiting = awaiting(all)
 	h.render(w, r, remediationTemplate, view)
