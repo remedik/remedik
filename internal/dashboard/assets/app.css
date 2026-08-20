@@ -2287,6 +2287,91 @@ th[aria-sort] .sort {
 }
 
 /* --------------------------------------------------------------------------
+   Impact
+
+   Three figures with a direction. The direction is a word as well as an arrow
+   and a colour, because a rising success rate and a rising failure rate are
+   the same arrow and opposite news -- and because colour alone is not a signal
+   everybody receives.
+   -------------------------------------------------------------------------- */
+
+.window-pick {
+  display: flex;
+  gap: 6px;
+}
+
+.impact {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.impact-figure {
+  border-radius: var(--radius-sm);
+}
+
+.impact-link {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  color: inherit;
+}
+
+.impact-link:hover,
+.impact-link:focus-visible {
+  background: var(--surface-2);
+}
+
+.impact-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.impact-value {
+  font-size: 1.8rem;
+  font-weight: 640;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+  color: var(--text);
+}
+
+.impact-ok {
+  color: var(--ok);
+}
+
+.impact-delta {
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.delta-better {
+  color: var(--ok);
+}
+
+.delta-worse {
+  color: var(--failed);
+}
+
+.delta-level {
+  color: var(--text-3);
+}
+
+.impact-detail {
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: var(--text-3);
+}
+
+/* --------------------------------------------------------------------------
    The approvals queue
 
    Cards rather than a table, and the one place on this dashboard where the

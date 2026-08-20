@@ -349,7 +349,8 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	view := buildOverview(remediations, strategies, h.viewPosture(), h.now())
+	view := buildOverview(
+		remediations, strategies, h.viewPosture(), ParseWindow(r.URL.Query()), h.now())
 	view.Page = h.page("Overview", navOverview)
 	view.Waiting = awaiting(remediations)
 	h.render(w, r, overviewTemplate, view)

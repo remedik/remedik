@@ -21,6 +21,7 @@ func TestBuildOverviewCountsEveryState(t *testing.T) {
 		},
 		[]v1alpha1.RemediationStrategy{enabledStrategy(), disabledStrategy()},
 		Posture{DryRun: true},
+		testWindow(),
 		testNow(),
 	)
 
@@ -55,7 +56,7 @@ func TestAnUnreconciledRecordCountsAsInFlight(t *testing.T) {
 	rem := pendingRemediation("new-1", 1)
 	rem.Status.State = ""
 
-	view := buildOverview([]v1alpha1.Remediation{rem}, nil, Posture{}, testNow())
+	view := buildOverview([]v1alpha1.Remediation{rem}, nil, Posture{}, testWindow(), testNow())
 
 	for _, stat := range view.Stats {
 		if stat.Label == "In flight" && stat.Value != "1" {
@@ -75,7 +76,7 @@ func TestOverviewOrdersNewestFirstAndBreaksTiesByName(t *testing.T) {
 			succeededRemediation("a-older", same),
 			succeededRemediation("c-newest", 1),
 		},
-		nil, Posture{}, testNow(),
+		nil, Posture{}, testWindow(), testNow(),
 	)
 
 	got := []string{view.Recent[0].Name, view.Recent[1].Name, view.Recent[2].Name}

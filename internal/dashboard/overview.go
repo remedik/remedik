@@ -28,7 +28,13 @@ type OverviewView struct {
 	Attention AttentionPanel
 	// Stats are the headline counts over the whole of recorded history.
 	Stats []Stat
-	// Activity is the last day, one bar per hour.
+	// Impact is what the window adds up to, and which way it is moving.
+	Impact ImpactPanel
+	// Window is the span the activity and impact panels describe, and the
+	// control that changes it. One control for both: a reader who widens the
+	// chart to a week is asking the whole page about a week.
+	Window Window
+	// Activity is that window, one bar per bucket.
 	Activity ActivityPanel
 	// Namespaces and Strategies are where remediation has been happening.
 	Namespaces []Breakdown
@@ -171,6 +177,7 @@ func buildOverview(
 	remediations []v1alpha1.Remediation,
 	strategies []v1alpha1.RemediationStrategy,
 	posture Posture,
+	window Window,
 	now time.Time,
 ) OverviewView {
 	// One pointer slice, ordered once, shared by every panel below. The
@@ -185,7 +192,9 @@ func buildOverview(
 		StrategyCount: len(strategies),
 		PosturePanel:  buildPosturePanel(posture),
 		Attention:     buildAttention(ordered),
-		Activity:      buildActivity(ordered, now),
+		Window:        window,
+		Impact:        buildImpact(ordered, window, now),
+		Activity:      buildActivity(ordered, window, now),
 		Namespaces:    buildBreakdown(ordered, targetNamespaceOf, byNamespace),
 		Strategies:    buildBreakdown(ordered, strategyOf, byStrategy),
 	}
@@ -461,17 +470,21 @@ func ranAt(rem *v1alpha1.Remediation) time.Time {
 	return rem.CreationTimestamp.Time
 }
 
-func buildActivity(remediations []*v1alpha1.Remediation, now time.Time) ActivityPanel {
+func buildActivity(
+	remediations []*v1alpha1.Remediation, window Window, now time.Time,
+) ActivityPanel {
 	panel := ActivityPanel{
-		Bars:   make([]ActivityBar, activityHours),
-		Window: fmt.Sprintf("last %d hours", activityHours),
+		Bars:   make([]ActivityBar, window.Buckets),
+		Window: window.Label,
 	}
 
-	// Bucket by hour, oldest first, so the panel reads left to right like
-	// every other timeline somebody has seen.
-	start := now.Truncate(time.Hour).Add(-time.Duration(activityHours-1) * time.Hour)
+	// Bucket oldest first, so the panel reads left to right like every other
+	// timeline somebody has seen. The start is aligned to the bucket, so bars
+	// line up with hours or with days rather than with whenever the page was
+	// opened.
+	start := window.Start(now)
 	for i := range panel.Bars {
-		panel.Bars[i].Label = start.Add(time.Duration(i) * time.Hour).Format("15:04")
+		panel.Bars[i].Label = start.Add(time.Duration(i) * window.Bucket).Format(window.Layout)
 	}
 
 	for _, rem := range remediations {
@@ -479,7 +492,7 @@ func buildActivity(remediations []*v1alpha1.Remediation, now time.Time) Activity
 		if when.Before(start) {
 			continue
 		}
-		bucket := int(when.Sub(start) / time.Hour)
+		bucket := int(when.Sub(start) / window.Bucket)
 		if bucket < 0 || bucket >= len(panel.Bars) {
 			continue
 		}

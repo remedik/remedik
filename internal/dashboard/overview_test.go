@@ -160,7 +160,7 @@ func TestActivityPanel(t *testing.T) {
 		simulatedRemediation("sim", "deployment/payments/api", 90),
 	}
 
-	panel := buildActivity(ptrs(records), now)
+	panel := buildActivity(ptrs(records), testWindow(), now)
 
 	if len(panel.Bars) != activityHours {
 		t.Fatalf("bars = %d, want %d", len(panel.Bars), activityHours)
@@ -196,7 +196,7 @@ func TestActivityPanel(t *testing.T) {
 }
 
 func TestActivityPanel_EmptyWindowDoesNotDivideByZero(t *testing.T) {
-	panel := buildActivity(nil, testNow())
+	panel := buildActivity(nil, testWindow(), testNow())
 
 	if panel.Any() {
 		t.Error("Any() = true with no records")
@@ -275,6 +275,7 @@ func TestOverviewStatsAllLink(t *testing.T) {
 		[]v1alpha1.Remediation{succeededRemediation("ok-1", 5)},
 		[]v1alpha1.RemediationStrategy{enabledStrategy()},
 		Posture{},
+		testWindow(),
 		testNow(),
 	)
 
@@ -296,7 +297,7 @@ func TestOverviewShowsOnlyATail(t *testing.T) {
 		records = append(records, succeededRemediation("ok-"+string(rune('a'+i%26))+string(rune('a'+i/26)), i))
 	}
 
-	view := buildOverview(records, nil, Posture{}, testNow())
+	view := buildOverview(records, nil, Posture{}, testWindow(), testNow())
 
 	if len(view.Recent) != recentLimit {
 		t.Errorf("Recent = %d rows, want %d", len(view.Recent), recentLimit)
@@ -427,7 +428,7 @@ func TestActivity_BucketsByWhenItRanNotWhenItWasWritten(t *testing.T) {
 		}
 	}
 
-	panel := buildActivity([]*v1alpha1.Remediation{ran(1), ran(2), ran(3)}, now)
+	panel := buildActivity([]*v1alpha1.Remediation{ran(1), ran(2), ran(3)}, testWindow(), now)
 
 	if panel.Busiest != 1 {
 		t.Errorf("busiest hour = %d, want 1: three runs an hour apart were "+
@@ -458,7 +459,7 @@ func TestActivity_ARecordThatHasNotRunCountsWhereItExists(t *testing.T) {
 	if got := ranAt(rem); !got.Equal(rem.CreationTimestamp.Time) {
 		t.Errorf("ranAt() = %v, want the creation time", got)
 	}
-	if panel := buildActivity([]*v1alpha1.Remediation{rem}, now); panel.Total != 0 {
+	if panel := buildActivity([]*v1alpha1.Remediation{rem}, testWindow(), now); panel.Total != 0 {
 		// It is in a bar, but it contributes to none of the three outcomes, so
 		// the total counts nothing it did not do.
 		t.Logf("total = %d", panel.Total)
@@ -477,7 +478,7 @@ func TestActivity_AQuietDayDoesNotLookLikeAWall(t *testing.T) {
 		failedRemediation("b", 65),
 		failedRemediation("c", 125),
 	}
-	panel := buildActivity(ptrs(records), now)
+	panel := buildActivity(ptrs(records), testWindow(), now)
 
 	if panel.Busiest != 1 {
 		t.Fatalf("Busiest = %d, want 1 — the fixture puts one in each hour", panel.Busiest)
@@ -508,7 +509,7 @@ func TestActivity_ABusyDayStillScalesToItsOwnPeak(t *testing.T) {
 		records = append(records, failedRemediation("busy", 5))
 	}
 
-	panel := buildActivity(ptrs(records), now)
+	panel := buildActivity(ptrs(records), testWindow(), now)
 	if panel.Busiest != 6 {
 		t.Fatalf("Busiest = %d, want 6", panel.Busiest)
 	}
@@ -649,7 +650,7 @@ func TestActivity_TheWindowCarriesItsOwnFailureRate(t *testing.T) {
 		failedRemediation("old", 60*40),
 	}
 
-	panel := buildActivity(ptrs(records), now)
+	panel := buildActivity(ptrs(records), testWindow(), now)
 
 	if panel.Total != 4 || panel.Failed != 2 {
 		t.Fatalf("window = %d executions, %d failed; want 4 and 2", panel.Total, panel.Failed)
@@ -660,7 +661,7 @@ func TestActivity_TheWindowCarriesItsOwnFailureRate(t *testing.T) {
 
 	// An empty window has no rate rather than a rate of zero, which reads as
 	// "nothing is failing" when the truth is "nothing has run".
-	if got := buildActivity(nil, now).FailureRate(); got != 0 {
+	if got := buildActivity(nil, testWindow(), now).FailureRate(); got != 0 {
 		t.Errorf("an empty window reports %d", got)
 	}
 }

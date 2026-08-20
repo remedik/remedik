@@ -35,7 +35,7 @@ func BenchmarkBuildOverview(b *testing.B) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		_ = buildOverview(rems, strategies, posture, testNow())
+		_ = buildOverview(rems, strategies, posture, testWindow(), testNow())
 	}
 }
 

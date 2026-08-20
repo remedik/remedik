@@ -67,6 +67,62 @@
   </div>
 </section>
 
+{{/*
+  The tiles above count everything the cluster still holds. This panel answers
+  the two questions those numbers are inputs to: how much of this did remedik
+  handle without anybody, and is it getting better or worse. Both are
+  arithmetic over records already loaded, and nothing here is estimated --
+  there is no "engineer hours saved", because that needs a counterfactual
+  remedik cannot observe.
+*/}}
+{{if .Impact.Any}}
+<section class="panel" aria-labelledby="impact-heading">
+  <div class="panel-head">
+    <h2 id="impact-heading">How it is going</h2>
+    {{/* One control for both panels: a reader who widens the chart to a week
+         is asking the whole page about a week, and two ranges on one screen is
+         how a page ends up comparing a day with a week and calling it a
+         trend. */}}
+    <nav class="window-pick" aria-label="Window">
+      {{range .Window.Windows}}
+      {{if .Selected}}
+      <span class="pill-link is-on" aria-current="true">{{.Short}}</span>
+      {{else}}
+      <a class="pill-link" href="{{.URL}}">{{.Short}}</a>
+      {{end}}
+      {{end}}
+    </nav>
+  </div>
+
+  <ul class="impact">
+    {{range .Impact.Figures}}
+    <li class="impact-figure">
+      <a class="impact-link" href="{{.URL}}">
+        <span class="impact-label">{{.Label}}</span>
+        <span class="impact-value impact-{{.Tone}}">{{.Value}}</span>
+        {{if .Delta}}
+        <span class="impact-delta delta-{{.Direction}}">
+          <span aria-hidden="true">{{if eq .Direction "better"}}&uarr;{{else if eq .Direction "worse"}}&darr;{{else}}&rarr;{{end}}</span>
+          {{.Delta}}
+        </span>
+        {{end}}
+        <span class="impact-detail">{{.Detail}}</span>
+      </a>
+    </li>
+    {{end}}
+  </ul>
+
+  <p class="panel-foot dim">
+    Over the {{.Impact.Window}}{{if .Impact.Covered}}, of which only the last
+    {{.Impact.Covered}} is still held &mdash; retention prunes the rest{{end}}.
+    {{if not .Impact.Comparable}}
+    There is no earlier window of the same length to compare against yet, so
+    these figures have a value and no direction.
+    {{end}}
+  </p>
+</section>
+{{end}}
+
 <div class="grid-2">
   <section class="panel" aria-labelledby="activity-heading">
     <div class="panel-head">
@@ -87,7 +143,7 @@
         <span class="chart-scale-zero">0</span>
       </div>
       <div class="chart" role="img"
-           aria-label="Executions per hour over the last day. The same numbers are in the table below.">
+           aria-label="Executions per bucket over the {{.Activity.Window}}. The same numbers are in the table below.">
         {{range .Activity.Bars}}
         <div class="chart-col" title="{{.Label}} &mdash; {{if .Total}}{{.Total}} execution{{if ne .Total 1}}s{{end}}{{if .Failed}}, {{.Failed}} failed{{end}}{{if .Succeeded}}, {{.Succeeded}} succeeded{{end}}{{if .Simulated}}, {{.Simulated}} simulated{{else}}{{end}}{{else}}nothing ran{{end}}">
           <div class="chart-bar {{pct .Percent}}">
@@ -101,7 +157,7 @@
     </div>
     <div class="chart-axis">
       <span>{{(index .Activity.Bars 0).Label}}</span>
-      <span class="dim">peak {{.Activity.Busiest}}/h</span>
+      <span class="dim">peak {{.Activity.Busiest}} per {{.Window.Short}} bucket</span>
       <span>now</span>
     </div>
     <p class="panel-foot">
@@ -113,10 +169,10 @@
       <summary>Read the numbers</summary>
       <div class="table-scroll">
         <table class="table">
-          <caption class="visually-hidden">Executions per hour</caption>
+          <caption class="visually-hidden">Executions per bucket</caption>
           <thead>
             <tr>
-              <th scope="col">Hour</th>
+              <th scope="col">Bucket</th>
               <th scope="col" class="num">Succeeded</th>
               <th scope="col" class="num">Failed</th>
               <th scope="col" class="num">Simulated</th>

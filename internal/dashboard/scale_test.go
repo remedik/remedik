@@ -156,7 +156,7 @@ func BenchmarkOverviewAtScale(b *testing.B) {
 	records := bigCluster(scaleNamespaces, scaleStrategies, scaleRecords)
 	b.ResetTimer()
 	for range b.N {
-		_ = buildOverview(records, nil, Posture{}, testNow())
+		_ = buildOverview(records, nil, Posture{}, testWindow(), testNow())
 	}
 }
 

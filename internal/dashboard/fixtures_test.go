@@ -233,3 +233,8 @@ func ptrs(remediations []v1alpha1.Remediation) []*v1alpha1.Remediation {
 	}
 	return out
 }
+
+// testWindow is the default span the overview describes: a day, one bar per
+// hour. Named rather than indexed so a test reads as "the usual window"
+// instead of "the first element of a package variable".
+func testWindow() Window { return windows[0] }
