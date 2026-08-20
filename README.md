@@ -379,6 +379,7 @@ the record still explains the run after the strategy is edited or deleted.
 | [docs/managed-kubernetes.md](docs/managed-kubernetes.md) | EKS, GKE and AKS — what is the same, what differs about alerts and nodes, and what is untested |
 | [docs/advanced-setup.md](docs/advanced-setup.md) | Hub/spoke, cloud packs, audit sinks, AI diagnosis (planned) |
 | [charts/remedik/README.md](charts/remedik/README.md) | Every chart value |
+| [docs/actions.md](docs/actions.md) | **Every action** — what it takes, what it verifies, what it refuses, and how to write one of your own |
 | [examples/strategies/](examples/strategies/) | Cookbook |
 | [docs/adr/](docs/adr/) | Why things are the way they are |
 | [SECURITY.md](SECURITY.md) | Security policy and commitments |

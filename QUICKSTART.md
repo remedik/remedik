@@ -244,7 +244,11 @@ port-forward or the Service name is.
 ### 4. Add a strategy
 
 Start from the cookbook in [`examples/strategies/`](examples/strategies/) —
-nineteen recipes, each with the reasoning behind its guards written down:
+nineteen recipes, each with the reasoning behind its guards written down.
+[docs/actions.md](docs/actions.md) is the other half: every action, what it
+takes, what it checks afterwards, what it refuses — and how to make remedik do
+something nobody here thought of, with a container of your own. The cookbook
+gets you your first strategy; that page gets you your second.
 
 ```bash
 kubectl apply -f examples/strategies/pod-crashloop.yaml
@@ -317,8 +321,17 @@ spec:
 ```
 
 A matching alert then creates a `Remediation` that sits in `AwaitingApproval`
-and does nothing — nothing is resolved, nothing is planned, nothing runs. You
-approve it the same way you do everything else in a cluster:
+and does nothing — nothing is resolved, nothing is planned, nothing runs. The
+plan is produced *after* the decision, against the cluster as it is then,
+rather than against the one that existed when the alert fired.
+
+If the dashboard is on, `/approvals` is the queue: ordered by which expires
+first rather than by age, each entry showing what approving it would run and
+how long is left. The count sits on the navigation entry of every page,
+because a gate that quietly accumulates looks exactly like remediation
+working.
+
+You approve it the same way you do everything else in a cluster:
 
 ```bash
 kubectl -n remedik patch remediation <name> --type merge \
@@ -327,6 +340,11 @@ kubectl -n remedik patch remediation <name> --type merge \
 
 Deny it with `"decision":"deny"`, and add `"note":"why"` — the note goes on the
 record, so the next person to read it knows what you knew.
+
+Nobody deciding is a decision too: the record fails as `ApprovalTimeout` when
+the window closes and runs the strategy's escalation, because the failure mode
+of a human gate is that nobody looks, and a gate that silently drops what
+nobody looked at turns an alert into silence.
 
 Three things worth knowing before you rely on it:
 
@@ -410,15 +428,22 @@ kubectl -n remedik get secret remedik-dashboard-token \
   -o jsonpath='{.data.token}' | base64 -d
 ```
 
-Five pages:
+Six pages:
 
-- **Overview** — counts by outcome, the dry-run report, what needs attention
-  first, and the most recent executions.
-- **Remediations** — every execution, filterable by namespace, strategy and
-  outcome, for when the overview's most-recent list is not far enough back.
-- **A remediation** — the triggering alert and its labels, the plan, each
-  step's outcome, message and timings, the attempt count, and why it ended
-  the way it did.
+- **Overview** — what needs attention first, counts by outcome, the dry-run
+  report, and how it is going: the share remedik handled without a person, the
+  median from the alert firing to the outcome, and both against the window
+  before, over a day or a week.
+- **Remediations** — every execution, filterable by namespace, strategy,
+  outcome, target, alert and whether anybody was told; sortable by any column.
+  A run of records saying the same thing collapses into one line that counts
+  them, so a crash loop nobody has fixed does not fill the page.
+- **A remediation** — the triggering alert and its labels, what happened in
+  order with the time elapsed between each moment, each step's outcome,
+  message and timings, what the error actually means, and what else has
+  happened to the same target.
+- **Approvals** — what is waiting for a person, soonest deadline first, with
+  what approving each one would run and the commands that decide it.
 - **Namespaces** — which namespaces remedik acts in and which it only reports
   on, with what happened in each. This is the page for a cluster where the
   posture is not the same everywhere.

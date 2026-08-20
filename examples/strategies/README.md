@@ -26,6 +26,11 @@ suit your alerts, and start with the operator in dry-run.
 | [escalate-into-alertmanager.yaml](escalate-into-alertmanager.yaml) | `KubePodCrashLooping` | Raises `RemediationFailed` in Alertmanager, so the routing you already have decides who is woken |
 | [replace-a-node.yaml](replace-a-node.yaml) | `KubeNodeUnreachable` | Drains it here, lets a pipeline terminate the instance |
 
+[docs/actions.md](../../docs/actions.md) is the reference behind these
+recipes: every action's parameters and defaults, what each one checks after it
+acts, what it refuses — and how to run a container of your own as a step, for
+the remediation nobody here thought of.
+
 Every action a recipe uses must be enabled in the chart, because each one is
 a permission: `--set actions.podDelete.enabled=true`. The chart's
 `action-rbac.yaml` lists what each is allowed to touch, and why.

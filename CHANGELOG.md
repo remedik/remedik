@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **[docs/actions.md](docs/actions.md) — every action, and how to write one of
+  your own.** What each takes, with its defaults; what it checks *after* it
+  acts, because "the API server accepted the patch" and "the workload came
+  back" are different questions; and what each one refuses, which is the
+  interesting half of this catalogue.
+
+  It exists because the CRD's own schema promised something the repository did
+  not deliver: *"each action documents and validates its own keys."* The
+  validation was there. The documentation was thirty-three constants in Go
+  source, five of them named in no document or example at all.
+
+  The half worth reading is the last one. `job.run` and `script.run` run any
+  image, or a script from a ConfigMap, as a ServiceAccount the step names —
+  with the incident in the environment — so an action nobody here thought of
+  needs no code and no release. Two patterns fall out of steps stopping at the
+  first failure: a check is a step that exits non-zero, and a verification is
+  a step that runs after. Both are written down now, with the rules that keep
+  the escape hatch safe: remedik's own ServiceAccount is refused, the Job runs
+  in remedik's namespace, and the command is a JSON array with no shell in it.
+
+  Three tests keep the page honest: every action in the registry, every
+  parameter constant under `internal/action/`, and every `actions.*.enabled`
+  flag in the chart must appear on it. Prose cannot be kept in step by
+  intention.
+
 - **`/approvals` — the queue with a clock on it.** `AwaitingApproval` is the
   only state on this operator with a deadline; every other one is history. It
   is ordered by how soon each record expires rather than by age, which is what
