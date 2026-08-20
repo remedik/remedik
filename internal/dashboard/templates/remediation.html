@@ -127,6 +127,75 @@
   </div>
 </section>
 
+{{if .Timeline.Any}}
+{{/*
+  One order, once. The alert, the wait for a person, the attempts and the
+  escalation used to be four sections with timestamps in them, and no reader
+  assembles four sections into a sequence.
+
+  Deliberately not a Gantt chart: Kubernetes timestamps have second
+  granularity and most remediations finish inside one second, so drawing those
+  to scale would produce one rectangle and imply a precision the data does not
+  carry. A bar appears only where there is a second to draw.
+*/}}
+<section class="panel" aria-labelledby="timeline-heading">
+  <div class="panel-head">
+    <h2 id="timeline-heading">What happened, in order</h2>
+    <span class="panel-meta">
+      {{if .Timeline.Instant}}all within one second{{else}}{{.Timeline.Total}} end to end{{end}}
+    </span>
+  </div>
+
+  <ol class="line">
+    {{range .Timeline.Entries}}
+    <li class="line-entry line-{{.Tone}}">
+      <span class="line-dot" aria-hidden="true"></span>
+      <div class="line-body">
+        <div class="line-head">
+          <span class="line-label">{{.Label}}</span>
+          {{if .Elapsed}}<span class="line-gap">{{.Elapsed}}</span>{{end}}
+          {{if .Duration}}<span class="line-took">took {{.Duration}}</span>{{end}}
+        </div>
+        {{if .Detail}}<p class="line-detail">{{.Detail}}</p>{{end}}
+        {{if .Bar}}<span class="line-bar {{pct .Bar}}" aria-hidden="true"></span>{{end}}
+        {{if .At}}<time class="line-at" datetime="{{.At}}">{{.At}}</time>{{end}}
+      </div>
+    </li>
+    {{end}}
+  </ol>
+</section>
+{{end}}
+
+{{if .History}}
+{{/*
+  A remediation that keeps being needed is a different problem from one that
+  failed, and it is invisible from the page of any single record.
+*/}}
+<section class="panel" aria-labelledby="history-heading">
+  <div class="panel-head">
+    <h2 id="history-heading">This target, before</h2>
+    <a class="panel-subtitle-link" href="{{.History.URL}}">all of them</a>
+  </div>
+  <p class="panel-foot">
+    remedik has acted on <code>{{.History.Target}}</code> more than once.
+  </p>
+  <ol class="history">
+    {{range .History.Marks}}
+    <li class="history-mark{{if .Current}} is-current{{end}}">
+      <a href="{{.URL}}">
+        <span class="pill pill-{{.Tone}}">{{.State}}</span>
+        <span class="history-age">{{.Age}}</span>
+        {{if .Current}}<span class="history-here">this one</span>{{end}}
+      </a>
+    </li>
+    {{end}}
+    {{if .History.More}}
+    <li class="history-more"><a href="{{.History.URL}}">and {{.History.More}} more</a></li>
+    {{end}}
+  </ol>
+</section>
+{{end}}
+
 <section aria-labelledby="plan-heading">
   <div class="section-head">
     <h2 id="plan-heading">{{if .DryRun}}The plan{{else}}Steps{{end}}</h2>

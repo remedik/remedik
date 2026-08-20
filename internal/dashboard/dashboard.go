@@ -400,8 +400,19 @@ func (h *Handler) remediation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	view := buildRemediation(&rem, h.now())
+	// The rest of the records, for what else has happened to this target and
+	// for the waiting count in the header. A page that cannot read them is
+	// still worth serving: the record itself is what the reader came for, so
+	// this degrades to no history rather than to no page.
+	all, err := h.listRemediations(ctx)
+	if err != nil {
+		h.logger.Debug("could not read the other records for a remediation page",
+			"name", name, "err", err)
+	}
+
+	view := buildRemediation(&rem, all, h.now())
 	view.Page = h.page(rem.Name, navRemediations)
+	view.Waiting = awaiting(all)
 	h.render(w, r, remediationTemplate, view)
 }
 

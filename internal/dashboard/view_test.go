@@ -469,7 +469,7 @@ func TestBuildRemediation_EscalationIsSeparateFromTheSteps(t *testing.T) {
 		}},
 	}
 
-	view := buildRemediation(&rem, testNow())
+	view := buildRemediation(&rem, nil, testNow())
 
 	if view.Escalation == nil {
 		t.Fatal("the page does not say whether anybody was told")
@@ -503,7 +503,7 @@ func TestBuildRemediation_FailedEscalationIsTheLoudCase(t *testing.T) {
 		}},
 	}
 
-	view := buildRemediation(&rem, testNow())
+	view := buildRemediation(&rem, nil, testNow())
 
 	if view.Escalation == nil || view.Escalation.Sent {
 		t.Fatalf("escalation = %+v, want a recorded failure", view.Escalation)
@@ -522,7 +522,7 @@ func TestBuildRemediation_FailedEscalationIsTheLoudCase(t *testing.T) {
 }
 
 func TestBuildRemediation_FailureWithNoEscalationSaysSo(t *testing.T) {
-	view := buildRemediation(ptr(failedRemediation("bad-1", 10)), testNow())
+	view := buildRemediation(ptr(failedRemediation("bad-1", 10)), nil, testNow())
 
 	if view.Escalation != nil {
 		t.Fatalf("escalation = %+v, want none", view.Escalation)
@@ -537,7 +537,7 @@ func TestBuildRemediation_SuccessNeverClaimsNobodyWasTold(t *testing.T) {
 	rem.Status.State = v1alpha1.RemediationStateSucceeded
 	rem.Status.Reason = ""
 
-	if buildRemediation(&rem, testNow()).NobodyWasTold() {
+	if buildRemediation(&rem, nil, testNow()).NobodyWasTold() {
 		t.Error("a succeeded remediation was reported as un-escalated; there was nothing to escalate")
 	}
 }

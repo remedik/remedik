@@ -2287,6 +2287,180 @@ th[aria-sort] .sort {
 }
 
 /* --------------------------------------------------------------------------
+   The timeline
+
+   A sequence with the time elapsed between its moments, not a Gantt chart:
+   most remediations finish inside one second, and drawing that to scale would
+   imply a precision second-granularity timestamps do not have. The bar appears
+   only where there is a second to draw.
+   -------------------------------------------------------------------------- */
+
+.line {
+  margin: 0;
+  padding: 0 0 0 4px;
+  list-style: none;
+}
+
+.line-entry {
+  position: relative;
+  display: flex;
+  gap: 12px;
+  padding: 0 0 16px 0;
+}
+
+/* The thread between the dots, stopping at the last one rather than trailing
+   off the end of the list. */
+.line-entry:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 16px;
+  bottom: 0;
+  width: 1px;
+  background: var(--border-strong);
+}
+
+.line-dot {
+  flex: none;
+  width: 11px;
+  height: 11px;
+  margin-top: 4px;
+  border-radius: 50%;
+  border: 2px solid var(--surface);
+  background: var(--waiting);
+  box-shadow: 0 0 0 1px var(--border-strong);
+}
+
+.line-ok .line-dot {
+  background: var(--ok);
+}
+
+.line-failed .line-dot {
+  background: var(--failed);
+}
+
+.line-dryrun .line-dot {
+  background: var(--dryrun);
+}
+
+.line-running .line-dot {
+  background: var(--running);
+}
+
+.line-warn .line-dot {
+  background: var(--warn);
+}
+
+.line-muted .line-dot {
+  background: var(--muted);
+}
+
+.line-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.line-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.line-label {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* The gap since the previous moment, which is the number somebody is reading a
+   timeline for. */
+.line-gap {
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+
+.line-took {
+  font-size: 0.72rem;
+  color: var(--text-3);
+}
+
+.line-detail {
+  margin: 3px 0 0;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.line-bar {
+  display: block;
+  height: 3px;
+  margin-top: 6px;
+  border-radius: 2px;
+  background: var(--border-strong);
+}
+
+.line-at {
+  display: block;
+  margin-top: 3px;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--text-3);
+}
+
+/* --------------------------------------------------------------------------
+   This target, before
+   -------------------------------------------------------------------------- */
+
+.history {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.history-mark a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  text-decoration: none;
+}
+
+.history-mark a:hover,
+.history-mark a:focus-visible {
+  border-color: var(--accent);
+}
+
+.history-mark.is-current a {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.history-age,
+.history-here {
+  font-size: 0.72rem;
+  color: var(--text-3);
+}
+
+.history-here {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.history-more a {
+  font-size: 0.78rem;
+  color: var(--text-3);
+}
+
+/* --------------------------------------------------------------------------
    Impact
 
    Three figures with a direction. The direction is a word as well as an arrow

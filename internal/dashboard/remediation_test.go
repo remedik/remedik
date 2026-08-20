@@ -26,7 +26,7 @@ func TestRemediationView_AWaitingRecordCarriesTheCommands(t *testing.T) {
 		Status: v1alpha1.RemediationStatus{State: v1alpha1.RemediationStateAwaitingApproval},
 	}
 
-	view := buildRemediation(rem, now)
+	view := buildRemediation(rem, nil, now)
 
 	if view.Approval == nil {
 		t.Fatal("a waiting remediation has no approval commands, so the page " +
@@ -70,7 +70,7 @@ func TestRemediationView_OnlyAWaitingRecordCarriesTheCommands(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "r", Namespace: "remedik"},
 			Status:     v1alpha1.RemediationStatus{State: state},
 		}
-		if view := buildRemediation(rem, now); view.Approval != nil {
+		if view := buildRemediation(rem, nil, now); view.Approval != nil {
 			t.Errorf("%s carries approval commands", state)
 		}
 	}
@@ -88,7 +88,7 @@ func TestRemediationView_TheMessageIsNotPrintedTwice(t *testing.T) {
 		},
 	}
 
-	view := buildRemediation(rem, now)
+	view := buildRemediation(rem, nil, now)
 
 	if !strings.Contains(view.Summary, "waiting for approval") {
 		t.Fatalf("summary = %q, want the status message", view.Summary)

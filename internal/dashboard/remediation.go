@@ -45,6 +45,13 @@ type RemediationView struct {
 	// Failed is the terminal state, kept as a bool because the page asks the
 	// question more than once and State is a display string.
 	Failed bool
+	// Timeline is the record as one ordered sequence of moments, which is how
+	// somebody reads what happened rather than as four sections with
+	// timestamps in them.
+	Timeline Timeline
+	// History is what else has happened to this target. Nil when this is the
+	// only record for it, because "once" is not a history.
+	History *TargetHistory
 	// Approval is the pair of commands that decide a waiting remediation, and
 	// nil for every other record.
 	//
@@ -225,7 +232,9 @@ func escalationMarker(esc *v1alpha1.EscalationStatus) string {
 	}
 }
 
-func buildRemediation(rem *v1alpha1.Remediation, now time.Time) RemediationView {
+func buildRemediation(
+	rem *v1alpha1.Remediation, all []v1alpha1.Remediation, now time.Time,
+) RemediationView {
 	view := RemediationView{
 		Name:        rem.Name,
 		Strategy:    rem.Spec.StrategyName,
@@ -252,6 +261,8 @@ func buildRemediation(rem *v1alpha1.Remediation, now time.Time) RemediationView 
 		Steps: buildSteps(rem),
 	}
 	view.Failed = rem.Status.State == v1alpha1.RemediationStateFailed
+	view.Timeline = buildTimeline(rem)
+	view.History = buildTargetHistory(rem, all, now)
 	view.Escalation = buildEscalation(rem)
 	view.Approval = buildApproval(rem, now)
 	view.Summary = summarise(rem, view.Steps)
