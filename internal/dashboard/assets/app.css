@@ -2287,6 +2287,67 @@ th[aria-sort] .sort {
 }
 
 /* --------------------------------------------------------------------------
+   What this means
+
+   A conclusion, and the fields it was drawn from. The citation line is not
+   decoration: it is the difference between an explanation somebody can argue
+   with and one they have to trust.
+   -------------------------------------------------------------------------- */
+
+.why {
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--muted);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.why-failed {
+  border-left-color: var(--failed);
+}
+
+.why-warn {
+  border-left-color: var(--warn);
+}
+
+.why-title {
+  margin: 0 0 8px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.why-cause {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.6;
+  color: var(--text);
+  max-width: 78ch;
+}
+
+.why-also {
+  margin: 10px 0 0;
+  font-size: 0.88rem;
+  line-height: 1.6;
+  color: var(--warn);
+  max-width: 78ch;
+}
+
+.why-next-label {
+  margin: 14px 0 6px;
+  font-size: 0.78rem;
+  color: var(--text-2);
+}
+
+.why-read {
+  margin: 12px 0 0;
+  font-size: 0.72rem;
+  color: var(--text-3);
+}
+
+/* --------------------------------------------------------------------------
    The timeline
 
    A sequence with the time elapsed between its moments, not a Gantt chart:

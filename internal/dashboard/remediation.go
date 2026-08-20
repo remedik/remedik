@@ -45,6 +45,11 @@ type RemediationView struct {
 	// Failed is the terminal state, kept as a bool because the page asks the
 	// question more than once and State is a display string.
 	Failed bool
+	// Explanation is what a rule made of the reason, the failing step, the
+	// message and this target's history. Nil when no rule recognised the
+	// record, which is the honest answer: the raw message is still on the
+	// page and nothing here guesses at it.
+	Explanation *Explanation
 	// Timeline is the record as one ordered sequence of moments, which is how
 	// somebody reads what happened rather than as four sections with
 	// timestamps in them.
@@ -263,6 +268,7 @@ func buildRemediation(
 	view.Failed = rem.Status.State == v1alpha1.RemediationStateFailed
 	view.Timeline = buildTimeline(rem)
 	view.History = buildTargetHistory(rem, all, now)
+	view.Explanation = explain(rem, view.History)
 	view.Escalation = buildEscalation(rem)
 	view.Approval = buildApproval(rem, now)
 	view.Summary = summarise(rem, view.Steps)

@@ -29,6 +29,32 @@
 <p class="callout callout-muted"><strong>{{.Reason}}</strong> &mdash; {{.Message}}</p>
 {{end}}
 
+{{if .Explanation}}
+{{/*
+  Beside the error, never instead of it. This is a table of rules over fields
+  the record already carries -- not a model, which is where the rest of this
+  category puts a paragraph nobody can check. Each rule names what it read, so
+  a reader can disagree with it, and a record no rule recognises gets no panel
+  rather than a guess.
+*/}}
+<section class="why why-{{.Explanation.Tone}}" aria-labelledby="why-heading">
+  <h2 id="why-heading" class="why-title">What this means</h2>
+
+  {{if .Explanation.Cause}}<p class="why-cause">{{.Explanation.Cause}}</p>{{end}}
+  {{if .Explanation.Also}}<p class="why-also">{{.Explanation.Also}}</p>{{end}}
+
+  {{if .Explanation.Next}}
+  <p class="why-next-label">{{.Explanation.NextWhy}}</p>
+  <pre class="code" data-copy><code>{{.Explanation.Next}}</code></pre>
+  {{end}}
+
+  <p class="why-read">
+    Read from
+    {{range $i, $field := .Explanation.Read}}{{if $i}}, {{end}}<code>{{$field}}</code>{{end}}.
+  </p>
+</section>
+{{end}}
+
 {{if .Approval}}
 {{/*
   The page cannot write, and is not going to: an approve button needs an
