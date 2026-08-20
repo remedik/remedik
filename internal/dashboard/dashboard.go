@@ -473,7 +473,7 @@ func (h *Handler) approvals(w http.ResponseWriter, r *http.Request) {
 
 	view := buildApprovals(remediations, strategies, h.now())
 	view.Page = h.page("Approvals", navApprovals)
-	view.Page.Waiting = len(view.Queue)
+	view.Waiting = len(view.Queue)
 	h.render(w, r, approvalsTemplate, view)
 }
 

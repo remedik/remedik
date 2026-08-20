@@ -154,6 +154,15 @@ test; each test explains itself.
    reported broken four times. Correct markup, correct handler, correct server,
    every test green. `hack/browser-check.mjs` reads the console, which is the
    only place the browser says so.
+
+   The same blindness is not only about the CSP. Anything the script builds
+   rather than the template — the Copy button, the palette — exists in no
+   page's markup, so no test that reads HTML can see whether it is there. The
+   Copy button shipped inside the filter's block, which returns early on any
+   page without a filter form, so it existed only on the one page with nothing
+   to copy. `make dev-dashboard` serves every page with made-up history and no
+   cluster, which is what makes asking the browser a thirty-second job rather
+   than a fifteen-minute one.
 5. **Escalation steps are not a plan.** They are alternative ways to reach a
    person, so one failing must not skip the rest — the opposite of the rule for
    a remediation's own steps, which do act on each other's results.

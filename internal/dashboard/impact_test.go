@@ -63,7 +63,9 @@ func TestImpact_TheMedianIsWithheldBelowTheFloor(t *testing.T) {
 	}
 
 	// One more record, and it is worth computing.
-	enough := append(few, succeededRemediation("ok-last", 9))
+	enough := make([]v1alpha1.Remediation, len(few), len(few)+1)
+	copy(enough, few)
+	enough = append(enough, succeededRemediation("ok-last", 9))
 	got := buildImpact(ptrs(enough), testWindow(), testNow()).Figures[1]
 	if got.Value == "—" {
 		t.Errorf("median over %d records is still withheld", len(enough))
@@ -137,7 +139,9 @@ func TestImpact_StatesTheRangeItActuallyCovered(t *testing.T) {
 	}
 
 	// And when the window is genuinely full, it says nothing extra.
-	full := append(records, succeededRemediation("kept-0", 60*24*7-30))
+	full := make([]v1alpha1.Remediation, len(records), len(records)+1)
+	copy(full, records)
+	full = append(full, succeededRemediation("kept-0", 60*24*7-30))
 	if got := buildImpact(ptrs(full), week, testNow()).Covered; got != "" {
 		t.Errorf("covered = %q on a full window, want no qualification", got)
 	}

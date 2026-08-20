@@ -225,20 +225,33 @@
     });
   });
 
-  /* ------------------------------------------------------------------
-   * Copying a command
-   *
-   * These pages print commands a person is meant to run: the patch that
-   * approves a remediation, and the kubectl each step would have been. At
-   * 04:00 nobody retypes a patch correctly, and dragging a mouse across a
-   * wrapped command is worse than retyping it.
-   *
-   * The button is built here rather than written into the template so that
-   * it cannot exist when it would not work. Clipboard access needs a secure
-   * context, so a dashboard put behind plain HTTP would otherwise show a
-   * button that silently does nothing — which is worse than no button,
-   * because the reader believes they copied it.
-   * ------------------------------------------------------------------ */
+})();
+
+/*
+ * Copying a command.
+ *
+ * These pages print commands a person is meant to run: the patch that decides
+ * an approval, and the kubectl each step would have been. At 04:00 nobody
+ * retypes a patch correctly, and dragging a mouse across a wrapped command is
+ * worse than retyping it.
+ *
+ * The button is built here rather than written into the template so that it
+ * cannot exist when it would not work. Clipboard access needs a secure
+ * context, so a dashboard put behind plain HTTP would otherwise show a button
+ * that silently does nothing — which is worse than no button, because the
+ * reader believes they copied it.
+ *
+ * Its own block, and that is the whole bug it shipped with: it lived inside
+ * the filter's, which returns early on any page with no filter form — that
+ * is, on every page that prints a command. Six commands on /approvals, a
+ * secure context, and no button on any of them. Nothing could see it: the
+ * markup was right, the handler was right, and the stub DOM the unit tests
+ * build always has a form in it. hack/browser-check.mjs asks the browser
+ * whether the button is there, which is the only thing that knows.
+ */
+(function () {
+  "use strict";
+
   var COPIED_MS = 1600;
 
   function canCopy() {

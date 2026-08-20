@@ -9,6 +9,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`/approvals` — the queue with a clock on it.** `AwaitingApproval` is the
+  only state on this operator with a deadline; every other one is history. It
+  is ordered by how soon each record expires rather than by age, which is what
+  the list does and which puts the record with fourteen minutes left above the
+  one with forty seconds. Each entry shows what approving it would run, and the
+  two commands that decide it.
+
+  An expired deadline reads as expired rather than as a negative number, and a
+  record carrying no deadline sorts first: the engine refuses to hold one of
+  those, so it is already on its way to `ApprovalTimeout`.
+
+  The count rides on the navigation entry, on every page. A queue nobody can
+  see is a queue nobody empties, and the person who could empty it is on
+  whichever page they happened to open.
+
+- **A run of identical records is one line.** Eight consecutive rows reading
+  `pod-crashloop / KubePodCrashLooping / Failed` are one fact printed eight
+  times, at the top of the page, during the incident that fact is about. The
+  line carries the count and the run's bounds — twelve in six hours and twelve
+  in six minutes are different incidents — and the count links to the records
+  behind it.
+
+  Only in time order: sorted by duration, "adjacent" is an accident of the
+  comparison, so another order draws every record and the page says why. The
+  figures above the table go on counting records.
+
+- **The overview concludes, rather than only counting.** How much remedik
+  handled without anybody — executions that ran for real, succeeded, and that
+  nobody had to approve — the median from the alert firing to the outcome, and
+  both against the previous window of equal length, in percentage points.
+
+  Nothing is estimated: there is no "engineer hours saved", no "MTTR reduced
+  by" and no "incidents avoided", because each needs a counterfactual remedik
+  cannot observe. The median is withheld below five records and says so.
+
+  One range control governs the impact panel and the activity chart together,
+  at a day or a week. Retention can make a week shorter than a week, and the
+  panel states the range it actually covered.
+
+- **A remediation has a shape in time.** The alert, the wait for a person, the
+  attempts and the escalation are one sequence now, with the time elapsed
+  between each pair of moments. Deliberately not a Gantt chart: timestamps have
+  second granularity, so a bar is drawn only where there is a second to draw,
+  and a record that finished inside one says so.
+
+  Beside it, **this target, before** — a remediation that keeps being needed is
+  a different problem from one that failed, and it was invisible from the page
+  of any single record.
+
+- **A failure is explained, not only quoted.** A table of rules over the
+  reason, the failing step, the message and the target's history says what the
+  error means, names the fields it read, and prints the command that settles
+  it. The one worth having alone is the namespace disagreement: the alert says
+  `checkout` and the step looked in `checkout-eu-prod`, which is what a managed
+  rule package producing `exported_namespace` looks like from inside a failure.
+
+  No language model, and no request leaving the operator: `explain.go` imports
+  `fmt`, `strings` and the API types, and a test asserts it. A record no rule
+  recognises gets no panel, because a guess is worse than the silence.
+
+- **Reach any page, namespace, strategy, alert or record without the mouse.**
+  `Ctrl`/`Cmd`+`K` opens a palette; `g` then a letter reaches the six pages;
+  `?` lists the keys. All of it is an enhancement: with JavaScript off the
+  navigation is the navigation and no function is reachable only by a key.
+
+- **Links out, configured in the chart.** `dashboard.links` is a name and a URL
+  template over `{namespace}`, `{target}`, `{name}`, `{alert}`,
+  `{fingerprint}`, `{from}` and `{to}`. Values are percent-encoded on
+  substitution, and a template whose scheme is not `http` or `https` is dropped
+  at startup with a log line naming it — it is rendered into a page, and a
+  `javascript:` URL there would run with the reader's session.
+
+- **The tables become cards on a phone.** Below 720px each row is a card and
+  each cell prints its own column name, from the same markup. The header row
+  stays as a row of sort links: taking ordering away on the device most likely
+  to be reading this at 03:00 is the opposite of the point.
+
 - **The dashboard can be asked questions, not just read.** Three filter axes,
   and the two that matter most are reached by clicking a value that was
   already on the page:
@@ -40,7 +117,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   cannot exist where it would not work: clipboard access needs a secure
   context, and a button that silently does nothing is worse than none.
 
+### Fixed
+
+- **The Copy button was on the one page with nothing to copy.** It was built
+  inside the filter's block, which returns early on any page with no filter
+  form — that is, on every page that prints a command. Six commands on
+  `/approvals`, a secure context, and no button on any of them. Nothing could
+  see it: the markup was right, the handler was right, and the stub DOM the
+  unit tests build always has a form in it. A browser was asked, and said so.
+
+- **Turning the page dropped the order.** Page two of "slowest first" was page
+  two of newest-first — a different set of rows presented as the continuation
+  of the one being read. Every list URL is built by one function now.
+
 ### Changed
+
+- **`make dev-dashboard` serves the dashboard with a cluster's worth of
+  made-up history and no cluster at all.** The two checks only a browser can
+  make — the console, which is the only place a Content-Security-Policy
+  violation is reported, and the layout, which no handler test lays out —
+  needed a kind cluster, a Helm install and a port-forward first. That is
+  fifteen minutes before the first look at a page, which is how a stylesheet
+  rule that never matched survived for months.
+
+  `hack/screenshots.sh` takes `TARGET=<url>` and will photograph anything
+  reachable, choosing which records to shoot from the pages themselves.
+
+- **`hack/browser-check.mjs` checks what only a browser knows**, beyond the
+  filter it was written for: that the palette opens and is styled, that every
+  printed command gets its Copy button, that a 390-pixel viewport does not
+  scroll sideways and each cell prints its column name, and that no page logs
+  anything the policy refused. It exits non-zero now, so it can be believed.
 
 - **The overview leads with the alarm rather than the totals.** The attention
   counts were smaller than the run totals below them, so the loudest number on

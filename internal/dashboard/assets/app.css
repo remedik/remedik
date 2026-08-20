@@ -2448,6 +2448,8 @@ th[aria-sort] .sort {
 /* The affordance in the header. Small, because the people who need it most
    will use the key, and the people who do not need to see it exists. */
 .palette-hint {
+  flex: none;
+  white-space: nowrap;
   padding: 5px 10px;
   border: 1px solid var(--border-strong);
   border-radius: 999px;
@@ -3009,6 +3011,25 @@ th[aria-sort] .sort {
    it: the activity panel's four short columns read fine at any width, and
    twenty-four cards of them would be worse than the table. */
 @media (width <= 720px) {
+  /* The table's own floor is what made the whole page 720px wide: the cards
+     were laid out correctly and every value sat off the right-hand edge of a
+     phone, which is the most convincing way for a layout to be wrong. */
+  .table-cards {
+    min-width: 0;
+  }
+
+  /* Five entries do not fit on one line at this width, and a navigation that
+     scrolls out of sight is a navigation with three entries. */
+  .topbar-inner {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+
+  .nav {
+    flex-wrap: wrap;
+    gap: 4px 10px;
+  }
+
   .table-cards,
   .table-cards tbody,
   .table-cards tr,

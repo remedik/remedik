@@ -6,8 +6,14 @@ The list SHALL collapse records that are adjacent in the displayed order and
 identical in strategy, target, alert and state into a single row stating how
 many records it stands for, the age of the newest and of the oldest.
 
-The group SHALL be expandable in place, and SHALL link to the filter that
-selects exactly the records it stands for.
+The count SHALL be a link to the records the group stands for, selected
+exactly — by strategy, target, alert and state, on top of whatever the reader
+was already looking through.
+
+It SHALL NOT be an expander holding its own open state. The list's rows sit
+inside the region the ten-second refresh replaces, so a group opened by a
+reader would be closed again by a timer while they read it; showing the
+records is navigation for the same reason filtering is.
 
 Collapsing SHALL apply only when the list is in its default time order.
 Adjacency carries no meaning in any other order, and a group formed from a
@@ -22,7 +28,12 @@ different population from the one the rows describe.
 #### Scenario: Eight identical failures are one row
 
 - **WHEN** eight consecutive records share a strategy, target, alert and state
-- **THEN** the list shows one row saying it stands for eight, with the newest and oldest ages, and the row expands to the eight records
+- **THEN** the list shows one row saying it stands for eight, with the newest and oldest ages
+
+#### Scenario: The records behind a group are one click away
+
+- **WHEN** a group's count is followed
+- **THEN** the list shows exactly those records, and the filter that selected them is stated on the page
 
 #### Scenario: The counts still count records
 

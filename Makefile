@@ -28,7 +28,7 @@ KIND_CLUSTER := remedik-dev
 
 .PHONY: all build test vet fmt tidy lint yaml-lint yaml-fix helm-lint helm-docs js-test \
         specs generate manifests verify verify-codegen tools docker-build e2e \
-        dev-up dev-down dev-info dev-deploy dev-seed versions clean help
+        dev-up dev-down dev-info dev-deploy dev-seed dev-dashboard versions clean help
 
 all: verify build
 
@@ -225,6 +225,14 @@ dev-seed: ## Fill the dev cluster with a cluster's worth of history (NS=150)
 	@# Nine records in three namespaces is not a test of a dashboard that
 	@# claims to work at any cluster size. This makes the claim checkable.
 	./hack/dev-seed.sh --reset --namespaces $(or $(NS),150)
+
+dev-dashboard: ## Serve the dashboard on :8099 with made-up history and no cluster
+	@# The two checks only a browser can make -- the console, which is the
+	@# only place a CSP violation is reported, and the layout, which no
+	@# handler test lays out -- needed a cluster, a Helm install and a
+	@# port-forward first. This is one command.
+	@echo "==> http://localhost:8099 — then: BASE=http://localhost:8099 node hack/browser-check.mjs"
+	go run ./hack/dev-dashboard
 
 dev-info: ## Show how to reach the dev cluster UIs
 	@echo ""

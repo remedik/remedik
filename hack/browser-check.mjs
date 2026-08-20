@@ -145,8 +145,147 @@ if (consoleErrors.length) {
   for (const e of consoleErrors) console.log("   " + e);
 }
 
+let failed = 0;
+const verdict = (ok, message) => {
+  if (!ok) failed++;
+  console.log(`   ${ok ? "PASS" : "FAIL"} ${message}`);
+};
+
 const href = JSON.parse(after.value ?? "{}").href ?? "";
-console.log(href.includes("namespace=")
-  ? "\n==> PASS the page navigated and the filter is in the URL"
-  : "\n==> FAIL choosing an option did not navigate");
+verdict(href.includes("namespace="), "choosing an option navigates, and the filter is in the URL");
+
+// --------------------------------------------------------------------------
+// The palette
+//
+// It exists in no page's markup -- the script builds it when somebody presses
+// a key -- so this is the only kind of test that can see it at all. What is
+// being checked is not that the code runs, which app.js's own tests cover, but
+// that the browser lets it: a fetch the CSP refuses and a stylesheet that never
+// matched both look exactly like a working palette from the server's side.
+// --------------------------------------------------------------------------
+console.log("\n==> the palette");
+consoleErrors.length = 0;
+
+const opened = await evaluate(`(() => {
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }));
+  const overlay = document.querySelector(".palette");
+  if (!overlay) return JSON.stringify({ open: false });
+  const style = getComputedStyle(overlay);
+  return JSON.stringify({
+    open: true,
+    // A class the stylesheet never defined leaves the overlay laid out as a
+    // plain div: in flow, static, and invisible against the page behind it.
+    positioned: style.position,
+    layered: style.zIndex,
+  });
+})()`);
+const palette = JSON.parse(opened.value ?? "{}");
+verdict(palette.open === true, "Ctrl+K builds the overlay");
+verdict(palette.positioned === "fixed", `the stylesheet reached it (position: ${palette.positioned})`);
+
+// The fetch is same-origin, which connect-src 'self' allows -- and which is
+// exactly the kind of thing this policy has silently broken twice before.
+await sleep(1200);
+const filled = await evaluate(`(() => {
+  const items = [...document.querySelectorAll(".palette-item .palette-label")].map(e => e.textContent.trim());
+  return JSON.stringify({ items: items.slice(0, 5), count: items.length });
+})()`);
+const entries = JSON.parse(filled.value ?? "{}");
+verdict((entries.count ?? 0) > 0, `the palette lists something (${entries.count} entries)`);
+verdict(
+  consoleErrors.length === 0,
+  `nothing was refused while it opened${consoleErrors.length ? ": " + consoleErrors.join(" | ") : ""}`,
+);
+
+await evaluate(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+
+// --------------------------------------------------------------------------
+// The Copy button
+//
+// Built by the script rather than written into the markup, so that it cannot
+// exist where the clipboard does not -- which also means no test that reads
+// HTML can see whether it exists where it should.
+// --------------------------------------------------------------------------
+console.log("\n==> the copy button");
+consoleErrors.length = 0;
+
+await send("Page.navigate", { url: `${BASE}/approvals` });
+await sleep(1800);
+
+const copies = await evaluate(`(() => {
+  const blocks = document.querySelectorAll("[data-copy]");
+  const buttons = document.querySelectorAll(".copyable .copy");
+  return JSON.stringify({
+    blocks: blocks.length,
+    buttons: buttons.length,
+    label: buttons[0] ? buttons[0].textContent.trim() : null,
+    secure: window.isSecureContext,
+  });
+})()`);
+const copy = JSON.parse(copies.value ?? "{}");
+verdict(
+  copy.blocks > 0 && copy.buttons === copy.blocks,
+  `every printed command offers a Copy (${copy.buttons}/${copy.blocks}, secure context: ${copy.secure})`,
+);
+
+// --------------------------------------------------------------------------
+// A phone
+//
+// Whoever is on call reads this from one. A table that scrolls sideways is
+// invisible to every test that does not lay the page out.
+// --------------------------------------------------------------------------
+console.log("\n==> at 390 CSS pixels");
+consoleErrors.length = 0;
+
+await send("Emulation.setDeviceMetricsOverride", {
+  width: 390, height: 844, deviceScaleFactor: 2, mobile: true,
+});
+await send("Page.navigate", { url: `${BASE}/remediations` });
+await sleep(2000);
+
+const narrow = await evaluate(`(() => {
+  const cell = document.querySelector(".table-cards tbody td[data-label]");
+  return JSON.stringify({
+    scrollWidth: document.documentElement.scrollWidth,
+    innerWidth: window.innerWidth,
+    // The column name comes from the cell's own attribute through a ::before.
+    // A rule that never matched leaves it as "none", and the card is a column
+    // of unlabelled values.
+    label: cell ? getComputedStyle(cell, "::before").content : "NO CELL",
+    display: cell ? getComputedStyle(cell).display : null,
+  });
+})()`);
+const phone = JSON.parse(narrow.value ?? "{}");
+// Asserted, because an override that silently did not apply leaves every check
+// below passing against a desktop-width page.
+verdict(
+  phone.innerWidth <= 420,
+  `the emulation actually applied (viewport ${phone.innerWidth})`,
+);
+verdict(
+  phone.scrollWidth <= phone.innerWidth + 1,
+  `the page does not scroll sideways (${phone.scrollWidth} <= ${phone.innerWidth})`,
+);
+verdict(
+  typeof phone.label === "string" && phone.label !== "none" && phone.label !== "NO CELL",
+  `each cell prints its column name (${phone.label})`,
+);
+verdict(phone.display === "flex", `cells are laid out as card rows (${phone.display})`);
+
+await send("Emulation.clearDeviceMetricsOverride");
+
+// --------------------------------------------------------------------------
+// Every page, read by the browser rather than by a handler test
+// --------------------------------------------------------------------------
+console.log("\n==> the console, on every page");
+for (const path of ["/", "/remediations", "/namespaces", "/approvals", "/strategies"]) {
+  consoleErrors.length = 0;
+  await send("Page.navigate", { url: BASE + path });
+  await sleep(1500);
+  verdict(consoleErrors.length === 0, `${path}${consoleErrors.length ? ": " + consoleErrors.join(" | ") : ""}`);
+}
+
+console.log(failed === 0 ? "\n==> browser-check: everything the console knows is fine"
+  : `\n==> browser-check: ${failed} failed`);
 ws.close();
+process.exit(failed === 0 ? 0 : 1);

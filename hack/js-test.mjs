@@ -188,8 +188,12 @@ function run(options = {}) {
   const form = makeElement("form", { class: "filter-select", method: "get", action: "/remediations" });
   form.children.push(select, button);
 
+  // options.forms === [] is a page with no filter -- which is every page that
+  // prints a command, and which the copy block spent its first release
+  // returning early on because it lived inside the filter's.
+  const forms = options.forms ?? [form];
   const win = makeWindow(options.entries);
-  const doc = makeDocument([form], options.copyable ?? []);
+  const doc = makeDocument(forms, options.copyable ?? []);
 
   // app.js refers to `window`, `document` and `navigator`. Giving them as
   // parameters runs the real file rather than a copy of it.
@@ -445,6 +449,28 @@ console.log("==> app.js: the palette");
   check(
     open.list.children.some((item) => item.className === "palette-help"),
     "and it is the keys rather than results",
+  );
+}
+
+{
+  // The pages that print commands -- /approvals and a remediation's own page --
+  // have no filter form at all. The copy block used to live inside the
+  // filter's, which returns early when there is none, so the button existed
+  // only on the one page with nothing to copy.
+  const { page, block } = makeCommand("kubectl -n remedik patch remediation x");
+  run({
+    forms: [],
+    copyable: [block],
+    navigator: makeClipboard(),
+  });
+
+  check(
+    block.parentNode && block.parentNode.className === "copyable",
+    "a page with no filter still gets its Copy button",
+  );
+  check(
+    page.children.some((c) => c.className === "copyable"),
+    "and it is in the page rather than nowhere",
   );
 }
 

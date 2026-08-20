@@ -403,7 +403,7 @@ The whole loop, and the parts that make it safe to leave running.
   restart, and that remedik cannot switch off itself.
 - **Escalation** through `onFailure.steps`, which runs during a dry run too, so
   the paging path is proved before it is needed.
-- **A read-only dashboard**, five pages, off by default and unable to write by
+- **A read-only dashboard**, six pages, off by default and unable to write by
   construction.
 - **Strategies that report on themselves** — a `Ready` condition naming the step
   that cannot run, and how often the strategy has fired, in `kubectl get`.

@@ -60,11 +60,27 @@ RBAC named the old API group. Nothing short of a cluster finds that.
   reasoning is in `hack/e2e/kind.yaml`; please read it before adding a node.
 
 **`hack/browser-check.mjs`** drives a real Chrome through the DevTools Protocol
-and reads its console. It is not in `make verify` — it needs a cluster and a
-browser — and it is what to reach for when a page looks correct and behaves
-otherwise, because that is the shape a Content-Security-Policy violation has.
-The policy has silently broken two features that way; both times every other
-test passed.
+and reads its console. It is not in `make verify` — it needs a browser — and it
+is what to reach for when a page looks correct and behaves otherwise, because
+that is the shape a Content-Security-Policy violation has. The policy has
+silently broken two features that way; both times every other test passed.
+
+It also asserts what only a laid-out page knows: that the palette opens and is
+styled, that every printed command gets its Copy button, and that a 390-pixel
+viewport does not scroll sideways with each cell printing its column name. The
+Copy button is why that list grew — it shipped inside the filter's block, which
+returns early on any page with no filter form, so it existed only on the page
+with nothing to copy.
+
+**`make dev-dashboard`** is what to point it at. It serves every page on
+`:8099` with a cluster's worth of made-up history and no cluster at all —
+repeats to collapse, failures with the messages the explainer has rules for,
+records waiting with a deadline that is really counting down. Before it, asking
+the browser anything meant a kind cluster, a Helm install and a port-forward
+first, which is how a stylesheet rule that never matched survived for months.
+
+`hack/screenshots.sh` will photograph it too: `TARGET=http://localhost:8099
+./hack/screenshots.sh`.
 
 **`make js-test`**, which `make verify` runs, exercises the dashboard's script
 against a stub DOM and a controlled clock. The script had no tests until the

@@ -636,7 +636,7 @@ refusals says more about an automation than another verb does:
 
 ## The dashboard
 
-Off by default. When enabled it serves five pages on its own port and
+Off by default. When enabled it serves six pages on its own port and
 answers the questions that are painful through kubectl: *what would this
 have done* during a dry-run trial, *why did nothing happen* during an
 incident, and *is anything wrong right now*.
@@ -650,7 +650,14 @@ version got wrong by putting all of them on one:
 | `/remediations` | What happened, and to what? The full list, with the filters |
 | `/remediations/{name}` | What did this one do, step by step |
 | `/namespaces` | Where is this going badly? One row per namespace, ordered by what needs attention |
+| `/approvals` | What is waiting for a person, and how long is left |
 | `/strategies` | What could happen, under what guards, and whether remedik can run it |
+
+There is one route that is not a page: `/palette` returns the same names the
+pages already show, as JSON, for the keyboard palette. It is GET, behind the
+same authentication, and it exists as a route rather than a blob rendered into
+all six pages because that blob would be re-sent on every ten-second refresh of
+every open tab.
 
 The overview is panels. Each is a claim with a link to its evidence, and
 each is one struct, one builder and one template block, which is why
@@ -658,6 +665,73 @@ each is one struct, one builder and one template block, which is why
 attention" panel orders by how much silence each entry represents: a failed
 escalation, which means nobody was told, outranks a failure somebody has
 already seen.
+
+**The overview concludes.** The tiles count everything the cluster still
+holds; the impact panel answers the two questions those counts are inputs to.
+How much did remedik handle without anybody — executions that ran for real,
+succeeded, and that nobody had to approve — and which way is it moving,
+against the previous window of exactly equal length, in percentage points
+rather than percent. A rise from 50% to 60% is ten points, and calling it "20%
+better" is the oldest way to mislead with a true number.
+
+Nothing there is estimated. There is no "engineer hours saved", no "MTTR
+reduced by" and no "incidents avoided", which every product in this category
+sells: each needs a counterfactual — what a person would have done, and how
+long they would have taken — that remedik cannot observe. A number nobody can
+derive is worse than no number, because it is the one that gets quoted. The
+median is withheld below five records for the same reason, and the panel says
+so: two records have a median and it is noise dressed as a measurement.
+
+One range control governs the impact panel and the activity chart together. A
+reader who widens the chart to a week is asking the whole page about a week,
+and two ranges on one screen is how a page ends up comparing a day with a week
+and calling it a trend.
+
+**`/approvals` is the queue with a clock on it.** `AwaitingApproval` is the
+only state on this operator with a deadline — everything else is history — so
+it is ordered by how soon it expires rather than by age, which is what the
+list does and which puts the record with fourteen minutes left above the one
+with forty seconds. Each entry shows what approving it would run, because
+approving something whose effect is on another page is how a person approves
+the wrong thing at 03:00. An expired deadline reads as expired rather than as
+a negative number, and a record with no deadline sorts first: the engine
+refuses to hold one of those, so it is already on its way to
+`ApprovalTimeout`.
+
+The count rides on the navigation entry, on every page, from a pass over
+records each page already had. A queue nobody can see is a queue nobody
+empties, and the person who could empty it is on whichever page they happened
+to open.
+
+**A run of identical records is one line.** Eight consecutive rows reading
+`pod-crashloop / KubePodCrashLooping / Failed` are one fact printed eight
+times, at the top of the page, during the incident that fact is about.
+Adjacency is the whole trick: it makes grouping a single pass over the page's
+rows, with no map, no second query and no change to the arithmetic above the
+table. It follows that grouping applies only in time order — sorted by
+duration, "adjacent" is an accident of the comparison — and the count is a
+link to the records rather than an expander, because an expander would hold
+its open state inside the region the refresh replaces.
+
+**A remediation has a shape in time.** The alert, the wait for a person, the
+attempts and the escalation were four sections with timestamps in them, and no
+reader assembles four sections into an order. It is deliberately not a Gantt
+chart: Kubernetes timestamps have second granularity and most remediations
+finish inside one second, so drawing those to scale would imply a precision
+the data does not carry. A bar appears only where there is a second to draw.
+
+**A failure is explained by a rule that shows its work.** The page quoted the
+error the action returned, which names the symptom and not the cause. Beside
+it — never instead of it — is a table of rules over fields the record already
+carries: the reason, the failing step, the message, and this target's history.
+Each names the fields it read, because an explanation that cannot be checked
+is an opinion, and a record no rule recognises gets no panel rather than a
+guess.
+
+This is where every competitor puts a language model. `internal/dashboard/
+explain.go` imports `fmt`, `strings` and the API types, and a test asserts
+that: a file that can reach nothing else cannot call anything, and the binary's
+only outbound connection stays the API server.
 
 `/namespaces` applies that same ordering across namespaces. Two things about
 it are decisions rather than details.
@@ -749,6 +823,28 @@ select at all — the same state whose destruction made the filter look broken
 twice. The cost is that the options do not gain a namespace first seen since
 the page loaded, until any navigation, which is the cheaper side of the
 trade by a wide margin.
+
+**Reaching a page without the mouse.** `Ctrl`/`Cmd`+`K` opens a palette over
+whatever is on screen; `g` then a letter reaches the six pages; `?` lists the
+keys. All of it is an enhancement in the strict sense — with JavaScript off the
+navigation is the navigation, every filter is still a link, and no function is
+reachable only by a key. If the palette's fetch fails it still opens on the
+pages, because those are also the shortcuts and the script knows them.
+
+**Links out are configuration, and the template is treated as hostile.**
+`dashboard.links` is a name and a URL template over `{namespace}`, `{target}`,
+`{name}`, `{alert}`, `{fingerprint}`, `{from}` and `{to}`. The person writing
+values.yaml is trusted with the cluster; the template is still rendered into a
+page, so its scheme is checked at startup and anything but `http` or `https` is
+dropped with a log line naming it. A `javascript:` URL there would run with the
+reader's session on a page they trust. Values are percent-encoded on
+substitution, so a workload called `api&admin=1` cannot add a query parameter.
+
+**On a phone the tables are cards.** Below 720px each row becomes a card and
+each cell prints its own column name from a `data-label`, from the same markup
+— one media query, no template rendered twice. The header row stays as a row of
+sort links: taking ordering away on the device most likely to be reading this at
+03:00 is the opposite of the point.
 
 **What it costs, measured.** On 150 namespaces, 40 strategies and 10,000
 records, held in `internal/dashboard/scale_test.go` so the number is checked

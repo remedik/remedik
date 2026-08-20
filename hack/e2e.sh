@@ -822,6 +822,10 @@ helm upgrade remedik charts/remedik \
 	--set dashboard.enabled=true \
 	--set dashboard.port="$DASHBOARD_PORT" \
 	--set dashboard.auth.token="$DASHBOARD_TOKEN" \
+	--set dashboard.links[0].name=Grafana \
+	--set dashboard.links[0].url=https://grafana.e2e.test/d/k8s/'{namespace}' \
+	--set dashboard.links[1].name=Refused \
+	--set dashboard.links[1].url=javascript:alert \
 	--set clusterName=e2e-cluster \
 	--wait --timeout 3m >/dev/null
 kubectl -n "$NAMESPACE" rollout status deploy/remedik --timeout=120s >/dev/null
@@ -846,7 +850,7 @@ else
 	fail "the dashboard answered $status without a token, want 401"
 fi
 
-for path in / /remediations /namespaces /strategies; do
+for path in / /remediations /namespaces /approvals /strategies; do
 	status=$(dashboard_status "$path")
 	if [ "$status" = "200" ]; then
 		pass "GET $path rendered"
@@ -854,6 +858,46 @@ for path in / /remediations /namespaces /strategies; do
 		fail "GET $path answered $status, want 200"
 	fi
 done
+
+# The palette's own route: the same names the pages show, as JSON, for the
+# keyboard overlay. It is a route rather than a blob rendered into six pages.
+palette=$(dashboard_body /palette)
+if grep -q '"kind":"page"' <<<"$palette" && grep -q 'Approvals' <<<"$palette"; then
+	pass "the palette route serves the pages it offers"
+else
+	fail "the palette route did not serve its entries: $(head -c 200 <<<"$palette")"
+fi
+
+# The window governs the whole page, so asking for a week gives a week of
+# chart and a week of arithmetic rather than one of each.
+week=$(dashboard_body "/?range=7d")
+if grep -q "last 7 days" <<<"$week"; then
+	pass "the overview describes the week it was asked for"
+else
+	fail "the range control did not reach the panels"
+fi
+
+# Ordering composes with everything: a header is a link, and turning the page
+# keeps the order it was turned in.
+ordered=$(dashboard_body "/remediations?sort=took&dir=desc")
+if grep -q 'aria-sort="descending"' <<<"$ordered"; then
+	pass "the list can be ordered by a column"
+else
+	fail "ordering by a column did not take"
+fi
+if grep -q "Every record has its own line" <<<"$ordered"; then
+	pass "and grouping steps aside in an order where adjacency means nothing"
+else
+	fail "the list did not say why it is not grouping"
+fi
+
+# A phone reads this too: each cell carries its own column name, from the same
+# markup the wide layout uses.
+if grep -q 'data-label="State"' <<<"$(dashboard_body /remediations)"; then
+	pass "every cell carries the column name the card layout prints"
+else
+	fail "the list's cells have no column names"
+fi
 
 # The stylesheet is embedded in the binary. A distroless image with no
 # filesystem to read from is exactly where a missing go:embed would show up.
@@ -916,6 +960,22 @@ else
 	info "matcher grep exit=${matcher}, guard grep exit=${guard}, bytes=$(printf '%s' "$strategies" | wc -c)"
 	info "strategy names on the page: $(grep -oE 'e2e-[a-z-]+' <<<"$strategies" | sort -u | tr '\n' ' ')"
 	info "cooldowns on the page: $(grep -oE '<code>[0-9]+[hms]</code>' <<<"$strategies" | sort -u | tr '\n' ' ')"
+fi
+
+# Links out are configuration, and a template whose scheme is not http or
+# https is refused at startup rather than rendered into a page.
+if [ -n "$simulated" ]; then
+	linked=$(dashboard_body "/remediations/${simulated}")
+	if grep -q "https://grafana.e2e.test/d/k8s/" <<<"$linked"; then
+		pass "the configured link reached the page with this record's own values"
+	else
+		fail "the configured link is not on the record's page"
+	fi
+	if grep -q "javascript:" <<<"$linked"; then
+		fail "a javascript: link was rendered into a page"
+	else
+		pass "and the link with a refused scheme was dropped"
+	fi
 fi
 
 status=$(dashboard_status /remediations/does-not-exist)
@@ -1232,6 +1292,10 @@ fi
 # --------------------------------------------------------------------------
 step "9. Guards refuse, and a node is cordoned then uncordoned"
 
+# The dashboard is named again here, and in the upgrade below, because these
+# set values rather than reusing them -- and an upgrade that does not name it
+# switches it off for the rest of the run, on a suite that asserts the
+# approvals queue later, against a record that only exists later.
 helm upgrade remedik charts/remedik \
 	--namespace "$NAMESPACE" \
 	--set image.repository="${IMAGE%%:*}" \
@@ -1242,6 +1306,9 @@ helm upgrade remedik charts/remedik \
 	--set actions.workloadRestart.enabled=true \
 	--set actions.podDelete.enabled=true \
 	--set actions.nodeCordon.enabled=true \
+	--set dashboard.enabled=true \
+	--set dashboard.port="$DASHBOARD_PORT" \
+	--set dashboard.auth.token="$DASHBOARD_TOKEN" \
 	--set actions.nodeUncordon.enabled=true \
 	--set actions.nodeDrain.enabled=true \
 	--set guards.blastRadius.enabled=true \
@@ -1364,6 +1431,9 @@ helm upgrade remedik charts/remedik \
 	--set actions.deploymentRestart.enabled=true \
 	--set actions.jobDelete.enabled=true \
 	--set actions.deploymentRollback.enabled=true \
+	--set dashboard.enabled=true \
+	--set dashboard.port="$DASHBOARD_PORT" \
+	--set dashboard.auth.token="$DASHBOARD_TOKEN" \
 	--set actions.deploymentScale.enabled=true \
 	--set actions.hpaScale.enabled=true \
 	--set actions.pvcExpand.enabled=true \
@@ -1911,6 +1981,36 @@ if [ -n "$rem" ]; then
 	pass "the remediation is waiting for a person: ${rem}"
 else
 	fail "no remediation reached AwaitingApproval"
+fi
+
+# The queue with a clock on it. A gate that accumulates silently looks exactly
+# like remediation working, so this page is the one that has to show it.
+if [ -n "$rem" ]; then
+	# Several upgrades have restarted the operator since step 7, so the tunnel
+	# from then is gone even though the dashboard is still enabled.
+	start_dashboard_forward
+	wait_for_dashboard_body /approvals "$rem" 30 || true
+	queue=$(dashboard_body /approvals)
+	if grep -q "$rem" <<<"$queue"; then
+		pass "the approvals queue shows it"
+	else
+		fail "the approvals queue does not show ${rem}"
+	fi
+	if grep -qE 'queue-left">[0-9]+m [0-9]+s left|queue-left">[0-9]+s left' <<<"$queue"; then
+		pass "with the time left on it"
+	else
+		fail "the queue shows no countdown"
+	fi
+	if grep -q "deployment.restart" <<<"$queue"; then
+		pass "and what approving it would run"
+	else
+		fail "the queue does not say what would run"
+	fi
+	if grep -q '<span class="nav-count">' <<<"$(dashboard_body /)"; then
+		pass "and every page carries the count"
+	else
+		fail "the overview does not carry the waiting count"
+	fi
 fi
 
 if [ -n "$rem" ]; then

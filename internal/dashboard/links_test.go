@@ -96,7 +96,7 @@ func TestLinks_TheWindowIsPaddedAroundTheRecord(t *testing.T) {
 	rem := failedRemediation("run-1", 30)
 	from, to := linkWindow(&rem, testNow())
 
-	if got := rem.CreationTimestamp.Time.Sub(from); got != linkPad {
+	if got := rem.CreationTimestamp.Sub(from); got != linkPad {
 		t.Errorf("window starts %v before the record, want %v", got, linkPad)
 	}
 	if !to.After(rem.Status.CompletedAt.Time) {

@@ -43,9 +43,13 @@ type Window struct {
 	Key   string
 	Label string
 	Short string
-	// Buckets is how many bars, Bucket how long each one is.
+	// Buckets is how many bars, Bucket how long each one is, and Unit names
+	// that length for the caption — "peak 16 per hour", which is what the
+	// number means, rather than "per 24h bucket", which is the window's name
+	// on the wrong noun.
 	Buckets int
 	Bucket  time.Duration
+	Unit    string
 	// Layout formats a bucket's label.
 	Layout string
 }
@@ -76,11 +80,11 @@ func (w Window) URL() string {
 var windows = []Window{
 	{
 		Key: "24h", Label: "last 24 hours", Short: "24h",
-		Buckets: activityHours, Bucket: time.Hour, Layout: "15:04",
+		Buckets: activityHours, Bucket: time.Hour, Unit: "hour", Layout: "15:04",
 	},
 	{
 		Key: "7d", Label: "last 7 days", Short: "7d",
-		Buckets: 7, Bucket: 24 * time.Hour, Layout: "Mon 2",
+		Buckets: 7, Bucket: 24 * time.Hour, Unit: "day", Layout: "Mon 2",
 	},
 }
 

@@ -58,13 +58,13 @@ func explain(rem *v1alpha1.Remediation, history *TargetHistory) *Explanation {
 			continue
 		}
 		found := r.explain(rem)
-		found.Also = repeatedly(rem, history)
+		found.Also = repeatedly(history)
 		return &found
 	}
 
 	// Nothing recognised it. A record whose history says something is still
 	// worth an observation; a record with neither gets no panel at all.
-	if also := repeatedly(rem, history); also != "" {
+	if also := repeatedly(history); also != "" {
 		return &Explanation{
 			Also: also,
 			Read: []string{"the other records for this target"},
@@ -136,7 +136,7 @@ func failureMessage(rem *v1alpha1.Remediation) string {
 // The rules
 // --------------------------------------------------------------------------
 
-func unknownAction(rem *v1alpha1.Remediation) Explanation {
+func unknownAction(_ *v1alpha1.Remediation) Explanation {
 	return Explanation{
 		Cause: "The strategy names an action this build does not have. That is one " +
 			"of two things and they need different fixes: the name is misspelled, " +
@@ -148,7 +148,7 @@ func unknownAction(rem *v1alpha1.Remediation) Explanation {
 	}
 }
 
-func interrupted(rem *v1alpha1.Remediation) Explanation {
+func interrupted(_ *v1alpha1.Remediation) Explanation {
 	return Explanation{
 		Cause: "The operator restarted while this attempt was running. It was failed " +
 			"rather than resumed, so any step above marked Succeeded did happen and " +
@@ -191,7 +191,7 @@ func denied(rem *v1alpha1.Remediation) Explanation {
 	}
 }
 
-func gaveUp(rem *v1alpha1.Remediation) Explanation {
+func gaveUp(_ *v1alpha1.Remediation) Explanation {
 	return Explanation{
 		Cause: "remedik remediated this target enough times inside the strategy's " +
 			"giveUpAfter window without the problem going away, so it stopped. " +
@@ -245,7 +245,7 @@ func notFound(rem *v1alpha1.Remediation) Explanation {
 	return explanation
 }
 
-func forbidden(rem *v1alpha1.Remediation) Explanation {
+func forbidden(_ *v1alpha1.Remediation) Explanation {
 	return Explanation{
 		Cause: "The identity the step runs as is not allowed to do this. An action's " +
 			"authority is named, never inherited: a remediation Job runs as the " +
@@ -258,7 +258,7 @@ func forbidden(rem *v1alpha1.Remediation) Explanation {
 	}
 }
 
-func alreadyExists(rem *v1alpha1.Remediation) Explanation {
+func alreadyExists(_ *v1alpha1.Remediation) Explanation {
 	return Explanation{
 		Cause: "The step tried to create something that is already there. Usually an " +
 			"earlier attempt of this same remediation got that far before failing, " +
@@ -268,7 +268,7 @@ func alreadyExists(rem *v1alpha1.Remediation) Explanation {
 	}
 }
 
-func tooSlow(rem *v1alpha1.Remediation) Explanation {
+func tooSlow(_ *v1alpha1.Remediation) Explanation {
 	return Explanation{
 		Cause: "The step did not finish inside the time it was given. What it started " +
 			"may still be running in the cluster: a timeout stops remedik waiting, " +
@@ -278,7 +278,7 @@ func tooSlow(rem *v1alpha1.Remediation) Explanation {
 	}
 }
 
-func unreachable(rem *v1alpha1.Remediation) Explanation {
+func unreachable(_ *v1alpha1.Remediation) Explanation {
 	return Explanation{
 		Cause: "Something the step had to reach was not reachable from inside the " +
 			"cluster — a name that does not resolve, or a port with nothing on it. " +
@@ -288,7 +288,7 @@ func unreachable(rem *v1alpha1.Remediation) Explanation {
 	}
 }
 
-func conflicted(rem *v1alpha1.Remediation) Explanation {
+func conflicted(_ *v1alpha1.Remediation) Explanation {
 	return Explanation{
 		Cause: "The object changed under the step between reading it and writing it. " +
 			"Something else is editing the same workload — another controller, a " +
@@ -311,7 +311,7 @@ const repeatedFloor = 3
 // It is separate from the cause because it does not compete with it: a
 // remediation that failed for a precise reason and has failed here four times
 // before has both a proximate cause and a bigger problem.
-func repeatedly(rem *v1alpha1.Remediation, history *TargetHistory) string {
+func repeatedly(history *TargetHistory) string {
 	if history == nil || len(history.Marks) < repeatedFloor {
 		return ""
 	}
@@ -333,11 +333,13 @@ func repeatedly(rem *v1alpha1.Remediation, history *TargetHistory) string {
 			"This is not the first time: %d of the last %d remediations for this target "+
 				"failed. Remediation is not the fix here — something keeps putting it back.",
 			failures, len(history.Marks))
-	case successes >= repeatedFloor && total >= repeatedFloor:
+	case successes >= repeatedFloor:
+		// Counted rather than characterised: "each one worked" was written on a
+		// record that had just failed, because the total included it.
 		return fmt.Sprintf(
-			"remedik has remediated this target %s. Each one worked, which means the "+
-				"problem keeps returning rather than being fixed.",
-			plural(total, "time"))
+			"remedik has fixed this target %s, out of the %s it still has records "+
+				"for. The problem keeps returning rather than being fixed.",
+			plural(successes, "time"), plural(total, "remediation"))
 	default:
 		return ""
 	}
