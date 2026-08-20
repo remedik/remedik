@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-20
+
+Provenance, not features. Nothing here changes what remedik does; what changes
+is what can be proved about the artefact you pull. 0.1.0's image was built from
+base images named by tag — a pointer somebody else can move — so it could not
+be shown to have come from a particular set of bytes. This one can.
+
 ### Fixed
 
 - **The page chrome's posture ignored the kill switch.** `page()` folded the
