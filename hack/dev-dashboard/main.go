@@ -24,6 +24,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -70,6 +71,14 @@ func (r *reader) List(_ context.Context, list client.ObjectList, _ ...client.Lis
 }
 
 func main() {
+	// Loopback by default. It serves an unauthenticated page, and a development
+	// fixture that binds every interface is one somebody's laptop offers to the
+	// coffee shop. -addr is there for the deliberate exception.
+	addr := flag.String("addr", "127.0.0.1:8099",
+		"address to listen on; the dashboard's own default port is 8082, which a "+
+			"port-forward to a dev cluster usually holds")
+	flag.Parse()
+
 	now := time.Now()
 	data := seed(now)
 
@@ -89,9 +98,13 @@ func main() {
 		panic(err)
 	}
 
-	addr := ":8099"
-	fmt.Println("dashboard on http://localhost" + addr)
-	if err := http.ListenAndServe(addr, ui.Mux()); err != nil {
+	fmt.Println("dashboard on http://" + *addr)
+	server := &http.Server{
+		Addr:              *addr,
+		Handler:           ui.Mux(),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	if err := server.ListenAndServe(); err != nil {
 		panic(err)
 	}
 }

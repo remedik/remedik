@@ -226,13 +226,15 @@ dev-seed: ## Fill the dev cluster with a cluster's worth of history (NS=150)
 	@# claims to work at any cluster size. This makes the claim checkable.
 	./hack/dev-seed.sh --reset --namespaces $(or $(NS),150)
 
-dev-dashboard: ## Serve the dashboard on :8099 with made-up history and no cluster
+dev-dashboard: ## Serve the dashboard on 127.0.0.1:8099 with made-up history and no cluster
 	@# The two checks only a browser can make -- the console, which is the
 	@# only place a CSP violation is reported, and the layout, which no
 	@# handler test lays out -- needed a cluster, a Helm install and a
 	@# port-forward first. This is one command.
-	@echo "==> http://localhost:8099 — then: BASE=http://localhost:8099 node hack/browser-check.mjs"
-	go run ./hack/dev-dashboard
+	@echo "==> http://127.0.0.1:8099 — then: BASE=http://localhost:8099 node hack/browser-check.mjs"
+	@# ADDR moves it, for a machine whose 8082 is not already a port-forward to
+	@# a dev cluster. Loopback by default: it serves an unauthenticated page.
+	go run ./hack/dev-dashboard $(if $(ADDR),-addr $(ADDR),)
 
 dev-info: ## Show how to reach the dev cluster UIs
 	@echo ""
@@ -277,6 +279,8 @@ dev-deploy: docker-build ## Build, load and install remedik into the dev cluster
 		--set namespacePosture.catalog-eu-prod=live \
 		--set namespacePosture.search-eu-prod=live \
 		--set dashboard.enabled=true --set dashboard.auth.token=dev-token \
+		--set dashboard.links[0].name=Grafana \
+		--set 'dashboard.links[0].url=http://localhost:3000/d/remedik/remedik?var-namespace={namespace}&from={from}&to={to}' \
 		--set actions.workloadRestart.enabled=true \
 		--set actions.podDelete.enabled=true \
 		--set actions.jobDelete.enabled=true \
