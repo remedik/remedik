@@ -332,9 +332,11 @@ func TestBuildAttention_WaitingForApprovalComesFirst(t *testing.T) {
 		t.Errorf("detail = %q, want it to say what happens if nobody looks",
 			panel.Items[0].Detail)
 	}
-	// And it links to the queue, so the panel is a way in rather than a notice.
-	if !strings.Contains(panel.Items[0].URL, "AwaitingApproval") {
-		t.Errorf("URL = %q, want it to filter to what is waiting", panel.Items[0].URL)
+	// And it links to the queue, so the panel is a way in rather than a
+	// notice. The queue rather than a filtered list: these records have a
+	// deadline, and the page that orders them by it is the one that helps.
+	if panel.Items[0].URL != approvalsPath {
+		t.Errorf("URL = %q, want the approvals queue", panel.Items[0].URL)
 	}
 }
 
@@ -358,25 +360,25 @@ func TestOverview_InFlightSaysWhichHalfIsWaitingOnAPerson(t *testing.T) {
 		name       string
 		counts     stateCounts
 		wantDetail string
-		wantState  string
+		wantURL    string
 	}{
 		{
 			name:       "nothing is waiting for a person",
 			counts:     stateCounts{inFlight: 3},
 			wantDetail: "pending or running",
-			wantState:  string(v1alpha1.RemediationStatePending),
+			wantURL:    Filter{State: string(v1alpha1.RemediationStatePending)}.Path(),
 		},
 		{
 			name:       "everything is waiting for a person",
 			counts:     stateCounts{inFlight: 2, awaiting: 2},
 			wantDetail: "waiting for a person",
-			wantState:  string(v1alpha1.RemediationStateAwaitingApproval),
+			wantURL:    approvalsPath,
 		},
 		{
 			name:       "some of each",
 			counts:     stateCounts{inFlight: 5, awaiting: 2},
 			wantDetail: "2 waiting for a person, 3 pending or running",
-			wantState:  string(v1alpha1.RemediationStateAwaitingApproval),
+			wantURL:    approvalsPath,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -384,8 +386,8 @@ func TestOverview_InFlightSaysWhichHalfIsWaitingOnAPerson(t *testing.T) {
 				t.Errorf("detail = %q, want %q", got, tc.wantDetail)
 			}
 			// The link goes to whichever half somebody can act on.
-			if got := inFlightURL(tc.counts); got != (Filter{State: tc.wantState}).Path() {
-				t.Errorf("URL = %q, want the %s filter", got, tc.wantState)
+			if got := inFlightURL(tc.counts); got != tc.wantURL {
+				t.Errorf("URL = %q, want %q", got, tc.wantURL)
 			}
 		})
 	}

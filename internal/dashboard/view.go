@@ -28,6 +28,7 @@ const (
 	navRemediations = "remediations"
 	navNamespaces   = "namespaces"
 	navStrategies   = "strategies"
+	navApprovals    = "approvals"
 )
 
 // Tones map a state onto the palette. They are names, not colours: the
@@ -146,6 +147,14 @@ type Page struct {
 	Asset string
 	// RenderedAt is when this page was produced.
 	RenderedAt string
+	// Waiting is how many remediations are waiting for a person, carried by
+	// every page's chrome.
+	//
+	// It is on the chrome rather than on one page because an approval queue
+	// that silently accumulates looks exactly like remediation working, and
+	// the person who could empty it is on whichever page they happened to
+	// open.
+	Waiting int
 }
 
 // Label is one key/value pair — an alert label, an action parameter or a

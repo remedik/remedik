@@ -302,7 +302,10 @@ func inFlightDetail(counts stateCounts) string {
 // inFlightURL points at whichever half a reader can do something about.
 func inFlightURL(counts stateCounts) string {
 	if counts.awaiting > 0 {
-		return Filter{State: string(v1alpha1.RemediationStateAwaitingApproval)}.Path()
+		// The queue rather than the filter: these are the records where
+		// somebody doing something changes the outcome, and the queue is the
+		// page that says how long they have.
+		return approvalsPath
 	}
 	return Filter{State: string(v1alpha1.RemediationStatePending)}.Path()
 }
@@ -396,7 +399,7 @@ func buildAttention(remediations []*v1alpha1.Remediation) AttentionPanel {
 			Detail: "Nothing will run until somebody approves or denies them, and " +
 				"they escalate if nobody does.",
 			Tone: toneWaiting,
-			URL:  Filter{State: string(v1alpha1.RemediationStateAwaitingApproval)}.Path(),
+			URL:  approvalsPath,
 		})
 	}
 

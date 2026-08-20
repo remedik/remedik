@@ -192,6 +192,8 @@ func New(cfg Config) (*Handler, error) {
 	h.mux.HandleFunc("/remediations/{name}", h.remediation)
 	h.mux.HandleFunc(namespacesPath, h.namespaces)
 	h.mux.HandleFunc(namespacesPath+"/{$}", h.namespaces)
+	h.mux.HandleFunc(approvalsPath, h.approvals)
+	h.mux.HandleFunc(approvalsPath+"/{$}", h.approvals)
 	h.mux.HandleFunc("/strategies", h.strategies)
 	h.mux.Handle("/static/", http.StripPrefix("/static/", staticHandler()))
 	h.mux.HandleFunc("/", h.notFound)
@@ -349,6 +351,7 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 
 	view := buildOverview(remediations, strategies, h.viewPosture(), h.now())
 	view.Page = h.page("Overview", navOverview)
+	view.Waiting = awaiting(remediations)
 	h.render(w, r, overviewTemplate, view)
 }
 
@@ -371,6 +374,7 @@ func (h *Handler) remediations(w http.ResponseWriter, r *http.Request) {
 	view := buildRemediations(
 		remediations, ParseFilter(query), ParseSort(query), ParsePage(query), h.now())
 	view.Page = h.page("Remediations", navRemediations)
+	view.Waiting = awaiting(remediations)
 	h.render(w, r, remediationsTemplate, view)
 }
 
@@ -418,7 +422,34 @@ func (h *Handler) namespaces(w http.ResponseWriter, r *http.Request) {
 	view := buildNamespaces(
 		remediations, h.viewPosture(), h.now(), ParseNamespaceFilter(r.URL.Query()))
 	view.Page = h.page("Namespaces", navNamespaces)
+	view.Waiting = awaiting(remediations)
 	h.render(w, r, namespacesTemplate, view)
+}
+
+// approvals is the queue with a clock on it.
+//
+// It reads what every other page reads. The strategies are here for the empty
+// case only: "nothing is waiting" and "no strategy asks for approval, so
+// nothing ever will" are the same empty page and two different situations.
+func (h *Handler) approvals(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), readTimeout)
+	defer cancel()
+
+	remediations, err := h.listRemediations(ctx)
+	if err != nil {
+		h.unavailable(w, r, "list remediations", err)
+		return
+	}
+	strategies, err := h.listStrategies(ctx)
+	if err != nil {
+		h.unavailable(w, r, "list strategies", err)
+		return
+	}
+
+	view := buildApprovals(remediations, strategies, h.now())
+	view.Page = h.page("Approvals", navApprovals)
+	view.Page.Waiting = len(view.Queue)
+	h.render(w, r, approvalsTemplate, view)
 }
 
 func (h *Handler) strategies(w http.ResponseWriter, r *http.Request) {
@@ -446,14 +477,16 @@ func (h *Handler) strategies(w http.ResponseWriter, r *http.Request) {
 
 	view := buildStrategies(strategies, remediations, h.now(), show)
 	view.Page = h.page("Strategies", navStrategies)
+	view.Waiting = awaiting(remediations)
 	h.render(w, r, strategiesTemplate, view)
 }
 
 func (h *Handler) notFound(w http.ResponseWriter, r *http.Request) {
 	h.fail(w, r, http.StatusNotFound,
 		"Page not found",
-		fmt.Sprintf("The dashboard serves the overview, the strategies list and one page "+
-			"per remediation. There is nothing at %s.", r.URL.Path))
+		fmt.Sprintf("The dashboard serves the overview, the remediations, the namespaces, "+
+			"the approvals queue, the strategies, and one page per remediation. "+
+			"There is nothing at %s.", r.URL.Path))
 }
 
 // --------------------------------------------------------------------------
@@ -486,6 +519,19 @@ func (h *Handler) listRemediations(ctx context.Context) ([]v1alpha1.Remediation,
 		return nil, err
 	}
 	return list.Items, nil
+}
+
+// awaiting counts the records waiting for a person, for the badge every page
+// carries. One pass over a list the page already had, so no page pays a read
+// for it.
+func awaiting(remediations []v1alpha1.Remediation) int {
+	var waiting int
+	for i := range remediations {
+		if remediations[i].Status.State == v1alpha1.RemediationStateAwaitingApproval {
+			waiting++
+		}
+	}
+	return waiting
 }
 
 // listStrategies reads every strategy. They are cluster-scoped.

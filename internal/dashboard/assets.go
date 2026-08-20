@@ -33,6 +33,7 @@ var (
 	remediationsTemplate = mustParsePage("remediations.html")
 	remediationTemplate  = mustParsePage("remediation.html")
 	namespacesTemplate   = mustParsePage("namespaces.html")
+	approvalsTemplate    = mustParsePage("approvals.html")
 	strategiesTemplate   = mustParsePage("strategies.html")
 	errorTemplate        = mustParsePage("error.html")
 )

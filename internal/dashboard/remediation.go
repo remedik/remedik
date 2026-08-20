@@ -265,16 +265,8 @@ func buildApproval(rem *v1alpha1.Remediation, now time.Time) *ApprovalView {
 		return nil
 	}
 
-	// The namespace is the record's own, so the command works when pasted
-	// rather than after somebody remembers to change it.
-	patch := func(decision string) string {
-		return fmt.Sprintf(
-			`kubectl -n %s patch remediation %s --type merge \
-  -p '{"spec":{"approval":{"decision":"%s","by":"YOUR-NAME"}}}'`,
-			rem.Namespace, rem.Name, decision)
-	}
-
-	view := &ApprovalView{Approve: patch("approve"), Deny: patch("deny")}
+	approve, deny := approvalCommands(rem)
+	view := &ApprovalView{Approve: approve, Deny: deny}
 	if deadline := rem.Spec.ApprovalDeadline; deadline != nil {
 		view.Deadline = FormatTimestamp(deadline.Time)
 		if left := deadline.Sub(now); left > 0 {

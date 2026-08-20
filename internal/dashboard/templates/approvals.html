@@ -1,0 +1,141 @@
+{{define "content"}}
+
+<div class="page-head">
+  <div>
+    <h1>Approvals</h1>
+    <p class="lede">
+      Remediations that will not run until a person says so &mdash; soonest
+      deadline first, because this is the only state with a clock on it.
+    </p>
+  </div>
+  <div class="page-head-badges">
+    {{if .Any}}<span class="pill pill-lg pill-warn">{{len .Queue}} waiting</span>{{end}}
+    {{if .Expired}}<span class="pill pill-lg pill-failed">{{.Expired}} expired</span>{{end}}
+  </div>
+</div>
+
+{{/*
+  The whole page is live: a countdown is the one thing on this dashboard that
+  is wrong the moment it is drawn. Ten-second granularity on a fifteen-minute
+  deadline is not the constraint it looks like, and a timer in the browser
+  would be a second opinion about the time -- capable of showing "2m left" on a
+  record the operator has already timed out.
+*/}}
+<div id="live">
+
+{{if .Any}}
+<ul class="queue">
+  {{range .Queue}}
+  <li class="queue-item queue-{{.Tone}}">
+    <div class="queue-head">
+      <div>
+        <a class="queue-name" href="{{.URL}}"><code>{{.Name}}</code></a>
+        <p class="queue-what">
+          {{if .StrategyURL}}<a class="pivot" href="{{.StrategyURL}}"><code>{{.Strategy}}</code></a>
+          {{else}}<code>{{.Strategy}}</code>{{end}}
+          {{if .Target}}
+          &middot; on
+          {{if .TargetURL}}<a class="pivot" href="{{.TargetURL}}"><code>{{.Target}}</code></a>
+          {{else}}<code>{{.Target}}</code>{{end}}
+          {{end}}
+          {{if .Alert}}&middot; from {{.Alert}}{{end}}
+        </p>
+      </div>
+
+      <div class="queue-clock">
+        {{if .NoDeadline}}
+        <span class="queue-left queue-left-gone">no deadline</span>
+        <span class="queue-when">the next reconcile ends this as
+          <code>ApprovalTimeout</code></span>
+        {{else if .Expired}}
+        <span class="queue-left queue-left-gone">expired</span>
+        <span class="queue-when">{{.Deadline}} &mdash; the record has not caught up yet</span>
+        {{else}}
+        <span class="queue-left">{{.Left}} left</span>
+        <span class="queue-when">until {{.Deadline}}</span>
+        {{end}}
+        <span class="queue-age">waiting {{.Age}}</span>
+      </div>
+    </div>
+
+    {{if .Steps}}
+    {{/*
+      What approving this actually does. Nothing is resolved until it is
+      approved -- that happens against the cluster as it is then -- so these
+      are the steps the strategy declares, which is what somebody is agreeing
+      to. Approving something whose effect is on another page is how a person
+      approves the wrong thing at three in the morning.
+    */}}
+    <div class="queue-plan">
+      <h2 class="queue-plan-title">Approving this runs</h2>
+      <ol class="queue-steps">
+        {{range .Steps}}
+        <li>
+          <code class="step-action">{{.Action}}</code>
+          {{if .Params}}
+          <ul class="chips">
+            {{range .Params}}
+            <li class="chip chip-param"><span class="chip-key">{{.Key}}</span><span class="chip-value">{{.Value}}</span></li>
+            {{end}}
+          </ul>
+          {{end}}
+        </li>
+        {{end}}
+      </ol>
+    </div>
+    {{end}}
+
+    <div class="queue-decide">
+      <p class="queue-decide-label">Approve it</p>
+      <pre class="code" data-copy><code>{{.Approve}}</code></pre>
+      <p class="queue-decide-label">Or deny it, with a note the next reader will thank you for</p>
+      <pre class="code" data-copy><code>{{.Deny}}</code></pre>
+    </div>
+  </li>
+  {{end}}
+</ul>
+
+<p class="list-note">
+  This page cannot decide anything: the dashboard is built from a read-only
+  client and serves GET and HEAD only. An approve button needs an identity
+  model it does not have, and an audit trail that cannot say who asked is worse
+  than no button.
+</p>
+
+{{else if .ApprovalStrategies}}
+<div class="empty">
+  <svg class="empty-mark" viewBox="0 0 48 48" aria-hidden="true" focusable="false">
+    <circle cx="24" cy="24" r="17" fill="none" stroke="currentColor" stroke-width="2"/>
+    <path d="M24 15v9.5l6 3.5" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <h3>Nothing is waiting</h3>
+  <p>
+    {{plural .ApprovalStrategies "strategy-strategies"}} ask for approval
+    &mdash; {{range $i, $name := .Named}}{{if $i}}, {{end}}<code>{{$name}}</code>{{end}} &mdash;
+    so this queue fills when one of them matches an alert. Everything that has
+    been through it is in the <a href="/remediations">list</a>.
+  </p>
+</div>
+
+{{else}}
+<div class="empty">
+  <svg class="empty-mark" viewBox="0 0 48 48" aria-hidden="true" focusable="false">
+    <circle cx="24" cy="24" r="17" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-dasharray="4 5" stroke-linecap="round"/>
+    <path d="M24 15v9.5l6 3.5" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <h3>No strategy asks for approval</h3>
+  <p>
+    Nothing can ever wait here, which is not the same as nothing waiting now.
+    A strategy gates itself with <code>execution.mode: approval</code>; until
+    one does, every match runs or is simulated according to the posture. The
+    <a href="/strategies">strategies</a> page says which is which.
+  </p>
+</div>
+{{end}}
+
+</div>
+
+{{end}}

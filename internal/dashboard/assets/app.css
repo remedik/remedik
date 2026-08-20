@@ -2287,6 +2287,165 @@ th[aria-sort] .sort {
 }
 
 /* --------------------------------------------------------------------------
+   The approvals queue
+
+   Cards rather than a table, and the one place on this dashboard where the
+   layout leads with a number that is counting down. Everything else here is
+   history; this expires.
+   -------------------------------------------------------------------------- */
+
+.nav-count {
+  display: inline-block;
+  min-width: 18px;
+  margin-left: 7px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+  text-align: center;
+  color: var(--warn);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+}
+
+.queue {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.queue-item {
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--waiting);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+/* The left edge is the urgency, so a queue scanned at speed sorts itself
+   visually the same way it is sorted logically. */
+.queue-warn {
+  border-left-color: var(--warn);
+}
+
+.queue-failed {
+  border-left-color: var(--failed);
+}
+
+.queue-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.queue-name {
+  font-family: var(--mono);
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.queue-name:hover,
+.queue-name:focus-visible {
+  color: var(--accent);
+}
+
+.queue-what {
+  margin: 5px 0 0;
+  font-size: 0.82rem;
+  color: var(--text-2);
+}
+
+.queue-clock {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  text-align: right;
+}
+
+.queue-left {
+  font-size: 1.15rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.queue-warn .queue-left {
+  color: var(--warn);
+}
+
+.queue-failed .queue-left {
+  color: var(--failed);
+}
+
+/* Expired is a word, not a negative number: the reconcile that fails the
+   record may not have run yet, and "minus four minutes" is not something a
+   reader can act on. */
+.queue-left-gone {
+  font-size: 0.95rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.queue-when,
+.queue-age {
+  font-size: 0.72rem;
+  color: var(--text-3);
+}
+
+.queue-plan {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.queue-plan-title {
+  margin: 0 0 8px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.queue-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 0.85rem;
+}
+
+.queue-steps .chips {
+  margin-top: 5px;
+}
+
+.queue-decide {
+  margin-top: 14px;
+}
+
+.queue-decide-label {
+  margin: 12px 0 6px;
+  font-size: 0.78rem;
+  color: var(--text-2);
+}
+
+.queue-decide-label:first-child {
+  margin-top: 0;
+}
+
+/* --------------------------------------------------------------------------
    Collapsed repeats
 
    A run of records saying the same thing is one line with a count on it. The

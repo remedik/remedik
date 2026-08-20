@@ -35,6 +35,10 @@
       <a class="nav-link{{if eq .Nav "overview"}} is-active{{end}}" href="/">Overview</a>
       <a class="nav-link{{if eq .Nav "remediations"}} is-active{{end}}" href="/remediations">Remediations</a>
       <a class="nav-link{{if eq .Nav "namespaces"}} is-active{{end}}" href="/namespaces">Namespaces</a>
+      {{/* The count rides on the entry because an approval queue that silently
+           accumulates looks exactly like remediation working, and the person
+           who could empty it is on whichever page they happened to open. */}}
+      <a class="nav-link{{if eq .Nav "approvals"}} is-active{{end}}" href="/approvals">Approvals{{if .Waiting}}<span class="nav-count">{{.Waiting}}</span>{{end}}</a>
       <a class="nav-link{{if eq .Nav "strategies"}} is-active{{end}}" href="/strategies">Strategies</a>
     </nav>
 

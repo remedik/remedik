@@ -101,6 +101,25 @@ func FormatSpan(from, to *metav1.Time) string {
 	return FormatDuration(span)
 }
 
+// FormatCountdown renders time remaining, at the precision somebody deciding
+// under it needs.
+//
+// Seconds while there are only seconds left, because that is when the number
+// changes what a reader does; and a padded second past a minute, so a queue of
+// countdowns does not jitter sideways as each one crosses ten.
+func FormatCountdown(d time.Duration) string {
+	switch {
+	case d <= 0:
+		return ""
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm %02ds", int(d.Minutes()), int(d.Seconds())%60)
+	default:
+		return fmt.Sprintf("%dh %dm", int(d.Hours()), int(d.Minutes())%60)
+	}
+}
+
 // FormatPeriod renders a length of time in words, for the sentence that
 // says how long a dry-run trial has been running.
 func FormatPeriod(d time.Duration) string {

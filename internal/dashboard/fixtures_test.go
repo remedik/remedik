@@ -154,6 +154,35 @@ func pendingRemediation(name string, minutesAgo int) v1alpha1.Remediation {
 	}
 }
 
+// awaitingRemediation is a record holding for a person. minutesLeft of zero
+// gives it a deadline that has already passed; a negative one gives it no
+// deadline at all, which the engine treats as expired on sight.
+func awaitingRemediation(name string, minutesAgo, minutesLeft int) v1alpha1.Remediation {
+	rem := simulatedRemediation(name, "deployment/payments/api", minutesAgo)
+	rem.Spec.StrategyName = "payments-restart"
+	rem.Spec.DryRun = false
+	rem.Labels[v1alpha1.LabelStrategy] = "payments-restart"
+	rem.Spec.Steps = []v1alpha1.Step{
+		{Action: "deployment.restart", With: map[string]string{"deployment": "api"}},
+	}
+	// Nothing has been resolved: that happens when it is approved, against the
+	// cluster as it is then.
+	rem.Status = v1alpha1.RemediationStatus{State: v1alpha1.RemediationStateAwaitingApproval}
+	if minutesLeft >= 0 {
+		deadline := metav1.NewTime(testNow().Add(time.Duration(minutesLeft) * time.Minute))
+		rem.Spec.ApprovalDeadline = &deadline
+	}
+	return rem
+}
+
+// approvalStrategy gates itself on a person.
+func approvalStrategy() v1alpha1.RemediationStrategy {
+	strategy := enabledStrategy()
+	strategy.Name = "payments-restart"
+	strategy.Spec.Execution = v1alpha1.Execution{Mode: v1alpha1.ExecutionModeApproval}
+	return strategy
+}
+
 func enabledStrategy() v1alpha1.RemediationStrategy {
 	return v1alpha1.RemediationStrategy{
 		ObjectMeta: metav1.ObjectMeta{
