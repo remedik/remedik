@@ -6,6 +6,9 @@
 
 > Predictably boring auto-remediation for Kubernetes alerts.
 
+**[remedik.github.io/remedik](https://remedik.github.io/remedik/)** — what it
+does, in pictures, in about two minutes.
+
 [![CI](https://github.com/remedik/remedik/actions/workflows/ci.yml/badge.svg)](https://github.com/remedik/remedik/actions/workflows/ci.yml)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/remedik/remedik/badge)](https://scorecard.dev/viewer/?uri=github.com/remedik/remedik)
 [![Go Reference](https://pkg.go.dev/badge/github.com/remedik/remedik.svg)](https://pkg.go.dev/github.com/remedik/remedik)
