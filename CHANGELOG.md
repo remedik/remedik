@@ -145,8 +145,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Removed
 
 - **Everything about being paid.** `docs/funding.md`, the "Supporting this
-  project" section and the (entirely commented-out) `.github/FUNDING.yml` are
-  gone. There is no way to take the money that works for the person behind
+  project" section, the sponsorship section of the landing page and the
+  (entirely commented-out) `.github/FUNDING.yml` are gone. There is no way to take the money that works for the person behind
   this yet, and a project asking to be trusted with cluster write access
   should not carry an ask it cannot honour.
 
@@ -157,6 +157,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   person's security review shorter.
 
 ### Fixed
+
+- **A link on the landing page pointed at a page that had been deleted.**
+  Nothing said so, because nothing checked. `make verify` now resolves every
+  link in this repository that points into this repository — Markdown between
+  documents, and the blob links the website uses to reach files here. External
+  URLs are deliberately not checked: a gate that depends on somebody else's
+  uptime is a gate people learn to skip.
 
 - **A chart value could put an extra flag on the operator's command line.**
   Every argument the deployment builds from `values.yaml` was rendered

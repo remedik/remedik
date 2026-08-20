@@ -28,7 +28,7 @@ KIND_CLUSTER := remedik-dev
 
 .PHONY: all build test vet fmt tidy lint yaml-lint yaml-fix helm-lint helm-docs js-test \
         specs generate manifests verify verify-codegen tools docker-build e2e \
-        dev-up dev-down dev-info dev-deploy dev-seed dev-dashboard versions clean help
+        dev-up dev-down dev-info dev-deploy dev-seed dev-dashboard links versions clean help
 
 all: verify build
 
@@ -116,7 +116,7 @@ helm-lint: ## Lint the Helm chart (requires helm)
 helm-docs: $(HELMDOCS) ## Regenerate chart README.md from values.yaml annotations
 	$(HELMDOCS) --chart-search-root charts
 
-verify: fmt vet lint yaml-lint helm-lint verify-docs specs vuln js-test test ## Everything CI runs
+verify: fmt vet lint yaml-lint helm-lint verify-docs specs links vuln js-test test ## Everything CI runs
 
 # Advisories against the toolchain go.mod pins, which is what CI installs.
 # It was CI-only, so the eleven standard-library advisories in go1.26.0 were
@@ -138,6 +138,11 @@ js-test: ## Test the dashboard's JavaScript
 
 specs: ## Check that the spec-first workflow was followed
 	./hack/openspec-check.sh
+
+links: ## Check that every link into this repository resolves
+	@# Removing one page broke a link on the landing page, which is the first
+	@# thing anybody sees, and nothing said so.
+	./hack/link-check.sh
 
 verify-codegen: generate manifests ## Fail if generated code or CRDs are stale
 	@git diff --exit-code api/ charts/remedik/crds/ \

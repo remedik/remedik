@@ -203,7 +203,7 @@ footer a:hover { color: var(--green); }
       <a href="#why">Why</a>
       <a href="#how">How</a>
       <a href="#see">See it</a>
-      <a href="#support">Support</a>
+      <a href="#licence">Licence</a>
       <a class="btn" href="https://github.com/remedik/remedik">GitHub</a>
     </nav>
   </div>
@@ -385,47 +385,53 @@ footer a:hover { color: var(--green); }
     <figure>
       <img src="assets/detail.png" alt="A failed remediation, showing the step that failed and an escalation that also failed">
       <figcaption>And every execution has a page that explains itself —
-      including the case that matters most, where the remediation failed and
-      the attempt to report it failed too.</figcaption>
+      the error, what that error actually means, what happened in order, and
+      whether anybody was told.</figcaption>
+    </figure>
+
+    <figure>
+      <img src="assets/approvals.png" alt="The approvals queue: what is waiting, the time left on each, what approving it would run, and the commands that decide it">
+      <figcaption>Some remediations should wait for a person. That queue is
+      ordered by which expires first — it is the only state with a clock on
+      it — and shows what approving one would actually run. The page still
+      cannot write: it prints the command.</figcaption>
     </figure>
   </div>
 </section>
 
-<section id="support">
+<section id="licence">
   <div class="wrap">
     <div class="section-head">
-      <h2>Supporting this</h2>
-      <p>remedik is Apache-2.0 and stays that way. Nothing is held back for a
-      paid tier, there is no telemetry, and no feature is behind a licence key.
-      If you never pay anything, you get the same software.</p>
+      <h2>What it costs</h2>
+      <p>Nothing, and there is nothing to buy. remedik is Apache-2.0 and stays
+      that way: nothing is held back for a paid tier, there is no telemetry,
+      and no feature is behind a licence key.</p>
     </div>
 
     <div class="cards">
-      <div class="card">
-        <h3>What sponsorship pays for</h3>
-        <p>Cluster time for the end-to-end suite — the test that has caught
-        every defect the unit tests could not. Coverage across Kubernetes
-        versions. An external security review of the code that holds write
-        access to your cluster.</p>
-      </div>
-      <div class="card">
-        <h3>What it does not buy</h3>
-        <p>Priority support, a private fork, or a feature because somebody paid
-        for it. If a change is right for the project it lands either way.
-        Sponsorship buys the project’s continued existence, not a queue
-        position.</p>
-      </div>
       <div class="card">
         <h3>Worth more than money</h3>
         <p>Tell us it runs in production. One line — “we run this on N
         clusters” — is what makes the next person’s security review shorter.
         Report the near-misses. Contribute a strategy to the cookbook.</p>
       </div>
+      <div class="card">
+        <h3>Read it before you trust it</h3>
+        <p>It asks for write access to your cluster, so the promises it makes
+        are written down as invariants, and the reasoning behind each is in the
+        repository beside the code that keeps it.</p>
+      </div>
+      <div class="card">
+        <h3>Try it on something disposable</h3>
+        <p>One command builds a throwaway cluster, a real Prometheus, a
+        workload that really breaks, and remedik recording what it would do
+        about it. Nothing is simulated and nothing of yours is touched.</p>
+      </div>
     </div>
 
     <p class="cta-row">
       <a class="btn btn-primary" href="https://github.com/remedik/remedik">Star it on GitHub</a>
-      <a class="btn" href="https://github.com/remedik/remedik/blob/main/docs/funding.md">Read the funding page</a>
+      <a class="btn" href="https://github.com/remedik/remedik/blob/main/docs/invariants.md">Read the invariants</a>
     </p>
   </div>
 </section>
