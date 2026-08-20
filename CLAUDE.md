@@ -112,7 +112,7 @@ internal/action/     The Resolve/Plan/Execute contract + registry
 internal/engine/     Sink (alert → record), the remediation reconciler, and
                      the strategy one, which only ever writes status
 internal/metrics/    Prometheus adapters behind the Recorder interfaces
-internal/dashboard/  Read-only web UI, five pages; templates and CSS embedded
+internal/dashboard/  Read-only web UI, six pages; templates and CSS embedded
 internal/action/external/  webhook.call, job.run, script.run — the widest trust surface
 charts/remedik/      Helm chart; RBAC assembled from enabled actions
 hack/e2e.sh          The end-to-end test

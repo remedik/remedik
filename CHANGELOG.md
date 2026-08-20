@@ -144,6 +144,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **A chart value could put an extra flag on the operator's command line.**
+  Every argument the deployment builds from `values.yaml` was rendered
+  unquoted, so a value carrying a newline ended its own YAML list item and
+  began another:
+
+  ```yaml
+  - --dashboard-link=Evil
+  - --actions=job.run=https://y.test
+  ```
+
+  That second line is not a broken link — it is a flag, and `--actions`
+  decides what remedik may run at all. The same shape reached `--cluster-name`,
+  `--log-level`, `--namespace-posture` and `--max-record-age`. Every one is
+  quoted now, `hack/no-arg-injection.sh` renders the chart with hostile values
+  and fails if any of them escapes its argument, and the dashboard refuses a
+  link whose name or URL contains control characters at all.
+
+  The person writing a values file is trusted with the cluster. The rendering
+  of it is not, for the same reason the scheme of a link is checked rather than
+  assumed.
+
 - **The auto-refresh control said "Auto" and showed nothing.** Its indicator
   had two states and one rule: an edit had flattened the paused selector onto
   the bare class, where it overrode the running one unconditionally, so the dot
@@ -180,6 +201,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
   `hack/screenshots.sh` takes `TARGET=<url>` and will photograph anything
   reachable, choosing which records to shoot from the pages themselves.
+
+- **No URL shape can break a page.** Forty-odd query strings — pages beyond
+  the end, orders that do not exist, every clause at once, every clause empty,
+  a two-thousand-character namespace, a percent-encoded path traversal — are
+  asserted to answer anything but 5xx, on a seeded cluster and on an empty one.
+  The dashboard's own history is the reason: an empty filter result once made a
+  row loop start at index -1, and the reader got a closed connection on the
+  page they opened because something was already wrong.
 
 - **`hack/browser-check.mjs` checks what only a browser knows**, beyond the
   filter it was written for: that the palette opens and is styled, that every

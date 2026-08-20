@@ -21,6 +21,7 @@ package dashboard
 import (
 	"log/slog"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -71,6 +72,15 @@ func validLinks(links []Link, logger *slog.Logger) []Link {
 		switch {
 		case strings.TrimSpace(link.Name) == "":
 			logger.Warn("ignoring a dashboard link with no name", "url", link.URL)
+		case hasControlChars(link.Name), hasControlChars(link.URL):
+			// A newline in a chart value used to end its own list item and
+			// start another, which is not a malformed link — it is an extra
+			// flag on the operator's command line. The chart quotes its
+			// arguments now; this refuses to render what got through anyway,
+			// because a control character in a name has no meaning here and
+			// every reason to be somebody's idea.
+			logger.Warn("ignoring a dashboard link containing control characters",
+				"name", strconv.Quote(link.Name), "url", strconv.Quote(link.URL))
 		case !safeLinkTemplate(link.URL):
 			// The whole point of the check. A javascript: URL here would run
 			// with the reader's session on a page they trust.
@@ -81,6 +91,14 @@ func validLinks(links []Link, logger *slog.Logger) []Link {
 		}
 	}
 	return kept
+}
+
+// hasControlChars reports whether a string carries anything that is not
+// printable text — a newline, a tab, an escape.
+func hasControlChars(s string) bool {
+	return strings.ContainsFunc(s, func(r rune) bool {
+		return r < 0x20 || r == 0x7f
+	})
 }
 
 // safeLinkTemplate reports whether a template may be rendered into a page.

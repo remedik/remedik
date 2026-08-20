@@ -43,24 +43,32 @@ spec:
         - name: remedik
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- /* Every argument built from a value is quoted, without
+                 exception. A value carrying a newline otherwise ends its own
+                 list item and starts another, which is not a broken link or a
+                 malformed name -- it is an extra flag on the operator's
+                 command line, chosen by whoever wrote the values file. That
+                 person is trusted with the cluster; the rendering still is
+                 not, for the same reason the scheme of a link is checked
+                 rather than assumed. */}}
           args:
             {{- with .Values.clusterName }}
-            - --cluster-name={{ . }}
+            - {{ printf "--cluster-name=%s" . | quote }}
             {{- end }}
             - --dry-run={{ .Values.dryRun }}
             {{- range $namespace, $posture := .Values.namespacePosture }}
-            - --namespace-posture={{ $namespace }}={{ $posture }}
+            - {{ printf "--namespace-posture=%s=%s" $namespace $posture | quote }}
             {{- end }}
             - --gateway-bind-address=:{{ .Values.gateway.port }}
-            - --gateway-path={{ .Values.gateway.path }}
+            - {{ printf "--gateway-path=%s" .Values.gateway.path | quote }}
             - --metrics-bind-address=:{{ .Values.metrics.port }}
             - --probe-bind-address=:{{ .Values.probes.port }}
             - --history-limit={{ .Values.history.keepPerStrategy }}
             {{- with .Values.history.maxAge }}
-            - --max-record-age={{ . }}
+            - {{ printf "--max-record-age=%s" (toString .) | quote }}
             {{- end }}
             - --concurrency={{ .Values.concurrency | default 4 }}
-            - --log-level={{ .Values.logLevel }}
+            - {{ printf "--log-level=%s" .Values.logLevel | quote }}
             {{- /* Exactly the actions this release granted permissions for.
                    A strategy naming anything else is reported as not ready
                    when it is applied, rather than failing mid-incident. */}}
@@ -72,7 +80,7 @@ spec:
             {{- /* Where else to look at a moment. The operator checks the
                    scheme itself: this template is rendered into a page. */}}
             {{- range .Values.dashboard.links }}
-            - --dashboard-link={{ .name }}={{ .url }}
+            - {{ printf "--dashboard-link=%s=%s" .name .url | quote }}
             {{- end }}
             {{- end }}
           env:

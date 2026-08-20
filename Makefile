@@ -106,6 +106,7 @@ helm-lint: ## Lint the Helm chart (requires helm)
 		--set dashboard.enabled=true >/dev/null 2>&1 \
 		&& { echo "the chart rendered an unauthenticated dashboard without being asked"; exit 1; } \
 		|| echo "chart refuses an unauthenticated dashboard, as intended"
+	./hack/no-arg-injection.sh
 	./hack/rbac-unchanged.sh
 	@# And that an existing release can still upgrade. `--reuse-values` does not
 	@# merge the new chart's defaults, so every key added since the last release

@@ -71,6 +71,11 @@ func TestLinks_AHostileTemplateNeverReachesAPage(t *testing.T) {
 		{Name: "Local", URL: "file:///etc/passwd"},
 		{Name: "Sneaky", URL: "JavaScript:alert(1)"},
 		{Name: "", URL: "https://nameless.example.com"},
+		// A newline in a chart value used to end its own YAML list item and
+		// begin another one: an extra flag on the operator's command line,
+		// written by whoever wrote the values file.
+		{Name: "Injected\n            - --actions=job.run", URL: "https://x.example.com"},
+		{Name: "Tabbed", URL: "https://x.example.com/\tsomewhere"},
 	}, logger)
 
 	if len(kept) != 2 {
@@ -83,7 +88,7 @@ func TestLinks_AHostileTemplateNeverReachesAPage(t *testing.T) {
 	}
 	// Dropped loudly: a mistyped link is not a reason to refuse to remediate a
 	// cluster, and it is a reason to say so where somebody is looking.
-	for _, name := range []string{"Hostile", "Local", "Sneaky"} {
+	for _, name := range []string{"Hostile", "Local", "Sneaky", "Injected", "Tabbed"} {
 		if !strings.Contains(log.String(), name) {
 			t.Errorf("dropping %s was not logged", name)
 		}
